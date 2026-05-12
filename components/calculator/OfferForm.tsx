@@ -351,16 +351,16 @@ export default function OfferForm({
         ];
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50">
+    <section className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50 sm:p-6">
       <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-blue-500 via-emerald-400 to-cyan-400" />
-      <div className="relative mb-6 flex items-center justify-between rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3">
-        <div className="flex items-center gap-3">
+      <div className="relative mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-sm font-black text-white shadow-md shadow-blue-100">
             1
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Krok 1</p>
-            <h2 className="text-xl font-bold text-slate-950">Konfiguracja</h2>
+            <h2 className="text-lg font-bold text-slate-950 sm:text-xl">Konfiguracja</h2>
           </div>
 
           <button
@@ -374,7 +374,7 @@ export default function OfferForm({
         </div>
 
         {showSettings && (
-          <div className="absolute right-0 top-16 z-10 w-72 rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-200/70">
+          <div className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-10 w-full rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-200/70 sm:left-auto sm:right-0 sm:w-72">
             <label className="block">
               <span className="text-sm text-slate-700">
                 Narzut handlowca netto
@@ -466,7 +466,7 @@ export default function OfferForm({
         </label>
       )}
 
-      <div className="relative mb-5">
+      <div className="relative mb-5 min-w-0">
         <label className="block">
           <span className="text-sm text-slate-700">
             Klient z CRM <span className="text-slate-500">lub wpisz ręcznie</span>
@@ -527,12 +527,12 @@ export default function OfferForm({
                     onClick={() => selectCrmClient(client)}
                     className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-slate-950">
+                    <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-start">
+                      <div className="min-w-0">
+                        <div className="break-words font-semibold text-slate-950">
                           {getClientDisplayName(client)}
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
+                        <div className="mt-1 break-words text-xs text-slate-500">
                           {[client.phone || client.contact_phone, client.email, client.city]
                             .filter(Boolean)
                             .join(" • ") || "Brak danych kontaktowych"}
@@ -540,7 +540,7 @@ export default function OfferForm({
                       </div>
 
                       {client.public_id && (
-                        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-100">
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-100">
                           LeadID {client.public_id}
                         </span>
                       )}
@@ -569,7 +569,7 @@ export default function OfferForm({
       </div>
 
       {offerType !== "storage" && (
-        <div className="mb-5 grid grid-cols-2 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="mb-5 grid grid-cols-1 gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2">
           <label className="block">
             <span className="text-sm text-slate-700">Moc instalacji</span>
 
@@ -685,7 +685,7 @@ export default function OfferForm({
             ))}
         </select>
 
-        <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs text-slate-500">
+        <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
           Auto dobiera falownik domyślnie. Ręczny wybór pozwala wymusić model, np. hybrydę „na zaś”.
         </p>
       </label>
@@ -708,7 +708,7 @@ export default function OfferForm({
 
       <button
         onClick={calculate}
-        className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 p-4 font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400"
+        className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400 sm:text-base"
       >
         Oblicz ofertę
       </button>

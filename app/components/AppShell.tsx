@@ -61,10 +61,12 @@ export default function AppShell({ children }: AppShellProps) {
   }, []);
 
   return (
-    <div className="min-h-screen w-full bg-slate-100 text-slate-950">
-      <div className="max-w-7xl mx-auto p-6">
+    <div className="min-h-screen w-full overflow-x-hidden bg-slate-100 text-slate-950">
+      <div className="mx-auto w-full max-w-7xl px-3 py-4 sm:px-4 sm:py-5 lg:p-6">
         {isLoggedIn ? <AppHeader /> : null}
-        {children}
+        <div className="w-full overflow-x-hidden">
+          {children}
+        </div>
       </div>
     </div>
   );

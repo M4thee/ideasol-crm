@@ -108,6 +108,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [showResults, setShowResults] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const trimmedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
 
@@ -202,6 +203,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   function openSearchResult(result: SearchResult) {
     setSearchQuery("");
     setShowResults(false);
+    setMobileMenuOpen(false);
 
     if (result.type === "sale") {
       router.push(`/sales/${result.id}`);
@@ -212,6 +214,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   }
 
   async function logout() {
+    setMobileMenuOpen(false);
     await supabase.auth.signOut({ scope: "global" });
 
     try {
@@ -321,219 +324,143 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   }, []);
 
   return (
-    <header className="flex items-center justify-between mb-10 gap-6 flex-wrap text-slate-900">
-      <div>
-        <div className="flex items-center gap-3">
-          <img
-            src="/logo.png"
-            alt="IdeaSol CRM"
-            className="h-[72px] w-auto"
-          />
+    <header className="mb-8 text-slate-900 lg:mb-10">
+      <div className="flex items-start justify-between gap-4 lg:items-center">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.png"
+              alt="IdeaSol CRM"
+              className="h-14 w-auto sm:h-[72px]"
+            />
 
-          <span className="text-lg font-bold text-slate-900">CRM</span>
-        </div>
-
-        {authChecked && profile && (
-          <p className="text-slate-500 mt-1">
-            Witaj, {profile.display_name || profile.email}
-
-            {profile.role && (
-              <span className="ml-2 text-slate-400">
-                • {roleLabels[profile.role] || profile.role}
-              </span>
-            )}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 flex-wrap justify-end relative">
-        <div
-          className="group relative h-12 w-12 shrink-0"
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setShowResults(false);
-              setSearchQuery("");
-            }
-          }}
-        >
-          <div className="absolute right-0 top-0 h-12 w-12 overflow-visible transition-all duration-300 ease-out group-hover:-right-3 group-hover:w-[320px] group-focus-within:-right-3 group-focus-within:w-[320px]">
-          <div className="pointer-events-none absolute left-0 top-0 z-10 flex h-12 w-12 items-center justify-center text-slate-500 transition-colors group-hover:text-emerald-500 group-focus-within:text-emerald-500">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-5 w-5"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
+            <span className="text-base font-bold text-slate-900 sm:text-lg">CRM</span>
           </div>
 
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-              setShowResults(true);
+          {authChecked && profile && (
+            <p className="mt-1 max-w-[220px] truncate text-sm text-slate-500 sm:max-w-none sm:text-base">
+              Witaj, {profile.display_name || profile.email}
+
+              {profile.role && (
+                <span className="ml-2 text-slate-400">
+                  • {roleLabels[profile.role] || profile.role}
+                </span>
+              )}
+            </p>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-1 items-start justify-end gap-2 lg:items-center">
+          <div
+            className="group relative hidden h-12 w-12 shrink-0 sm:block"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setShowResults(false);
+                setSearchQuery("");
+              }
             }}
-            onFocus={() => setShowResults(true)}
-            placeholder="Szukaj klienta, SaleID, LeadID, telefonu..."
-            className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 shadow-sm transition-all duration-300 ease-out placeholder:text-transparent focus:outline-none focus:ring-2 focus:ring-emerald-500 group-hover:placeholder:text-slate-400 group-focus-within:placeholder:text-slate-400"
-          />
+          >
+            <div className="absolute right-0 top-0 h-12 w-12 overflow-visible transition-all duration-300 ease-out group-hover:-right-3 group-hover:w-[min(320px,calc(100vw-2rem))] group-focus-within:-right-3 group-focus-within:w-[min(320px,calc(100vw-2rem))]">
+              <div className="pointer-events-none absolute left-0 top-0 z-10 flex h-12 w-12 items-center justify-center text-slate-500 transition-colors group-hover:text-emerald-500 group-focus-within:text-emerald-500">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+              </div>
 
-          {showResults && trimmedSearch.length >= 2 && (
-            <div className="absolute top-full right-0 mt-2 min-w-[320px] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-50">
-              {searching ? (
-                <div className="px-4 py-4 text-sm text-slate-500">
-                  Wyszukiwanie...
-                </div>
-              ) : searchError ? (
-                <div className="px-4 py-4 text-sm text-red-600">
-                  {searchError}
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="px-4 py-4 text-sm text-slate-500">
-                  Brak wyników.
-                </div>
-              ) : (
-                <div className="max-h-[420px] overflow-y-auto">
-                  {searchResults.map((result) => (
-                    <button
-                      key={`${result.type}-${result.id}`}
-                      type="button"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        openSearchResult(result);
-                      }}
-                      className="w-full text-left px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">
-                            {result.title}
-                          </p>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setShowResults(true);
+                }}
+                onFocus={() => setShowResults(true)}
+                placeholder="Szukaj klienta, SaleID, LeadID, telefonu..."
+                className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 shadow-sm transition-all duration-300 ease-out placeholder:text-transparent focus:outline-none focus:ring-2 focus:ring-emerald-500 group-hover:placeholder:text-slate-400 group-focus-within:placeholder:text-slate-400"
+              />
 
-                          {result.subtitle && (
-                            <p className="text-xs text-slate-500 truncate mt-1">
-                              {result.subtitle}
-                            </p>
-                          )}
-                        </div>
+              {showResults && trimmedSearch.length >= 2 && (
+                <div className="absolute top-full right-0 mt-2 min-w-[320px] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-50">
+                  {searching ? (
+                    <div className="px-4 py-4 text-sm text-slate-500">
+                      Wyszukiwanie...
+                    </div>
+                  ) : searchError ? (
+                    <div className="px-4 py-4 text-sm text-red-600">
+                      {searchError}
+                    </div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-slate-500">
+                      Brak wyników.
+                    </div>
+                  ) : (
+                    <div className="max-h-[420px] overflow-y-auto">
+                      {searchResults.map((result) => (
+                        <button
+                          key={`${result.type}-${result.id}`}
+                          type="button"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            openSearchResult(result);
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-900 truncate">
+                                {result.title}
+                              </p>
 
-                        <div className="shrink-0 flex flex-col items-end gap-1">
-                          <span
-                            className={`text-[10px] px-2 py-1 rounded-full font-semibold ${
-                              result.type === "sale"
-                                ? "bg-emerald-100 text-emerald-900"
-                                : "bg-sky-100 text-sky-900"
-                            }`}
-                          >
-                            {result.type === "sale" ? "Sprzedaż" : "Klient"}
-                          </span>
+                              {result.subtitle && (
+                                <p className="text-xs text-slate-500 truncate mt-1">
+                                  {result.subtitle}
+                                </p>
+                              )}
+                            </div>
 
-                          {result.public_id && (
-                            <span className="text-[10px] text-slate-400 font-medium">
-                              {result.public_id}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                            <div className="shrink-0 flex flex-col items-end gap-1">
+                              <span
+                                className={`text-[10px] px-2 py-1 rounded-full font-semibold ${
+                                  result.type === "sale"
+                                    ? "bg-emerald-100 text-emerald-900"
+                                    : "bg-sky-100 text-sky-900"
+                                }`}
+                              >
+                                {result.type === "sale" ? "Sprzedaż" : "Klient"}
+                              </span>
+
+                              {result.public_id && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {result.public_id}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-          </div>
-        </div>
-
-        <nav className="ml-3 flex h-12 items-center gap-2 bg-white border border-slate-200 rounded-xl px-1 py-1 shadow-sm flex-wrap">
-          {navItems.map((item) => {
-            const isExternal = "external" in item && item.external;
-
-            const isActive =
-              !isExternal &&
-              (item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href));
-
-            return isExternal ? (
-              <a
-                key={item.href}
-                href={item.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-700 hover:bg-slate-50"
-              >
-                {item.label}
-              </a>
-            ) : (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  isActive
-                    ? "bg-emerald-500 text-white"
-                    : "text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setProfileMenuOpen((current) => !current)}
-              onMouseEnter={() => setProfileMenuOpen(true)}
-              title="Profil"
-              aria-label="Profil"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-                aria-hidden="true"
-              >
-                <path d="M20 21a8 8 0 0 0-16 0" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            </button>
-
-            {profileMenuOpen && (
-              <div
-                className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70"
-                onMouseEnter={() => setProfileMenuOpen(true)}
-                onMouseLeave={() => setProfileMenuOpen(false)}
-              >
-                <Link
-                  href="/settings"
-                  className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
-                  onClick={() => setProfileMenuOpen(false)}
-                >
-                  Ustawienia
-                </Link>
-
-              </div>
-            )}
           </div>
 
           <button
             type="button"
-            onClick={logout}
-            title="Wyloguj"
-            aria-label="Wyloguj"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-red-50 hover:text-red-600"
+            onClick={() => setMobileMenuOpen((current) => !current)}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 lg:hidden"
+            aria-expanded={mobileMenuOpen}
+            aria-label="Menu"
           >
             <svg
               viewBox="0 0 24 24"
@@ -545,13 +472,251 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
               className="h-5 w-5"
               aria-hidden="true"
             >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <path d="M16 17l5-5-5-5" />
-              <path d="M21 12H9" />
+              {mobileMenuOpen ? (
+                <path d="M18 6 6 18M6 6l12 12" />
+              ) : (
+                <>
+                  <path d="M4 6h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 18h16" />
+                </>
+              )}
             </svg>
+            Menu
           </button>
-        </nav>
+
+          <nav className="ml-3 hidden h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-sm lg:flex">
+            {navItems.map((item) => {
+              const isExternal = "external" in item && item.external;
+
+              const isActive =
+                !isExternal &&
+                (item.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(item.href));
+
+              return isExternal ? (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition text-slate-700 hover:bg-slate-50"
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    isActive
+                      ? "bg-emerald-500 text-white"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setProfileMenuOpen((current) => !current)}
+                onMouseEnter={() => setProfileMenuOpen(true)}
+                title="Profil"
+                aria-label="Profil"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                >
+                  <path d="M20 21a8 8 0 0 0-16 0" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </button>
+
+              {profileMenuOpen && (
+                <div
+                  className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70"
+                  onMouseEnter={() => setProfileMenuOpen(true)}
+                  onMouseLeave={() => setProfileMenuOpen(false)}
+                >
+                  <Link
+                    href="/settings"
+                    className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                    onClick={() => setProfileMenuOpen(false)}
+                  >
+                    Ustawienia
+                  </Link>
+
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={logout}
+              title="Wyloguj"
+              aria-label="Wyloguj"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-red-50 hover:text-red-600"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <path d="M16 17l5-5-5-5" />
+                <path d="M21 12H9" />
+              </svg>
+            </button>
+          </nav>
+        </div>
       </div>
+
+      {mobileMenuOpen && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:hidden">
+          <div className="relative mb-3">
+            <div className="pointer-events-none absolute left-0 top-0 z-10 flex h-12 w-12 items-center justify-center text-slate-500">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </div>
+
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setShowResults(true);
+              }}
+              onFocus={() => setShowResults(true)}
+              placeholder="Szukaj klienta, SaleID, LeadID, telefonu..."
+              className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-900 shadow-sm outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+
+            {showResults && trimmedSearch.length >= 2 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                {searching ? (
+                  <div className="px-4 py-4 text-sm text-slate-500">
+                    Wyszukiwanie...
+                  </div>
+                ) : searchError ? (
+                  <div className="px-4 py-4 text-sm text-red-600">
+                    {searchError}
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="px-4 py-4 text-sm text-slate-500">
+                    Brak wyników.
+                  </div>
+                ) : (
+                  <div className="max-h-[320px] overflow-y-auto">
+                    {searchResults.map((result) => (
+                      <button
+                        key={`mobile-${result.type}-${result.id}`}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          openSearchResult(result);
+                        }}
+                        className="w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-slate-50"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900">
+                              {result.title}
+                            </p>
+
+                            {result.subtitle && (
+                              <p className="mt-1 truncate text-xs text-slate-500">
+                                {result.subtitle}
+                              </p>
+                            )}
+                          </div>
+
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${
+                              result.type === "sale"
+                                ? "bg-emerald-100 text-emerald-900"
+                                : "bg-sky-100 text-sky-900"
+                            }`}
+                          >
+                            {result.type === "sale" ? "Sprzedaż" : "Klient"}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <nav className="grid gap-2">
+            {navItems.map((item) => {
+              const isActive =
+                item.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(item.href);
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+                    isActive
+                      ? "bg-emerald-500 text-white"
+                      : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+
+            <Link
+              href="/settings"
+              onClick={() => setMobileMenuOpen(false)}
+              className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+            >
+              Ustawienia
+            </Link>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-bold text-red-600 transition hover:bg-red-100"
+            >
+              Wyloguj
+            </button>
+          </nav>
+        </div>
+      )}
     </header>
   );
 }

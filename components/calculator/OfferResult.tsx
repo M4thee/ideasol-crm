@@ -162,15 +162,15 @@ export default function OfferResult({
   }
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-6 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50">
+    <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50 sm:p-6">
       <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-emerald-500 via-lime-400 to-teal-400" />
-      <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3">
+      <div className="mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 sm:flex-row sm:items-center">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Krok 2</p>
-          <h2 className="text-xl font-bold text-slate-950">Oferta dla klienta</h2>
+          <h2 className="text-lg font-bold text-slate-950 sm:text-xl">Oferta dla klienta</h2>
         </div>
 
-        <div className="flex gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
           <button
             type="button"
             onClick={() => {
@@ -178,7 +178,7 @@ export default function OfferResult({
               setCopied(false);
               setEmailStatus("");
             }}
-            className="px-3 py-2 rounded-xl bg-slate-100 border border-slate-300 text-slate-700 hover:bg-slate-200 text-sm transition"
+            className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-200"
           >
             Edytuj
           </button>
@@ -186,7 +186,7 @@ export default function OfferResult({
           <button
             type="button"
             onClick={resetForm}
-            className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-sm transition"
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
           >
             Wyczyść
           </button>
@@ -197,7 +197,7 @@ export default function OfferResult({
         {result.offerType !== "storage" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
             <p className="text-slate-500 text-sm">Moc instalacji</p>
-            <p className="text-2xl font-bold text-slate-950">{result.pvPowerKw} kWp</p>
+            <p className="text-xl font-bold text-slate-950 sm:text-2xl">{result.pvPowerKw} kWp</p>
             <p className="text-xs text-slate-500 mt-1">
               {panelCount} paneli × {panelPowerWp} Wp
             </p>
@@ -207,34 +207,34 @@ export default function OfferResult({
         {result.inverter !== "Brak" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
             <p className="text-slate-500 text-sm">Falownik</p>
-            <p className="text-xl font-bold text-slate-950">{result.inverter}</p>
+            <p className="break-words text-lg font-bold text-slate-950 sm:text-xl">{result.inverter}</p>
           </div>
         )}
 
         {result.energyStorage !== "Brak" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
             <p className="text-slate-500 text-sm">Magazyn energii</p>
-            <p className="text-xl font-bold text-slate-950">{result.energyStorage}</p>
+            <p className="break-words text-lg font-bold text-slate-950 sm:text-xl">{result.energyStorage}</p>
           </div>
         )}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
           <p className="text-slate-500 text-sm">Cena netto</p>
-          <p className="text-2xl font-bold text-slate-950">
+          <p className="text-xl font-bold text-slate-950 sm:text-2xl">
             {result.finalNet.toLocaleString("pl-PL")} zł
           </p>
         </div>
 
-        <div className="rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-500 p-5 text-white shadow-xl shadow-emerald-200">
+        <div className="rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-500 p-4 text-white shadow-xl shadow-emerald-200 sm:p-5">
           <p className="text-sm font-semibold">Cena brutto {result.vatRate}%</p>
-          <p className="text-3xl font-black text-white">
+          <p className="break-words text-2xl font-black text-white sm:text-3xl">
             {result.finalGross.toLocaleString("pl-PL")} zł
           </p>
         </div>
 
         <button
           onClick={copyOffer}
-          className="w-full rounded-2xl border border-slate-200 bg-white p-4 font-bold text-slate-950 shadow-sm transition hover:bg-slate-50 hover:shadow-md"
+          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold sm:text-base text-slate-950 shadow-sm transition hover:bg-slate-50 hover:shadow-md"
         >
           {copied ? "Skopiowano maila" : "Skopiuj ofertę do schowka"}
         </button>
@@ -245,7 +245,7 @@ export default function OfferResult({
               type="button"
               onClick={saveOfferToCrm}
               disabled={savingOffer || !selectedClientId}
-              className="w-full rounded-2xl bg-emerald-600 p-4 font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+              className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
             >
               {savingOffer ? "Zapisywanie oferty..." : "Zapisz ofertę w CRM"}
             </button>
@@ -268,7 +268,7 @@ export default function OfferResult({
           type="button"
           onClick={downloadOfferPdf}
           disabled={isGeneratingPdf}
-          className="w-full rounded-2xl bg-amber-400 p-4 font-bold text-slate-950 shadow-md shadow-amber-100 transition hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+          className="w-full rounded-2xl bg-amber-400 px-4 py-4 text-sm font-bold sm:text-base text-slate-950 shadow-md shadow-amber-100 transition hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
         >
           {isGeneratingPdf ? "Generowanie PDF..." : "Pobierz ofertę PDF"}
         </button>
@@ -281,7 +281,7 @@ export default function OfferResult({
           <label className="block">
             <span className="text-sm text-slate-700">E-mail klienta</span>
             <input
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 sm:text-base"
               type="email"
               placeholder="klient@example.com"
               value={clientEmail}
@@ -292,7 +292,7 @@ export default function OfferResult({
           <button
             onClick={sendOfferEmail}
             disabled={sendingEmail || !clientEmail}
-            className="w-full rounded-2xl bg-blue-600 p-4 font-bold text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
           >
             {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
           </button>
@@ -349,7 +349,7 @@ export default function OfferResult({
             {showMarginSummary && (
               <div className="mt-4 space-y-3">
                 {isSeller ? (
-                  <div className="text-right text-sm text-slate-500 font-normal">
+                  <div className="break-words text-right text-sm font-normal text-slate-500">
                     {sellerCommissionNet.toLocaleString("pl-PL")} zł
                   </div>
                 ) : (
@@ -363,10 +363,10 @@ export default function OfferResult({
                       {result.breakdown.map((item) => (
                         <div
                           key={item.label}
-                          className="flex justify-between text-sm text-slate-700"
+                          className="flex items-start justify-between gap-3 text-sm text-slate-700"
                         >
-                          <span>{item.label}</span>
-                          <span>{item.value.toLocaleString("pl-PL")} zł</span>
+                          <span className="min-w-0 break-words">{item.label}</span>
+                          <span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span>
                         </div>
                       ))}
                     </div>

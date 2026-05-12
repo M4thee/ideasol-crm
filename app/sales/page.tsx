@@ -291,35 +291,35 @@ export default function SalesPage() {
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
-        <header className="flex items-center justify-between gap-4 flex-wrap">
+        <header className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <p className="text-sm text-slate-500 mb-1">Moduł sprzedażowy</p>
-            <h1 className="text-3xl font-bold text-slate-900">Sprzedaże</h1>
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Sprzedaże</h1>
           </div>
         </header>
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 md:gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <p className="text-sm text-slate-500">
               {currentUserRole === "seller" ? "Moje sprzedaże" : "Liczba sprzedaży"}
             </p>
-            <p className="text-3xl font-bold text-slate-900 mt-1">{sales.length}</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">{sales.length}</p>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <p className="text-sm text-slate-500">
               {currentUserRole === "seller" ? "Moje zakończone" : "Zakończone"}
             </p>
-            <p className="text-3xl font-bold text-slate-900 mt-1">
+            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
               {sales.filter((sale) => sale.status === "Zakończona").length}
             </p>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <p className="text-sm text-slate-500">
               {currentUserRole === "seller" ? "Wartość moich umów" : "Wartość umów"}
             </p>
-            <p className="text-3xl font-bold text-slate-900 mt-1">
+            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
               {sales
                 .reduce((sum, sale) => sum + (sale.contract_value || 0), 0)
                 .toLocaleString("pl-PL")} zł
@@ -327,8 +327,8 @@ export default function SalesPage() {
           </div>
         </section>
 
-        <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-4 flex-wrap">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 lg:flex-row lg:items-center">
             <div>
               <h2 className="text-lg font-bold text-slate-900">Lista sprzedaży</h2>
               <p className="text-sm text-slate-500">
@@ -336,18 +336,18 @@ export default function SalesPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3 ml-auto">
-              <div className="relative">
+            <div className="flex w-full flex-col gap-3 sm:flex-row lg:ml-auto lg:w-auto">
+              <div className="relative w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setIsSellerFilterOpen((value) => !value)}
-                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 sm:w-auto"
                 >
                   {getSellerFilterLabel()}
                 </button>
 
                 {isSellerFilterOpen && currentUserRole !== "seller" && (
-                  <div className="absolute right-0 top-12 z-30 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <div className="absolute left-0 right-0 top-12 z-30 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl sm:left-auto sm:w-72">
                     <div className="mb-2 flex gap-2">
                       <button
                         type="button"
@@ -396,7 +396,7 @@ export default function SalesPage() {
               <button
                 type="button"
                 onClick={loadSales}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-white font-semibold"
+                className="w-full rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-slate-700 sm:w-auto"
               >
                 Odśwież
               </button>
@@ -404,23 +404,23 @@ export default function SalesPage() {
           </div>
 
           {loading ? (
-            <div className="p-6 text-slate-500">Ładowanie sprzedaży...</div>
+            <div className="p-4 text-slate-500 sm:p-6">Ładowanie sprzedaży...</div>
           ) : sales.length === 0 ? (
-            <div className="p-6 text-slate-500">
+            <div className="p-4 text-slate-500 sm:p-6">
               Brak sprzedaży. Wejdź w kartę wydarzenia i kliknij „Dodaj sprzedaż”.
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-[980px] w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
                   <tr>
-                    <th className="text-left px-6 py-3 font-semibold">SaleID</th>
-                    <th className="text-left px-6 py-3 font-semibold">Data sprzedaży</th>
-                    <th className="text-left px-6 py-3 font-semibold">Klient</th>
-                    <th className="text-left px-6 py-3 font-semibold">Sprzedawca</th>
-                    <th className="text-left px-6 py-3 font-semibold">Wartość umowy</th>
-                    <th className="text-left px-6 py-3 font-semibold">Status</th>
-                    <th className="text-right px-6 py-3 font-semibold">Akcje</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">SaleID</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Data sprzedaży</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Klient</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Sprzedawca</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Wartość umowy</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Status</th>
+                    <th className="text-right px-4 py-3 sm:px-6 font-semibold">Akcje</th>
                   </tr>
                 </thead>
 
@@ -436,15 +436,15 @@ export default function SalesPage() {
 
                     return (
                       <tr key={sale.id} className="hover:bg-slate-50 transition">
-                        <td className="px-6 py-4 font-bold text-slate-900 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 font-bold text-slate-900 whitespace-nowrap">
                           {visibleSaleId}
                         </td>
 
-                        <td className="px-6 py-4 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
                           {new Date(sale.sale_date).toLocaleString("pl-PL")}
                         </td>
 
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 sm:px-6">
                           <div>
                             <p className="font-semibold text-slate-900">{clientName}</p>
                             <p className="text-xs text-slate-500">
@@ -453,7 +453,7 @@ export default function SalesPage() {
                           </div>
                         </td>
 
-                        <td className="px-6 py-4 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
                           {sale.seller?.display_name ||
                             sale.seller?.email ||
                             (sale.seller_id
@@ -461,13 +461,13 @@ export default function SalesPage() {
                               : "Brak sprzedawcy")}
                         </td>
 
-                        <td className="px-6 py-4 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
                           {sale.contract_value
                             ? `${sale.contract_value.toLocaleString("pl-PL")} zł`
                             : "Brak danych"}
                         </td>
 
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 sm:px-6">
                           <span
                             className={`inline-flex px-3 py-1 rounded-full border text-xs font-bold ${getSaleStatusClass(
                               sale.status
@@ -477,10 +477,10 @@ export default function SalesPage() {
                           </span>
                         </td>
 
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 py-4 sm:px-6 text-right">
                           <a
                             href={`/sales/${sale.id}`}
-                            className="inline-flex px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold"
+                            className="inline-flex rounded-xl bg-emerald-500 px-4 py-2 font-bold text-white hover:bg-emerald-400"
                           >
                             Otwórz
                           </a>
