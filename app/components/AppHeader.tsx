@@ -454,11 +454,10 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
               )}
             </div>
           </div>
-
           <button
             type="button"
             onClick={() => setMobileMenuOpen((current) => !current)}
-            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 lg:hidden"
+            className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 lg:hidden"
             aria-expanded={mobileMenuOpen}
             aria-label="Menu"
           >
@@ -482,7 +481,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                 </>
               )}
             </svg>
-            Menu
           </button>
 
           <nav className="ml-3 hidden h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-sm lg:flex">
