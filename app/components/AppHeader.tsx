@@ -637,10 +637,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                       <button
                         key={`mobile-${result.type}-${result.id}`}
                         type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          openSearchResult(result);
-                        }}
+                        onClick={() => openSearchResult(result)}
                         className="w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-slate-50"
                       >
                         <div className="flex items-start justify-between gap-3">
