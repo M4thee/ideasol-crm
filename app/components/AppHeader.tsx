@@ -453,6 +453,25 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     }
   }
 
+  async function clearNotifications() {
+    const notificationIds = notifications.map((notification) => notification.id);
+
+    if (notificationIds.length === 0) return;
+
+    setNotifications([]);
+    setToastNotification(null);
+    setNotificationsOpen(false);
+
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .in("id", notificationIds);
+
+    if (error) {
+      console.error("Błąd czyszczenia powiadomień:", error);
+    }
+  }
+
   function openNotification(notification: HeaderNotification) {
     markNotificationAsRead(notification.id);
     setNotificationsOpen(false);
@@ -838,15 +857,27 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                       </p>
                     </div>
 
-                    {unreadNotificationsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={markAllNotificationsAsRead}
-                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-600"
-                      >
-                        Oznacz wszystkie
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {unreadNotificationsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={markAllNotificationsAsRead}
+                          className="text-xs font-semibold text-emerald-700 hover:text-emerald-600"
+                        >
+                          Oznacz wszystkie
+                        </button>
+                      )}
+
+                      {notifications.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={clearNotifications}
+                          className="text-xs font-semibold text-red-600 hover:text-red-500"
+                        >
+                          Wyczyść
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {notifications.length === 0 ? (
@@ -1117,6 +1148,16 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                       className="w-full rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-700"
                     >
                       Oznacz wszystkie jako przeczytane
+                    </button>
+                  )}
+
+                  {notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearNotifications}
+                      className="w-full rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600"
+                    >
+                      Wyczyść powiadomienia
                     </button>
                   )}
                 </div>
