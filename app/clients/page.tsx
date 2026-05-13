@@ -287,6 +287,25 @@ function ClientsPageContent() {
     return ["owner", "admin", "cc"].includes(currentUserRole || "");
   }
 
+  function canAnonymizeClients() {
+    return currentUserRole === "admin";
+  }
+
+  function maskClientName(value: string | null) {
+    const cleanValue = String(value || "").trim();
+
+    if (!cleanValue) return "Zanonimizowany kontakt";
+
+    return cleanValue
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => {
+        if (part.length <= 2) return `${part[0] || ""}***`;
+        return `${part.slice(0, 2)}${"*".repeat(Math.max(part.length - 2, 3))}`;
+      })
+      .join(" ");
+  }
+
   function getAdvisorName(client: Client) {
     return client.assigned_user?.display_name || client.assigned_user?.email || "Brak";
   }
@@ -389,7 +408,21 @@ function ClientsPageContent() {
         : null,
     }));
 
-    setClients(normalizedClients);
+    const sortedClients = normalizedClients.sort((firstClient, secondClient) => {
+      const firstIsLost = firstClient.status === "Utracony";
+      const secondIsLost = secondClient.status === "Utracony";
+
+      if (firstIsLost !== secondIsLost) {
+        return firstIsLost ? 1 : -1;
+      }
+
+      return (
+        new Date(secondClient.created_at).getTime() -
+        new Date(firstClient.created_at).getTime()
+      );
+    });
+
+    setClients(sortedClients);
     setLoading(false);
   }
 
@@ -505,7 +538,7 @@ function ClientsPageContent() {
       return;
     }
 
-    const shouldAskAssignment = ["owner", "admin", "cc"].includes(
+    const shouldAskAssignment = ["admin", "seller"].includes(
       currentUserRole || ""
     );
 
@@ -519,8 +552,7 @@ function ClientsPageContent() {
     const normalizedPhone = newClient.phone.trim();
     const normalizedContactPhone = newClient.contact_phone.trim();
 
-    const shouldAssignToCurrentUser =
-      currentUserRole === "seller" || assignToCurrentUser === true;
+    const shouldAssignToCurrentUser = assignToCurrentUser === true;
 
     const payload = {
       created_by: currentUserId,
@@ -623,6 +655,72 @@ function ClientsPageContent() {
 
     setSavingAssignment(false);
     closeAssignModal();
+  }
+
+  async function anonymizeClient(client: Client) {
+    const clientName = client.full_name || client.company_name || "ten kontakt";
+
+    const confirmed = window.confirm(
+      `Czy na pewno chcesz zanonimizować kontakt: ${clientName}?\n\n` +
+        "Ta operacja usunie dane osobowe i kontaktowe oraz ustawi status Utracony."
+    );
+
+    if (!confirmed) return;
+
+    const maskedFullName = client.full_name ? maskClientName(client.full_name) : null;
+    const maskedCompanyName = client.company_name ? maskClientName(client.company_name) : null;
+
+    const { error } = await supabase
+      .from("clients")
+      .update({
+        full_name: maskedFullName,
+        company_name: maskedCompanyName,
+        phone: null,
+        email: null,
+        city: null,
+        postal_code: null,
+        street: null,
+        building_number: null,
+        province: null,
+        phone_country_code: null,
+        pesel: null,
+        nip: null,
+        contact_person: null,
+        contact_phone: null,
+        status: "Utracony",
+      })
+      .eq("id", client.id);
+
+    if (error) {
+      console.error("Błąd anonimizacji klienta:", error);
+      alert(`Nie udało się zanonimizować kontaktu: ${error.message}`);
+      return;
+    }
+
+    setClients((currentClients) =>
+      currentClients.map((currentClient) =>
+        currentClient.id === client.id
+          ? {
+              ...currentClient,
+              full_name: maskedFullName,
+              company_name: maskedCompanyName,
+              phone: null,
+              email: null,
+              city: null,
+              postal_code: null,
+              street: null,
+              building_number: null,
+              province: null,
+              phone_country_code: null,
+              pesel: null,
+              nip: null,
+              contact_person: null,
+              contact_phone: null,
+              status: "Utracony",
+            }
+          : currentClient
+      )
+    );
   }
 
   const availableProvinces = Array.from(
@@ -971,6 +1069,16 @@ function ClientsPageContent() {
                               className="inline-flex rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
                             >
                               Przypisz
+                            </button>
+                          )}
+
+                          {canAnonymizeClients() && (
+                            <button
+                              type="button"
+                              onClick={() => anonymizeClient(client)}
+                              className="inline-flex rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                            >
+                              Anonimizuj
                             </button>
                           )}
 
