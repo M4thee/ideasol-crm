@@ -38,6 +38,12 @@ type Client = {
     role: string | null;
   } | null;
   created_at: string;
+  created_by: string | null;
+  created_by_user?: {
+    id: string;
+    display_name: string | null;
+    email: string | null;
+  } | null;
 };
 
 type CalendarEvent = {
@@ -242,7 +248,7 @@ export default function ClientPage() {
 
     const { data: clientData, error: clientError } = await supabase
       .from("clients")
-      .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at")
+      .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at, created_by")
       .eq("id", clientId)
       .single();
 
@@ -252,11 +258,32 @@ export default function ClientPage() {
       return;
     }
 
+    let createdByUser: {
+      id: string;
+      display_name: string | null;
+      email: string | null;
+    } | null = null;
+
+    if (clientData.created_by) {
+      const { data: creatorData, error: creatorError } = await supabase
+        .from("profiles")
+        .select("id, display_name, email")
+        .eq("id", clientData.created_by)
+        .maybeSingle();
+
+      if (creatorError) {
+        console.error("Błąd ładowania użytkownika, który dodał leada:", creatorError);
+      }
+
+      createdByUser = creatorData || null;
+    }
+
     const normalizedClient = {
       ...clientData,
       assigned_user: Array.isArray(clientData.assigned_user)
         ? clientData.assigned_user[0] || null
         : clientData.assigned_user || null,
+      created_by_user: createdByUser,
     };
 
     if (role === "seller" && clientData.assigned_user_id !== user.id) {
@@ -391,6 +418,14 @@ setActivities((activitiesData as ClientActivity[]) || []);
     return client?.assigned_user?.display_name || client?.assigned_user?.email || "Brak";
   }
 
+  function getLeadCreatorName() {
+    return (
+      client?.created_by_user?.display_name ||
+      client?.created_by_user?.email ||
+      "Nieznany użytkownik"
+    );
+  }
+
   function getRoleLabel(role: string | null) {
     if (role === "owner") return "Członek Zarządu";
     if (role === "admin") return "Administrator";
@@ -522,6 +557,39 @@ setActivities((activitiesData as ClientActivity[]) || []);
       alert(`Nie udało się przypisać klienta: ${error.message}`);
       setSavingAssignment(false);
       return;
+    }
+
+    // Notification creation
+    const clientName = client.full_name || client.company_name || "Nowy klient";
+    const clientCity = client.city || "Brak miejscowości";
+
+    const notificationPayload = {
+      user_id: selectedUserId,
+      title: "Przypisano Ci nowego klienta",
+      body: `${clientName}, ${clientCity}`,
+      client_id: client.id,
+    };
+
+    console.log("Tworzenie powiadomienia z karty klienta:", notificationPayload);
+
+    const { data: notificationData, error: notificationError } = await supabase
+      .from("notifications")
+      .insert(notificationPayload)
+      .select("id, user_id, title, body, client_id, is_read, created_at")
+      .single();
+
+    if (notificationError) {
+      console.error("Błąd tworzenia powiadomienia z karty klienta:", {
+        message: notificationError.message,
+        details: notificationError.details,
+        hint: notificationError.hint,
+        code: notificationError.code,
+        selectedUserId,
+        clientId: client.id,
+      });
+    } else {
+      console.log("Powiadomienie utworzone z karty klienta:", notificationData);
+      window.dispatchEvent(new Event("ideasol-notifications-refresh"));
     }
 
     const selectedUser = assignableUsers.find((user) => user.id === selectedUserId) || null;
@@ -818,6 +886,10 @@ setActivities((activitiesData as ClientActivity[]) || []);
               <p className="text-sm text-slate-500 mb-1">{visibleLeadId}</p>
 
               <h1 className="text-3xl font-bold text-slate-900">{clientName}</h1>
+
+              <p className="mt-1 text-xs font-medium text-slate-400">
+                Lead dodany przez: {getLeadCreatorName()}
+              </p>
 
               <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm font-semibold">

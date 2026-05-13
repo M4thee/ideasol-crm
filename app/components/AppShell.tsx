@@ -78,7 +78,7 @@ export default function AppShell({ children }: AppShellProps) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [pathname, router]);
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-slate-100 text-slate-950">

@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
 
 type AppHeaderProps = {
   currentUser?: {
@@ -44,6 +50,15 @@ type SearchResult = {
   public_id: string | null;
   title: string;
   subtitle: string | null;
+};
+
+type HeaderNotification = {
+  id: string;
+  title: string;
+  body: string | null;
+  client_id: string | null;
+  is_read: boolean;
+  created_at: string;
 };
 
 type SearchableClient = {
@@ -109,8 +124,187 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
+  const [toastNotification, setToastNotification] = useState<HeaderNotification | null>(null);
+  const knownNotificationIdsRef = useRef<Set<string>>(new Set());
+  const notificationsLoadedRef = useRef(false);
+  const lastNotificationSoundRef = useRef<number>(0);
 
   const trimmedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+
+  const unreadNotificationsCount = notifications.filter(
+    (notification) => !notification.is_read
+  ).length;
+
+  function playNotificationSound() {
+    try {
+      const now = Date.now();
+
+      if (now - lastNotificationSoundRef.current < 1500) return;
+      lastNotificationSoundRef.current = now;
+
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContextClass();
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(
+        660,
+        audioContext.currentTime + 0.12
+      );
+
+      gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, audioContext.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.18);
+
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.2);
+
+      window.setTimeout(() => {
+        audioContext.close().catch(() => undefined);
+      }, 350);
+    } catch (error) {
+      console.warn("Nie udało się odtworzyć dźwięku powiadomienia:", error);
+    }
+  }
+
+  function showToast(notification: HeaderNotification) {
+    setToastNotification(notification);
+    playNotificationSound();
+
+    window.setTimeout(() => {
+      setToastNotification((current) =>
+        current?.id === notification.id ? null : current
+      );
+    }, 8000);
+  }
+
+  useEffect(() => {
+    const profileId = profile?.id;
+
+    if (!profileId) return;
+
+    let active = true;
+
+    async function loadNotifications() {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, body, client_id, is_read, created_at")
+        .eq("user_id", profileId)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error("Błąd ładowania powiadomień w headerze:", error);
+        return;
+      }
+
+      if (!active) return;
+
+      const loadedNotifications = (data || []) as HeaderNotification[];
+      const newestUnseenUnreadNotification = loadedNotifications.find(
+        (notification) =>
+          !notification.is_read &&
+          notificationsLoadedRef.current &&
+          !knownNotificationIdsRef.current.has(notification.id)
+      );
+
+      knownNotificationIdsRef.current = new Set(
+        loadedNotifications.map((notification) => notification.id)
+      );
+      notificationsLoadedRef.current = true;
+
+      setNotifications(loadedNotifications);
+
+      if (newestUnseenUnreadNotification) {
+        showToast(newestUnseenUnreadNotification);
+      }
+    }
+
+    loadNotifications();
+
+    const notificationsRefreshInterval = window.setInterval(() => {
+      loadNotifications();
+    }, 5000);
+
+    async function handleNotificationsRefresh() {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, body, client_id, is_read, created_at")
+        .eq("user_id", profileId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (
+        !error &&
+        data?.[0] &&
+        !data[0].is_read &&
+        !knownNotificationIdsRef.current.has(data[0].id)
+      ) {
+        showToast(data[0] as HeaderNotification);
+      }
+
+      loadNotifications();
+    }
+
+    window.addEventListener("ideasol-notifications-refresh", handleNotificationsRefresh);
+
+    const channel = supabase
+      .channel(`header-notifications-${profileId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${profileId}`,
+        },
+        (payload) => {
+          const notification = payload.new as HeaderNotification;
+          setNotifications((current) => [notification, ...current].slice(0, 10));
+
+          if (!notification.is_read) {
+            showToast(notification);
+          }
+
+          loadNotifications();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${profileId}`,
+        },
+        (payload) => {
+          const notification = payload.new as HeaderNotification;
+          setNotifications((current) =>
+            current.map((item) =>
+              item.id === notification.id ? notification : item
+            )
+          );
+          loadNotifications();
+        }
+      )
+      .subscribe((status) => {
+        console.log("Header notifications realtime status:", status);
+      });
+
+    return () => {
+      active = false;
+      window.clearInterval(notificationsRefreshInterval);
+      window.removeEventListener("ideasol-notifications-refresh", handleNotificationsRefresh);
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id]);
 
   useEffect(() => {
     async function searchCRM() {
@@ -211,6 +405,63 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     }
 
     router.push(`/clients/${result.id}`);
+  }
+
+  async function markNotificationAsRead(notificationId: string) {
+    setNotifications((current) =>
+      current.map((notification) =>
+        notification.id === notificationId
+          ? { ...notification, is_read: true }
+          : notification
+      )
+    );
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({
+        is_read: true,
+        read_at: new Date().toISOString(),
+      })
+      .eq("id", notificationId);
+
+    if (error) {
+      console.error("Błąd oznaczania powiadomienia jako przeczytane:", error);
+    }
+  }
+
+  async function markAllNotificationsAsRead() {
+    const unreadIds = notifications
+      .filter((notification) => !notification.is_read)
+      .map((notification) => notification.id);
+
+    if (unreadIds.length === 0) return;
+
+    setNotifications((current) =>
+      current.map((notification) => ({ ...notification, is_read: true }))
+    );
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({
+        is_read: true,
+        read_at: new Date().toISOString(),
+      })
+      .in("id", unreadIds);
+
+    if (error) {
+      console.error("Błąd oznaczania wszystkich powiadomień:", error);
+    }
+  }
+
+  function openNotification(notification: HeaderNotification) {
+    markNotificationAsRead(notification.id);
+    setNotificationsOpen(false);
+    setMobileMenuOpen(false);
+    setToastNotification(null);
+
+    if (notification.client_id) {
+      router.push(`/clients/${notification.client_id}`);
+    }
   }
 
   async function logout() {
@@ -551,6 +802,96 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
             <div className="relative">
               <button
                 type="button"
+                onClick={() => setNotificationsOpen((current) => !current)}
+                title="Powiadomienia"
+                aria-label="Powiadomienia"
+                className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                >
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+
+                {unreadNotificationsCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">Powiadomienia</p>
+                      <p className="text-xs text-slate-500">
+                        {unreadNotificationsCount} nieprzeczytane
+                      </p>
+                    </div>
+
+                    {unreadNotificationsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsAsRead}
+                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-600"
+                      >
+                        Oznacz wszystkie
+                      </button>
+                    )}
+                  </div>
+
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-5 text-sm text-slate-500">
+                      Brak powiadomień.
+                    </div>
+                  ) : (
+                    <div className="max-h-96 overflow-y-auto">
+                      {notifications.map((notification) => (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => openNotification(notification)}
+                          className={`w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-slate-50 ${
+                            notification.is_read ? "bg-white" : "bg-emerald-50/70"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span
+                              className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
+                                notification.is_read ? "bg-slate-200" : "bg-emerald-500"
+                              }`}
+                            />
+
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold text-slate-900">
+                                {notification.title}
+                              </p>
+                              {notification.body && (
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {notification.body}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
                 onClick={() => setProfileMenuOpen((current) => !current)}
                 onMouseEnter={() => setProfileMenuOpen(true)}
                 title="Profil"
@@ -733,6 +1074,54 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
             >
               Poczta
             </a>
+            <div className="rounded-xl bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-bold text-slate-700">
+                  Powiadomienia
+                </span>
+                {unreadNotificationsCount > 0 && (
+                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
+                    {unreadNotificationsCount}
+                  </span>
+                )}
+              </div>
+
+              {notifications.length === 0 ? (
+                <p className="text-xs text-slate-500">Brak powiadomień.</p>
+              ) : (
+                <div className="space-y-2">
+                  {notifications.slice(0, 3).map((notification) => (
+                    <button
+                      key={`mobile-notification-${notification.id}`}
+                      type="button"
+                      onClick={() => openNotification(notification)}
+                      className={`w-full rounded-xl px-3 py-2 text-left text-xs transition ${
+                        notification.is_read
+                          ? "bg-white text-slate-600"
+                          : "bg-emerald-50 text-slate-800"
+                      }`}
+                    >
+                      <span className="font-bold">{notification.title}</span>
+                      {notification.body && (
+                        <span className="mt-1 block text-slate-500">
+                          {notification.body}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  {unreadNotificationsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={markAllNotificationsAsRead}
+                      className="w-full rounded-xl bg-white px-3 py-2 text-xs font-bold text-emerald-700"
+                    >
+                      Oznacz wszystkie jako przeczytane
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             <Link
               href="/settings"
               onClick={() => setMobileMenuOpen(false)}
@@ -750,6 +1139,45 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
             </button>
           </nav>
         </div>
+      )}
+      {toastNotification && (
+        <button
+          type="button"
+          onClick={() => openNotification(toastNotification)}
+          className="fixed bottom-4 right-4 z-[9999] w-[calc(100vw-2rem)] max-w-sm rounded-2xl border border-sky-400/70 bg-slate-950/90 p-4 text-left shadow-2xl shadow-sky-900/30 backdrop-blur transition hover:scale-[1.01] hover:bg-slate-950 sm:right-6"
+        >
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-400/15 text-sky-300 ring-1 ring-sky-400/40">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-white">
+                {toastNotification.title}
+              </p>
+              {toastNotification.body && (
+                <p className="mt-1 text-sm text-slate-300">
+                  {toastNotification.body}
+                </p>
+              )}
+              <p className="mt-2 text-xs font-semibold text-sky-300">
+                Kliknij, aby otworzyć kontakt
+              </p>
+            </div>
+          </div>
+        </button>
       )}
     </header>
   );

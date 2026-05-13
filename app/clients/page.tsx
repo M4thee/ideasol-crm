@@ -640,6 +640,32 @@ function ClientsPageContent() {
       return;
     }
 
+    const clientName =
+      assigningClient.full_name || assigningClient.company_name || "Nowy klient";
+    const clientCity = assigningClient.city || "Brak miejscowości";
+
+    const { error: notificationError } = await supabase
+      .from("notifications")
+      .insert({
+        user_id: selectedSellerId,
+        title: "Przypisano Ci nowego klienta",
+        body: `${clientName}, ${clientCity}`,
+        client_id: assigningClient.id,
+      });
+
+    if (notificationError) {
+      console.error("Błąd tworzenia powiadomienia:", {
+        message: notificationError.message,
+        details: notificationError.details,
+        hint: notificationError.hint,
+        code: notificationError.code,
+        selectedSellerId,
+        clientId: assigningClient.id,
+      });
+    } else {
+      window.dispatchEvent(new Event("ideasol-notifications-refresh"));
+    }
+
     const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId) || null;
 
     setClients((currentClients) =>
