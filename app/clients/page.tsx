@@ -66,8 +66,10 @@ function isHiddenAssignmentUser(profile: {
     profile.hidden_from_assignment === true ||
     displayName === "own1" ||
     displayName === "seller2" ||
+    displayName === "cc3" ||
     displayName.includes("own1") ||
-    displayName.includes("seller2")
+    displayName.includes("seller2") ||
+    displayName.includes("cc3")
   );
 }
 

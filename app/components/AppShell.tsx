@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AppHeader from "@/app/components/AppHeader";
 
@@ -10,6 +11,8 @@ type AppShellProps = {
 
 export default function AppShell({ children }: AppShellProps) {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     let mounted = true;
@@ -27,7 +30,13 @@ export default function AppShell({ children }: AppShellProps) {
 
         if (!mounted) return;
 
-        setIsLoggedIn(Boolean(session?.user));
+        const hasUser = Boolean(session?.user);
+
+        setIsLoggedIn(hasUser);
+
+        if (!hasUser && pathname !== "/") {
+          router.replace("/");
+        }
       } catch (error) {
         console.error("AppShell auth crash:", error);
 
@@ -46,11 +55,22 @@ export default function AppShell({ children }: AppShellProps) {
 
       if (event === "SIGNED_OUT") {
         setIsLoggedIn(false);
+
+        if (pathname !== "/") {
+          router.replace("/");
+        }
+
         return;
       }
 
       if (session?.user) {
         setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+
+        if (pathname !== "/") {
+          router.replace("/");
+        }
       }
     });
 
