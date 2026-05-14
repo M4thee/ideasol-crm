@@ -168,6 +168,7 @@ function ClientsPageContent() {
     contact_phone: "",
     contact_phone_country_code: "+48",
   });
+  const [newClientNote, setNewClientNote] = useState("");
 
   useEffect(() => {
     initializePage();
@@ -463,6 +464,7 @@ function ClientsPageContent() {
       contact_phone: "",
       contact_phone_country_code: "+48",
     });
+    setNewClientNote("");
   }
 
   async function fetchCompanyFromGus() {
@@ -586,9 +588,11 @@ function ClientsPageContent() {
       assigned_user_id: shouldAssignToCurrentUser ? currentUserId : null,
     };
 
-    const { error } = await supabase
+    const { data: insertedClient, error } = await supabase
       .from("clients")
-      .insert(payload);
+      .insert(payload)
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Błąd dodawania klienta:", {
@@ -609,6 +613,20 @@ function ClientsPageContent() {
 
       setSavingClient(false);
       return;
+    }
+
+    const trimmedClientNote = newClientNote.trim();
+
+    if (trimmedClientNote && insertedClient?.id && currentUserId) {
+      const { error: noteError } = await supabase.from("client_notes").insert({
+        client_id: insertedClient.id,
+        created_by: currentUserId,
+        content: trimmedClientNote,
+      });
+
+      if (noteError) {
+        console.error("Błąd zapisu notatki do nowego klienta:", noteError);
+      }
     }
 
     await loadClients(currentUserId, currentUserRole);
@@ -1484,6 +1502,24 @@ function ClientsPageContent() {
               )}
             </div>
 
+            <div className="mt-6">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">
+                  Notatka do leada
+                </span>
+
+                <textarea
+                  value={newClientNote}
+                  onChange={(event) => setNewClientNote(event.target.value)}
+                  placeholder="Opcjonalnie wpisz krótki opis kontaktu, ustalenia lub powód pozostawienia leada w ogólnej bazie..."
+                  className="mt-2 min-h-[120px] w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500"
+                />
+
+                <p className="mt-2 text-xs text-slate-400">
+                  Notatka zapisze się automatycznie na karcie klienta w module notatek.
+                </p>
+              </label>
+            </div>
             <div className="mt-8 flex flex-col-reverse justify-end gap-3 sm:flex-row">
               <button
                 type="button"

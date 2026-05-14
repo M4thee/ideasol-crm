@@ -124,6 +124,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileNotificationsOpen, setMobileNotificationsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
   const [toastNotification, setToastNotification] = useState<HeaderNotification | null>(null);
@@ -458,9 +459,12 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
     if (notificationIds.length === 0) return;
 
+    const previousNotifications = notifications;
+
     setNotifications([]);
     setToastNotification(null);
     setNotificationsOpen(false);
+    setMobileNotificationsOpen(false);
 
     const { error } = await supabase
       .from("notifications")
@@ -468,7 +472,14 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
       .in("id", notificationIds);
 
     if (error) {
-      console.error("Błąd czyszczenia powiadomień:", error);
+      console.error("Błąd czyszczenia powiadomień:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+      setNotifications(previousNotifications);
+      alert("Nie udało się wyczyścić powiadomień. Sprawdź uprawnienia RLS dla tabeli notifications.");
     }
   }
 
@@ -476,6 +487,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     markNotificationAsRead(notification.id);
     setNotificationsOpen(false);
     setMobileMenuOpen(false);
+    setMobileNotificationsOpen(false);
     setToastNotification(null);
 
     if (notification.client_id) {
@@ -1106,20 +1118,41 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
               Poczta
             </a>
             <div className="rounded-xl bg-slate-50 p-3">
-              <div className="mb-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setMobileNotificationsOpen((current) => !current)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
                 <span className="text-sm font-bold text-slate-700">
                   Powiadomienia
                 </span>
-                {unreadNotificationsCount > 0 && (
-                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
-                    {unreadNotificationsCount}
-                  </span>
-                )}
-              </div>
 
-              {notifications.length === 0 ? (
-                <p className="text-xs text-slate-500">Brak powiadomień.</p>
-              ) : (
+                <span className="flex items-center gap-2">
+                  {unreadNotificationsCount > 0 && (
+                    <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
+
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`h-4 w-4 text-slate-500 transition ${mobileNotificationsOpen ? "rotate-180" : ""}`}
+                    aria-hidden="true"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </button>
+
+              {mobileNotificationsOpen && (
+                notifications.length === 0 ? (
+                  <p className="mt-3 text-xs text-slate-500">Brak powiadomień.</p>
+                ) : (
                 <div className="space-y-2">
                   {notifications.slice(0, 3).map((notification) => (
                     <button
@@ -1161,6 +1194,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                     </button>
                   )}
                 </div>
+                )
               )}
             </div>
             <Link
