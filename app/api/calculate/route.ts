@@ -99,6 +99,7 @@ const PLACEHOLDERS_NET = {
   wiring: 800,
   transport: 500,
   documentation: 700,
+  ems: 1200,
 };
 
 function getNumberOverride(value: unknown, fallback: number) {
@@ -243,6 +244,7 @@ function buildPricing(
       overrides?.placeholders?.documentation,
       PLACEHOLDERS_NET.documentation
     ),
+    ems: getNumberOverride(overrides?.placeholders?.ems, PLACEHOLDERS_NET.ems),
   };
 
   const operatorPercent = clampPercent(
@@ -384,6 +386,9 @@ export async function POST(request: Request) {
           currentOverrides?.placeholders?.documentation ??
           700
       ),
+      ems: Number(
+        settingsRow?.ems_cost ?? currentOverrides?.placeholders?.ems ?? 1200
+      ),
     },
     operator: {
       ...(currentOverrides.operator || {}),
@@ -416,6 +421,7 @@ export async function POST(request: Request) {
   const isStorageOnly = offerType === "storage";
   const isPvOnly = offerType === "pv";
   const hasPv = !isStorageOnly;
+  const shouldAddEms = offerType === "pv_storage" || offerType === "storage";
 
   const panel = pricing.panels[body.panelModel as keyof typeof pricing.panels];
   const requestedStorageKey = isPvOnly ? "none" : body.storage;
@@ -467,11 +473,14 @@ export async function POST(request: Request) {
     ? 0
     : pricing.roofPlaceholders[roofType] ?? 2000;
 
+  const emsNet = shouldAddEms ? pricing.placeholders.ems : 0;
+
   const placeholdersTotalNet =
     pricing.placeholders.protections +
     pricing.placeholders.wiring +
     pricing.placeholders.transport +
-    pricing.placeholders.documentation;
+    pricing.placeholders.documentation +
+    emsNet;
 
   const purchaseCostNet =
     panelsCostNet +
@@ -589,6 +598,14 @@ export async function POST(request: Request) {
         label: "Dokumentacja",
         value: Math.round(pricing.placeholders.documentation),
       },
+      ...(shouldAddEms
+        ? [
+            {
+              label: "System EMS",
+              value: Math.round(emsNet),
+            },
+          ]
+        : []),
       {
         label: "Marketing",
         value: Math.round(marketingNet),

@@ -31,6 +31,12 @@ type EventOwner = {
   role: string | null;
 };
 
+type AssignableUser = {
+  id: string;
+  display_name: string | null;
+  role: string | null;
+};
+
 type PhoneStatus =
   | ""
   | "nie odbiera"
@@ -75,6 +81,10 @@ export default function EventPage() {
   const [event, setEvent] = useState<CalendarEvent | null>(null);
   const [client, setClient] = useState<Client | null>(null);
   const [eventOwner, setEventOwner] = useState<EventOwner | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [selectedMeetingOwnerId, setSelectedMeetingOwnerId] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creatingSale, setCreatingSale] = useState(false);
@@ -96,6 +106,17 @@ export default function EventPage() {
   function localDateTimeToIso(value: string) {
     if (!value) return null;
     return new Date(value).toISOString();
+  }
+
+  function canChooseMeetingOwner() {
+    return ["cc", "admin", "owner"].includes(currentUserRole || "");
+  }
+
+  function getMeetingOwnerId(fallbackUserId: string | null | undefined) {
+    if (canChooseMeetingOwner()) {
+      return selectedMeetingOwnerId || null;
+    }
+    return fallbackUserId || null;
   }
 
   function isCompletedEvent(status: string | null) {
@@ -241,12 +262,24 @@ export default function EventPage() {
       taskPhoneStatus === "prośba o ponowny kontakt";
     const needsMeeting = taskPhoneStatus === "umówione spotkanie";
 
+    // --- Meeting owner selection support ---
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const chosenMeetingOwnerId = getMeetingOwnerId(user?.id);
+
     if (needsReminder && !taskReminderAt) {
       alert("Ten efekt wymaga ustawienia terminu ponownego kontaktu.");
       return;
     }
     if (needsMeeting && !taskMeetingAt) {
       alert("Ten efekt wymaga ustawienia terminu spotkania.");
+      return;
+    }
+
+    if (needsMeeting && canChooseMeetingOwner() && !chosenMeetingOwnerId) {
+      alert("Wybierz użytkownika, do którego kalendarza trafi spotkanie.");
       return;
     }
 
@@ -260,10 +293,6 @@ export default function EventPage() {
     }
 
     setSavingTaskEffect(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
 
     const description = taskDescription.trim();
 
@@ -314,7 +343,7 @@ export default function EventPage() {
         event_type: "meeting",
         event_at: taskMeetingAt,
         status: "planned",
-        created_by: user?.id || null,
+        created_by: chosenMeetingOwnerId,
       });
 
       if (meetingError) {
@@ -355,6 +384,7 @@ export default function EventPage() {
     setTaskDescription("");
     setTaskReminderAt("");
     setTaskMeetingAt("");
+    setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
     setShowTaskEffectPanel(false);
     setSavingTaskEffect(false);
 
@@ -379,8 +409,24 @@ export default function EventPage() {
     const needsNextContact = meetingEffectStatus === "Zainteresowany";
     const needsReschedule = meetingEffectStatus === "Przełożenie";
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const chosenMeetingOwnerId = getMeetingOwnerId(user?.id);
+
     if (needsNextContact && !nextContactAt) {
       alert("Wybierz datę kolejnego kontaktu.");
+      return;
+    }
+
+    if (
+      needsNextContact &&
+      nextContactType === "meeting" &&
+      canChooseMeetingOwner() &&
+      !chosenMeetingOwnerId
+    ) {
+      alert("Wybierz użytkownika, do którego kalendarza trafi spotkanie.");
       return;
     }
 
@@ -458,9 +504,7 @@ export default function EventPage() {
 
     setSavingMeetingEffect(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // Already got user and chosenMeetingOwnerId above
 
     const { error: activityError } = await supabase.from("client_activities").insert({
       client_id: event.client_id,
@@ -511,6 +555,7 @@ export default function EventPage() {
       setNextContactType("phone");
       setNextContactAt("");
       setRescheduledMeetingAt("");
+      setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
       setShowMeetingEffectPanel(false);
       setSavingMeetingEffect(false);
 
@@ -532,7 +577,7 @@ export default function EventPage() {
         event_type: nextContactType === "phone" ? "reminder" : "meeting",
         event_at: nextEventAt,
         status: "planned",
-        created_by: user?.id || null,
+        created_by: nextContactType === "meeting" ? chosenMeetingOwnerId : user?.id || null,
       });
 
       if (nextEventError) {
@@ -577,6 +622,7 @@ export default function EventPage() {
     setNextContactType("phone");
     setNextContactAt("");
     setRescheduledMeetingAt("");
+    setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
     setShowMeetingEffectPanel(false);
     setSavingMeetingEffect(false);
 
@@ -590,6 +636,38 @@ export default function EventPage() {
   async function loadEvent() {
     setLoading(true);
     setErrorMessage(null);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    setCurrentUserId(user?.id || null);
+
+    if (user?.id) {
+      const { data: profileData } = await supabase
+        .from("user_profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const loadedRole = profileData?.role || null;
+
+      setCurrentUserRole(loadedRole);
+      setSelectedMeetingOwnerId(
+        ["cc", "admin", "owner"].includes(loadedRole || "") ? "" : user.id
+      );
+
+      if (["cc", "admin", "owner"].includes(loadedRole || "")) {
+        const { data: usersData } = await supabase
+          .from("user_profiles")
+          .select("id, display_name, role")
+          .in("role", ["seller", "owner", "admin", "cc"])
+          .eq("hidden_from_assignment", false)
+          .order("display_name", { ascending: true });
+
+        setAssignableUsers((usersData || []) as AssignableUser[]);
+      }
+    }
 
     const { data: eventData, error: eventError } = await supabase
       .from("calendar_events")
@@ -898,6 +976,28 @@ export default function EventPage() {
                 <p className="text-xs text-blue-700 mt-2">
                   Ten efekt utworzy spotkanie w kalendarzu CRM.
                 </p>
+
+                {canChooseMeetingOwner() && (
+                  <div className="mt-4">
+                    <label className="block text-xs uppercase font-semibold text-blue-700 mb-2">
+                      Kalendarz użytkownika
+                    </label>
+
+                    <select
+                      value={selectedMeetingOwnerId}
+                      onChange={(input) => setSelectedMeetingOwnerId(input.target.value)}
+                      className="w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-400"
+                    >
+                      <option value="">Wybierz użytkownika</option>
+
+                      {assignableUsers.map((assignableUser) => (
+                        <option key={assignableUser.id} value={assignableUser.id}>
+                          {assignableUser.display_name || assignableUser.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 
@@ -924,7 +1024,9 @@ export default function EventPage() {
                   savingTaskEffect ||
                   !taskPhoneStatus ||
                   (taskEffectNeedsReminder && !taskReminderAt) ||
-                  (taskPhoneStatus === "umówione spotkanie" && !taskMeetingAt)
+                  (taskPhoneStatus === "umówione spotkanie" &&
+                    (!taskMeetingAt ||
+                      (canChooseMeetingOwner() && !selectedMeetingOwnerId)))
                 }
                 className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white font-bold text-sm"
               >
@@ -1020,6 +1122,28 @@ export default function EventPage() {
                 <p className="text-xs text-pink-700 mt-2">
                   Ten efekt utworzy kolejny kontakt w kalendarzu CRM.
                 </p>
+
+                {nextContactType === "meeting" && canChooseMeetingOwner() && (
+                  <div className="mt-4">
+                    <label className="block text-xs uppercase font-semibold text-pink-700 mb-2">
+                      Kalendarz użytkownika
+                    </label>
+
+                    <select
+                      value={selectedMeetingOwnerId}
+                      onChange={(input) => setSelectedMeetingOwnerId(input.target.value)}
+                      className="w-full rounded-xl border border-pink-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-pink-400"
+                    >
+                      <option value="">Wybierz użytkownika</option>
+
+                      {assignableUsers.map((assignableUser) => (
+                        <option key={assignableUser.id} value={assignableUser.id}>
+                          {assignableUser.display_name || assignableUser.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
             {meetingEffectStatus === "Przełożenie" && (
@@ -1069,7 +1193,11 @@ export default function EventPage() {
                   savingMeetingEffect ||
                   !meetingEffectStatus ||
                   !meetingEffectDescription.trim() ||
-                  (meetingEffectNeedsNextContact && !nextContactAt) ||
+                  (meetingEffectNeedsNextContact &&
+                    (!nextContactAt ||
+                      (nextContactType === "meeting" &&
+                        canChooseMeetingOwner() &&
+                        !selectedMeetingOwnerId))) ||
                   (meetingEffectStatus === "Przełożenie" && !rescheduledMeetingAt)
                 }
                 className={`px-5 py-2.5 rounded-xl disabled:opacity-50 text-white font-bold text-sm transition ${

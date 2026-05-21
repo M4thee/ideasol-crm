@@ -80,6 +80,7 @@ const DEFAULT_PRICING_OVERRIDES = {
     wiring: 800,
     transport: 500,
     documentation: 700,
+    ems: 1200,
   },
   margins: {
     marketing: 500,
@@ -222,6 +223,7 @@ export default function Home() {
           wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
           transport: Number(data.transport_cost ?? current.placeholders.transport),
           documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
+          ems: Number(data.ems_cost ?? current.placeholders.ems),
         },
         margins: {
           ...current.margins,
@@ -318,6 +320,7 @@ export default function Home() {
         wiring_cost: pricing.placeholders.wiring,
         transport_cost: pricing.placeholders.transport,
         documentation_cost: pricing.placeholders.documentation,
+        ems_cost: pricing.placeholders.ems,
         marketing_cost: pricing.margins.marketing,
         warranty_percent: pricing.operator.percent,
         updated_at: new Date().toISOString(),

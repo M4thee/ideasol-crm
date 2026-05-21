@@ -29,8 +29,10 @@ export default function SubsidyOptimizer({
 
   const calculations = useMemo(() => {
     const totalNetPrice = Math.max(storageGrossPrice, 0);
+
+    // PV musi posiadać choć symboliczną wartość na fakturze.
     const symbolicPvNet = totalNetPrice > 1 ? 1 : 0;
-    const priceAvailableForStorageNet = Math.max(totalNetPrice - symbolicPvNet, 0);
+
     const hasStorage = storageCapacity >= 10;
     const storageCapByKwh = storageCapacity * 800;
     const programCap = isNetBilling ? 16000 : 8000;
@@ -40,6 +42,29 @@ export default function SubsidyOptimizer({
 
     const minStorageNetForMaxSubsidy = maxStorageSubsidy / 0.3;
     const maxStorageNetByProgramLimit = storageCapacity * 3000;
+
+    const canApplyEuBonus = Boolean(isEuStorage && isEuHybridInverter);
+
+    // EMS/falownik UE musi mieć realną wartość netto,
+    // aby wygenerować bonus 50% max 2000 zł.
+    const eligibleDeviceNet = Math.max(inverterGrossPrice, 0);
+
+    // Żeby uzyskać pełne 2000 zł bonusu,
+    // urządzenie musi mieć minimum 4000 zł netto.
+    const targetInverterNet = canApplyEuBonus
+      ? Math.min(eligibleDeviceNet, 4000)
+      : 0;
+
+    const inverterBonus = canApplyEuBonus
+      ? Math.min(targetInverterNet * 0.5, 2000)
+      : 0;
+
+    // Na magazyn można przeznaczyć tylko pozostałą część faktury
+    // po odjęciu EMS/falownika oraz symbolicznej wartości PV.
+    const priceAvailableForStorageNet = Math.max(
+      totalNetPrice - symbolicPvNet - targetInverterNet,
+      0
+    );
 
     const targetStorageNet = hasStorage
       ? Math.min(
@@ -56,12 +81,8 @@ export default function SubsidyOptimizer({
         )
       : 0;
 
-    const canApplyEuBonus = Boolean(isEuStorage && isEuHybridInverter);
-    const targetInverterNet = 0;
-    const inverterBonus = 0;
-
     const remainingNet = Math.max(
-      totalNetPrice - targetStorageNet - targetInverterNet,
+      totalNetPrice - targetStorageNet - targetInverterNet - symbolicPvNet,
       0
     );
 
@@ -86,6 +107,7 @@ export default function SubsidyOptimizer({
       minStorageNetForMaxSubsidy,
       maxStorageNetByProgramLimit,
       targetStorageNet,
+      eligibleDeviceNet,
       targetInverterNet,
       remainingNet,
       storageSubsidy,
@@ -101,6 +123,7 @@ export default function SubsidyOptimizer({
   }, [
     storageCapacity,
     storageGrossPrice,
+    inverterGrossPrice,
     isNetBilling,
     isEuStorage,
     isEuHybridInverter,
@@ -187,13 +210,13 @@ export default function SubsidyOptimizer({
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Falownik / urządzenie UE netto
+              Falownik / EMS UE netto
             </p>
             <div className="mt-2 text-xl font-black text-slate-950">
               {formatMoney(calculations.targetInverterNet)} zł
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Bonus: {formatMoney(calculations.inverterBonus)} zł
+              Bonus EMS/UE: {formatMoney(calculations.inverterBonus)} zł
             </p>
           </div>
 
@@ -202,10 +225,9 @@ export default function SubsidyOptimizer({
               Pozostała część instalacji / PV / montaż netto
             </p>
             <div className="mt-2 text-xl font-black text-slate-950">
-              {formatMoney(calculations.remainingNet)} zł
+              PV + montaż + pozostałe elementy: {formatMoney(calculations.remainingNet)} zł netto
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Suma rozpiski: {formatMoney(calculations.totalNetPrice)} zł netto
             </p>
           </div>
         </div>
@@ -244,6 +266,18 @@ export default function SubsidyOptimizer({
                     <span className="text-slate-500">Limit programu</span>
                     <strong className="text-slate-950">
                       {formatMoney(calculations.programCap)} zł
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Bonus EMS/UE</span>
+                    <strong className="text-slate-950">
+                      {formatMoney(calculations.inverterBonus)} zł
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Symboliczna wartość PV</span>
+                    <strong className="text-slate-950">
+                      {formatMoney(calculations.symbolicPvNet)} zł
                     </strong>
                   </div>
                 </div>
