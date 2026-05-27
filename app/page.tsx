@@ -1396,17 +1396,6 @@ export default function Home() {
       <div>
 
         <section className="space-y-6">
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-            <h1 className="text-3xl font-bold text-slate-900">
-              Witaj, {currentUser.user_metadata?.display_name || currentUser.email}
-            </h1>
-
-            {managerInfo && (
-              <p className="mt-2 text-sm text-slate-500">
-                Twój przełożony: <span className="font-semibold text-slate-700">{managerInfo.display_name}</span>, {managerInfo.role}
-              </p>
-            )}
-          </div>
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
             <div ref={meetingsRef} className="xl:col-span-2 self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
             <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
