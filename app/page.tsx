@@ -856,13 +856,6 @@ export default function Home() {
     }
 
     const closedMeetingsCount = closedMeetings?.length || 0;
-    const meetingsWithSalesCount =
-      closedMeetings?.filter((meeting) => meeting.status === "Zakończone - Sprzedaż").length || 0;
-
-    const conversionRate =
-      closedMeetingsCount > 0
-        ? Math.round((meetingsWithSalesCount / closedMeetingsCount) * 100)
-        : 0;
 
     const { data: allSales, error: monthlySalesError } = await supabase
       .from("sales")
@@ -888,6 +881,12 @@ export default function Home() {
 
       return saleBelongsToCurrentUser(sale as Record<string, unknown>);
     });
+
+    const meetingsWithSalesCount = monthlySales.length;
+    const conversionRate =
+      closedMeetingsCount > 0
+        ? Math.round((meetingsWithSalesCount / closedMeetingsCount) * 100)
+        : 0;
 
     const monthlySellerMargin = monthlySales.reduce((sum, sale) => {
       if (shouldShowCompanySalesSummary) {

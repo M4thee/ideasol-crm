@@ -51,9 +51,9 @@ type UserProfile = {
   id: string;
   display_name: string | null;
   phone: string | null;
-  default_calculator_margin: number | null;
   default_seller_markup?: number | null;
   role: "admin" | "owner" | "seller" | "cc" | null;
+  is_active?: boolean | null;
 };
 
 
@@ -133,12 +133,14 @@ export default function Home() {
   const [emailStatus, setEmailStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
 
-  const currentUserRole = userProfile?.role || "seller";
+  const currentUserRole = String(userProfile?.role || "seller")
+    .trim()
+    .toLowerCase();
   const advisorName = userProfile?.display_name || currentUserEmail || "IdeaSol";
   const advisorPhone = userProfile?.phone || "501 000 000";
   const advisorEmail = currentUserEmail || "kontakt@ideasol.pl";
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
-  const canSeePricingPanel = currentUserRole === "admin";
+  const canSeePricingPanel = currentUserRole.includes("admin");
 
   function getPanelPowerWp(model: string) {
     const selectedPanel = panels.find((panel) => panel.code === model);
@@ -179,7 +181,7 @@ export default function Home() {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, display_name, phone, default_calculator_margin, default_seller_markup, role")
+        .select("id, display_name, phone, default_seller_markup, role, is_active")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -194,10 +196,9 @@ export default function Home() {
 
       if (data) {
         const profile = data as UserProfile;
-
         setUserProfile(profile);
 
-        const defaultMargin = profile.default_calculator_margin;
+        const defaultMargin = profile.default_seller_markup;
 
         if (defaultMargin !== null && defaultMargin !== undefined) {
           const parsedDefaultMargin = Number(defaultMargin);
@@ -418,7 +419,7 @@ export default function Home() {
     setRoofType("dachowka");
     setStorage("ZBPOWER_10");
     setSelectedInverterName("auto");
-    const defaultMargin = userProfile?.default_calculator_margin;
+    const defaultMargin = userProfile?.default_seller_markup;
 
     if (defaultMargin !== null && defaultMargin !== undefined) {
       const parsedDefaultMargin = Number(defaultMargin);
@@ -487,7 +488,7 @@ export default function Home() {
           selectedInverterName,
           sellerMarkup,
           vatRate,
-          defaultCalculatorMargin: userProfile?.default_calculator_margin ?? null,
+          defaultCalculatorMargin: userProfile?.default_seller_markup ?? null,
         },
         pricingOverrides,
         advisor: {
@@ -613,6 +614,7 @@ IdeaSol`;
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
+
 
         {canSeePricingPanel && (
           <div className="flex justify-end">
