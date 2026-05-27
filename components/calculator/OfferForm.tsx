@@ -135,7 +135,7 @@ export default function OfferForm({
         }
 
         const { data: profile, error: profileError } = await supabase
-          .from("user_profiles")
+          .from("profiles")
           .select("role")
           .eq("id", user.id)
           .maybeSingle();

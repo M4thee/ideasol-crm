@@ -41,7 +41,13 @@ type Client = {
   created_at: string;
 };
 
-type UserRole = "owner" | "admin" | "cc" | "seller" | string;
+type UserRole =
+  | "owner"
+  | "admin"
+  | "manager"
+  | "cc"
+  | "seller"
+  | string;
 
 type Profile = {
   id: string;
@@ -60,17 +66,7 @@ function isHiddenAssignmentUser(profile: {
   display_name?: string | null;
   hidden_from_assignment?: boolean | null;
 }) {
-  const displayName = (profile.display_name || "").toLowerCase().trim();
-
-  return (
-    profile.hidden_from_assignment === true ||
-    displayName === "own1" ||
-    displayName === "seller2" ||
-    displayName === "cc3" ||
-    displayName.includes("own1") ||
-    displayName.includes("seller2") ||
-    displayName.includes("cc3")
-  );
+  return profile.hidden_from_assignment === true;
 }
 
 const provinces = [
@@ -246,7 +242,7 @@ function ClientsPageContent() {
     setCurrentUserId(user.id);
 
     const { data: profileData, error: profileError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("id, display_name, role")
       .eq("id", user.id)
       .maybeSingle();
@@ -263,9 +259,10 @@ function ClientsPageContent() {
 
   async function loadSellers() {
     const { data, error } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("id, display_name, role, hidden_from_assignment")
-      .in("role", ["seller", "owner", "admin", "cc"])
+      .in("role", ["seller", "manager", "owner", "admin", "cc"])
+      .or("hidden_from_assignment.is.null,hidden_from_assignment.eq.false")
       .order("display_name", { ascending: true });
 
     if (error) {
@@ -275,10 +272,7 @@ function ClientsPageContent() {
 
     setSellers(
       ((data || []) as Omit<Profile, "email">[])
-        .filter((profile) => {
-          if (currentUserRole === "admin") return true;
-          return !isHiddenAssignmentUser(profile);
-        })
+        .filter((profile) => !isHiddenAssignmentUser(profile))
         .map((profile) => ({
           ...profile,
           email: null,
@@ -287,7 +281,7 @@ function ClientsPageContent() {
   }
 
   function canAssignClients() {
-    return ["owner", "admin", "cc"].includes(currentUserRole || "");
+    return ["owner", "admin", "manager", "cc"].includes(currentUserRole || "");
   }
 
   function canAnonymizeClients() {
@@ -328,8 +322,11 @@ function ClientsPageContent() {
   function getRoleLabel(role: string | null) {
     if (role === "owner") return "Członek Zarządu";
     if (role === "admin") return "Administrator";
+    if (role === "manager") return "Manager";
     if (role === "cc") return "Konsultant CC";
-    return "Doradca Techniczny";
+    if (role === "seller") return "Doradca Techniczny";
+
+    return role || "Użytkownik";
   }
 
   function toggleFilterValue(
@@ -365,6 +362,24 @@ function ClientsPageContent() {
       query = query.eq("assigned_user_id", userId);
     }
 
+    if (role === "manager" && userId) {
+      const { data: teamMembers, error: teamError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId);
+
+      if (teamError) {
+        console.error("Błąd ładowania zespołu managera:", teamError);
+      }
+
+      const allowedUserIds = [
+        userId,
+        ...((teamMembers || []).map((item: { id: string }) => item.id)),
+      ];
+
+      query = query.in("assigned_user_id", allowedUserIds);
+    }
+
     const { data, error } = await query;
 
     if (error) {
@@ -385,7 +400,7 @@ function ClientsPageContent() {
 
     if (assignedUserIds.length > 0) {
       const { data: assignedUsersData, error: assignedUsersError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("id, display_name, role")
         .in("id", assignedUserIds);
 
@@ -542,7 +557,7 @@ function ClientsPageContent() {
       return;
     }
 
-    const shouldAskAssignment = ["admin", "seller"].includes(
+    const shouldAskAssignment = ["admin", "manager", "seller"].includes(
       currentUserRole || ""
     );
 
@@ -560,7 +575,6 @@ function ClientsPageContent() {
 
     const payload = {
       created_by: currentUserId,
-      assigned_to: shouldAssignToCurrentUser ? currentUserId : null,
       client_type: clientType,
       full_name:
         clientType === "B2C" ? newClient.full_name : null,

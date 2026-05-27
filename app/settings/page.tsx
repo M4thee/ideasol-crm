@@ -48,7 +48,7 @@ export default function SettingsPage() {
     }
 
     const { data, error } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("*")
       .eq("id", user.id)
       .maybeSingle();
@@ -150,7 +150,7 @@ export default function SettingsPage() {
 
     if (user?.id) {
       const { error: profileError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .update({
           password_changed_at: new Date().toISOString(),
           password_reset_required: false,
@@ -194,7 +194,7 @@ export default function SettingsPage() {
     setSavingMargin(true);
 
     const { error } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .update({
         default_calculator_margin: normalizedValue,
       })

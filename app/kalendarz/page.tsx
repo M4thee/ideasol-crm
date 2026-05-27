@@ -26,6 +26,7 @@ type CalendarOwner = {
   id: string;
   display_name: string | null;
   role: string | null;
+  manager_id?: string | null;
 };
 
 export default function CalendarPage() {
@@ -36,7 +37,8 @@ export default function CalendarPage() {
   const [calendarView, setCalendarView] = useState<CalendarView>("month");
   const [selectedItem, setSelectedItem] = useState<CalendarItem | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "seller" | "cc">("seller");
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "manager" | "seller" | "cc">("seller");
   const [calendarOwners, setCalendarOwners] = useState<CalendarOwner[]>([]);
   const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>([]);
   const [isOwnerFilterOpen, setIsOwnerFilterOpen] = useState(false);
@@ -49,7 +51,50 @@ export default function CalendarPage() {
     if (!currentUserId) return;
 
     loadCalendarItems();
-  }, [currentUserId, currentUserRole, selectedOwnerIds]);
+  }, [currentUserId, currentUserRole, selectedOwnerIds, visibleUserIds]);
+
+  // --- Manager-aware calendar visibility scopes ---
+  async function loadVisibleUserIds(
+    userId: string,
+    role: string
+  ) {
+    if (["admin", "owner"].includes(role)) {
+      setVisibleUserIds(null);
+      return null;
+    }
+
+    if (["seller", "cc"].includes(role)) {
+      const ids = [userId];
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    if (role === "manager") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId);
+
+      if (error) {
+        console.error("Błąd ładowania zespołu managera", error);
+        const ids = [userId];
+        setVisibleUserIds(ids);
+        return ids;
+      }
+
+      const ids = [
+        userId,
+        ...(data || []).map((item) => item.id),
+      ];
+
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    const fallbackIds = [userId];
+    setVisibleUserIds(fallbackIds);
+    return fallbackIds;
+  }
   async function initializeCalendar() {
     const {
       data: { user },
@@ -65,17 +110,19 @@ export default function CalendarPage() {
     setCurrentUserId(user.id);
 
     const { data: profileData } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("role, display_name")
       .eq("id", user.id)
       .maybeSingle();
 
     setCurrentUserRole(
-      (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc"
+      (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc"
     );
-    const role = (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc";
+    const role = (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc";
 
-    if (role === "seller") {
+    const ids = await loadVisibleUserIds(user.id, role);
+
+    if (["seller", "cc"].includes(role)) {
       setCalendarOwners([
         {
           id: user.id,
@@ -88,10 +135,18 @@ export default function CalendarPage() {
     }
 
     const { data: ownersData, error: ownersError } = await supabase
-      .from("user_profiles")
-      .select("id, display_name, role")
-      .in("role", ["seller", "admin", "owner", "cc"])
-      .order("display_name", { ascending: true });
+  .from("profiles")
+  .select("id, display_name, role, manager_id")
+  .eq("hidden_from_assignment", false)
+  .order("display_name", { ascending: true });
+
+    let filteredOwners = ownersData || [];
+
+    if (role === "manager" && ids?.length) {
+      filteredOwners = filteredOwners.filter((owner) =>
+        ids.includes(owner.id)
+      );
+    }
 
     if (ownersError) {
       console.error("Błąd ładowania użytkowników do filtra kalendarza", ownersError);
@@ -99,7 +154,7 @@ export default function CalendarPage() {
       return;
     }
 
-    setCalendarOwners((ownersData || []) as CalendarOwner[]);
+    setCalendarOwners(filteredOwners as CalendarOwner[]);
   }
 
   async function loadCalendarItems() {
@@ -113,10 +168,10 @@ export default function CalendarPage() {
       .not("event_at", "is", null)
       .order("event_at", { ascending: true });
 
-    if (currentUserRole === "seller" && currentUserId) {
-      query = query.eq("created_by", currentUserId);
-    } else if (selectedOwnerIds.length > 0) {
+    if (selectedOwnerIds.length > 0) {
       query = query.in("created_by", selectedOwnerIds);
+    } else if (visibleUserIds && visibleUserIds.length > 0) {
+      query = query.in("created_by", visibleUserIds);
     }
 
     const { data, error } = await query;
@@ -161,7 +216,7 @@ export default function CalendarPage() {
 
     const { data: ownersData, error: ownersError } = ownerIds.length > 0
       ? await supabase
-          .from("user_profiles")
+          .from("profiles")
           .select("id, display_name, role")
           .in("id", ownerIds)
       : { data: [], error: null };
@@ -469,6 +524,15 @@ export default function CalendarPage() {
   }, [currentDate, calendarItems]);
 
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
+  function getRoleLabel(role: string | null) {
+  if (role === "owner") return "Członek Zarządu";
+  if (role === "admin") return "Administrator";
+  if (role === "manager") return "Manager";
+  if (role === "cc") return "Konsultant CC";
+  if (role === "seller") return "Doradca Techniczny";
+
+  return role || "Użytkownik";
+}
   const dayItems = useMemo(
     () => getItemsForDate(currentDate),
     [currentDate, calendarItems]
@@ -526,7 +590,7 @@ export default function CalendarPage() {
                   {getOwnerFilterLabel()}
                 </button>
 
-                {isOwnerFilterOpen && currentUserRole !== "seller" && (
+                {isOwnerFilterOpen && !["seller", "cc"].includes(currentUserRole) && (
                   <div className="absolute left-0 top-12 z-30 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
                     <div className="mb-2 flex gap-2">
                       <button
@@ -558,11 +622,11 @@ export default function CalendarPage() {
                             className="h-4 w-4 accent-emerald-500"
                           />
                           <span className="font-medium text-slate-700">
-                            {owner.display_name || "Użytkownik"}
+                          {owner.display_name || "Użytkownik"}
                           </span>
                           <span className="ml-auto text-xs text-slate-400">
-                            {owner.role}
-                          </span>
+  {getRoleLabel(owner.role)}
+</span>
                         </label>
                       ))}
                     </div>
@@ -651,7 +715,7 @@ export default function CalendarPage() {
                       key={item.id}
                       item={item}
                       onClick={openCalendarItem}
-                      showOwner={currentUserRole !== "seller"}
+                      showOwner={!["seller", "cc"].includes(currentUserRole)}
                     />
                   ))}
 
@@ -705,7 +769,7 @@ export default function CalendarPage() {
                             key={item.id}
                             item={item}
                             onClick={openCalendarItem}
-                            showOwner={currentUserRole !== "seller"}
+                            showOwner={!["seller", "cc"].includes(currentUserRole)}
                           />
                         ))
                       )}
@@ -732,7 +796,7 @@ export default function CalendarPage() {
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="font-bold">{item.client_name}</p>
-                          {currentUserRole !== "seller" && item.owner_name && (
+                          {!["seller", "cc"].includes(currentUserRole) && item.owner_name && (
                             <p className="mt-1 text-xs font-semibold text-slate-500">
                               Opiekun: {item.owner_name}
                             </p>
@@ -801,7 +865,7 @@ export default function CalendarPage() {
                         {selectedItem.client_name}
                       </p>
                     </div>
-                    {currentUserRole !== "seller" && selectedItem.owner_name && (
+                    {!["seller", "cc"].includes(currentUserRole) && selectedItem.owner_name && (
                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                         <p className="text-xs text-slate-400 uppercase font-semibold">Opiekun</p>
                         <p className="text-slate-800 font-bold mt-1">

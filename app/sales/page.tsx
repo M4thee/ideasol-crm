@@ -28,6 +28,7 @@ type SellerProfile = {
   display_name: string | null;
   email: string | null;
   role: string | null;
+  manager_id?: string | null;
   hidden_from_assignment?: boolean | null;
 };
 
@@ -40,6 +41,7 @@ type SalesOwner = {
   id: string;
   display_name: string | null;
   role: string | null;
+  manager_id?: string | null;
   hidden_from_assignment?: boolean | null;
 };
 
@@ -81,7 +83,8 @@ export default function SalesPage() {
   const [sales, setSales] = useState<SaleWithClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "seller" | "cc">("seller");
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "manager" | "seller" | "cc">("seller");
   const [salesOwners, setSalesOwners] = useState<SalesOwner[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [isSellerFilterOpen, setIsSellerFilterOpen] = useState(false);
@@ -95,6 +98,48 @@ export default function SalesPage() {
 
     loadSales();
   }, [currentUserId, currentUserRole, selectedSellerIds]);
+
+  async function loadVisibleUserIds(
+    userId: string,
+    role: string
+  ) {
+    if (["admin", "owner"].includes(role)) {
+      setVisibleUserIds(null);
+      return null;
+    }
+
+    if (["seller", "cc"].includes(role)) {
+      const ids = [userId];
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    if (role === "manager") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId);
+
+      if (error) {
+        console.error("Błąd ładowania zespołu managera", error);
+        const ids = [userId];
+        setVisibleUserIds(ids);
+        return ids;
+      }
+
+      const ids = [
+        userId,
+        ...(data || []).map((item: { id: string }) => item.id),
+      ];
+
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    const fallbackIds = [userId];
+    setVisibleUserIds(fallbackIds);
+    return fallbackIds;
+  }
 
   async function initializeSalesPage() {
     const {
@@ -111,16 +156,17 @@ export default function SalesPage() {
     setCurrentUserId(user.id);
 
     const { data: profileData } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("role, display_name")
       .eq("id", user.id)
       .maybeSingle();
 
-    const role = (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc";
+    const role = (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc";
 
     setCurrentUserRole(role);
+    const ids = await loadVisibleUserIds(user.id, role);
 
-    if (role === "seller") {
+    if (["seller", "cc"].includes(role)) {
       setSalesOwners([
         {
           id: user.id,
@@ -133,9 +179,8 @@ export default function SalesPage() {
     }
 
     let ownersQuery = supabase
-      .from("user_profiles")
-      .select("id, display_name, role, hidden_from_assignment")
-      .in("role", ["seller", "admin", "owner", "cc"])
+      .from("profiles")
+      .select("id, display_name, role, manager_id, hidden_from_assignment")
       .order("display_name", { ascending: true });
 
     if (role !== "admin") {
@@ -150,7 +195,14 @@ export default function SalesPage() {
       return;
     }
 
-    const visibleOwners = ((ownersData || []) as SalesOwner[]).filter((owner) => {
+    const scopedOwners =
+      role === "manager" && ids?.length
+        ? ((ownersData || []) as SalesOwner[]).filter((owner) =>
+            ids.includes(owner.id)
+          )
+        : ((ownersData || []) as SalesOwner[]);
+
+    const visibleOwners = scopedOwners.filter((owner) => {
       if (role === "admin") return true;
       return !isHiddenAssignmentUser(owner);
     });
@@ -166,10 +218,10 @@ export default function SalesPage() {
       .select("id, public_id, client_id, seller_id, sale_date, contract_value, status, created_at")
       .order("created_at", { ascending: false });
 
-    if (currentUserRole === "seller" && currentUserId) {
-      query = query.eq("seller_id", currentUserId);
-    } else if (selectedSellerIds.length > 0) {
+    if (selectedSellerIds.length > 0) {
       query = query.in("seller_id", selectedSellerIds);
+    } else if (visibleUserIds && visibleUserIds.length > 0) {
+      query = query.in("seller_id", visibleUserIds);
     }
 
     const { data: salesData, error: salesError } = await query;
@@ -184,7 +236,7 @@ export default function SalesPage() {
 
     if (currentUserRole !== "admin") {
       const { data: hiddenUsersData, error: hiddenUsersError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("id, display_name, hidden_from_assignment");
 
       if (hiddenUsersError) {
@@ -229,7 +281,7 @@ export default function SalesPage() {
 
     if (sellerIds.length > 0) {
       const { data: loadedSellers, error: sellersError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("id, display_name, email, role, hidden_from_assignment")
         .in("id", sellerIds);
 
@@ -346,7 +398,7 @@ export default function SalesPage() {
                   {getSellerFilterLabel()}
                 </button>
 
-                {isSellerFilterOpen && currentUserRole !== "seller" && (
+                {isSellerFilterOpen && !["seller", "cc"].includes(currentUserRole) && (
                   <div className="absolute left-0 right-0 top-12 z-30 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl sm:left-auto sm:w-72">
                     <div className="mb-2 flex gap-2">
                       <button
@@ -384,7 +436,15 @@ export default function SalesPage() {
                           </span>
 
                           <span className="ml-auto text-xs text-slate-400">
-                            {owner.role}
+                            {owner.role === "owner"
+                              ? "Członek Zarządu"
+                              : owner.role === "admin"
+                              ? "Administrator"
+                              : owner.role === "manager"
+                              ? "Manager"
+                              : owner.role === "cc"
+                              ? "Konsultant CC"
+                              : "Doradca Techniczny"}
                           </span>
                         </label>
                       ))}

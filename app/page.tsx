@@ -5,13 +5,17 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import ClientsTable from "@/app/clients/ClientsTable";
 import { Client } from "@/app/clients/types";
+import {
+  canViewCompanySales,
+  canViewTeamCalendar,
+} from "@/lib/permissions";
 
 type AuthUser = {
   id: string;
   email?: string;
   user_metadata?: {
     display_name?: string;
-    role?: "admin" | "owner" | "seller" | "cc";
+    role?: "admin" | "owner" | "manager" | "seller" | "cc";
   };
 };
 
@@ -61,13 +65,54 @@ const resolutionStatusOptions = [
 const AUTH_EXPIRY_STORAGE_KEY = "ideasol_auth_expires_at";
 const AUTH_REMEMBER_STORAGE_KEY = "ideasol_auth_remember_me";
 const SESSION_DURATION_REMEMBER_MS = 12 * 60 * 60 * 1000;
+
 const SESSION_DURATION_SHORT_MS = 30 * 60 * 1000;
+
+type UserRole = "admin" | "owner" | "manager" | "seller" | "cc";
 
 export default function Home() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "seller" | "cc">("seller");
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>("seller");
+  const [managerInfo, setManagerInfo] = useState<{
+    display_name: string;
+    role: string;
+  } | null>(null);
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
+  async function loadVisibleUserIds() {
+    if (!currentUser?.id) {
+      setVisibleUserIds([]);
+      return;
+    }
+
+    if (["admin", "owner"].includes(currentUserRole)) {
+      setVisibleUserIds(null);
+      return;
+    }
+
+    if (["seller", "cc"].includes(currentUserRole)) {
+      setVisibleUserIds([currentUser.id]);
+      return;
+    }
+
+    if (currentUserRole === "manager") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", currentUser.id);
+
+      if (error) {
+        console.error("Błąd ładowania zespołu managera", error);
+        setVisibleUserIds([currentUser.id]);
+        return;
+      }
+
+      const teamIds = (data || []).map((item) => item.id);
+
+      setVisibleUserIds([currentUser.id, ...teamIds]);
+    }
+  }
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -98,7 +143,7 @@ export default function Home() {
   const [visibleClientsCount, setVisibleClientsCount] = useState(10);
   const [meetingsCollapsed, setMeetingsCollapsed] = useState(false);
   const [salesSummaryCollapsed, setSalesSummaryCollapsed] = useState(false);
-  const [salesSummaryMode, setSalesSummaryMode] = useState<"mine" | "company">("mine");
+  const [salesSummaryMode, setSalesSummaryMode] = useState<"mine" | "team">("mine");
   const [followUpsCollapsed, setFollowUpsCollapsed] = useState(false);
   const [clientsCollapsed, setClientsCollapsed] = useState(false);
   const [resolvingFollowUp, setResolvingFollowUp] = useState<FollowUp | null>(null);
@@ -222,20 +267,37 @@ export default function Home() {
         setAuthLoading(false);
 
         const { data: profileData, error: profileError } = await supabase
-          .from("user_profiles")
-          .select("role")
+          .from("profiles")
+          .select("role, manager_id")
           .eq("id", session.user.id)
           .maybeSingle();
 
         if (profileError) {
-          console.error("Błąd pobierania profilu użytkownika", profileError);
+          console.error(
+  "Błąd pobierania profilu użytkownika",
+  JSON.stringify(profileError, null, 2)
+);
         }
 
         if (!mounted) return;
 
         setCurrentUserRole(
-          (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc"
+          (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc"
         );
+        if (profileData?.manager_id) {
+          const { data: managerData } = await supabase
+            .from("profiles")
+            .select("display_name, role")
+            .eq("id", profileData.manager_id)
+            .maybeSingle();
+
+          if (managerData) {
+            setManagerInfo({
+              display_name: managerData.display_name || "Brak nazwy",
+              role: managerData.role || "manager",
+            });
+          }
+        }
       } catch (authError) {
         console.error("Błąd sprawdzania sesji", authError);
 
@@ -270,20 +332,37 @@ export default function Home() {
         setAuthLoading(false);
 
         const { data: profileData, error: profileError } = await supabase
-          .from("user_profiles")
-          .select("role")
+          .from("profiles")
+          .select("role, manager_id")
           .eq("id", session.user.id)
           .maybeSingle();
 
         if (profileError) {
-          console.error("Błąd pobierania profilu po zmianie sesji", profileError);
+          console.error(
+  "Błąd pobierania profilu po zmianie sesji",
+  JSON.stringify(profileError, null, 2)
+);
         }
 
         if (!mounted) return;
 
         setCurrentUserRole(
-          (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc"
+          (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc"
         );
+        if (profileData?.manager_id) {
+          const { data: managerData } = await supabase
+            .from("profiles")
+            .select("display_name, role")
+            .eq("id", profileData.manager_id)
+            .maybeSingle();
+
+          if (managerData) {
+            setManagerInfo({
+              display_name: managerData.display_name || "Brak nazwy",
+              role: managerData.role || "manager",
+            });
+          }
+        }
       }
     });
 
@@ -295,13 +374,25 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.id) return;
+
+    loadVisibleUserIds();
+  }, [currentUser?.id, currentUserRole]);
+
+  useEffect(() => {
+    if (!currentUser || visibleUserIds === undefined) return;
 
     loadClients();
     loadFollowUps();
     loadMeetings();
     loadSalesSummary();
-  }, [currentUser?.id, currentUserRole, calendarMode, salesSummaryMode]);
+  }, [
+    currentUser?.id,
+    currentUserRole,
+    calendarMode,
+    salesSummaryMode,
+    JSON.stringify(visibleUserIds),
+  ]);
 
   async function loadClients() {
     setLoadingClients(true);
@@ -313,8 +404,8 @@ export default function Home() {
       )
       .order("created_at", { ascending: false });
 
-    if (currentUserRole === "seller" && currentUser?.id) {
-      query = query.eq("assigned_user_id", currentUser.id);
+    if (visibleUserIds && visibleUserIds.length > 0) {
+      query = query.in("assigned_user_id", visibleUserIds);
     }
 
     const { data, error } = await query;
@@ -547,8 +638,8 @@ export default function Home() {
       .not("client_id", "is", null)
       .order("event_at", { ascending: true });
 
-    if (currentUserRole === "seller" && currentUser?.id) {
-      query = query.eq("created_by", currentUser.id);
+    if (visibleUserIds && visibleUserIds.length > 0) {
+      query = query.in("created_by", visibleUserIds);
     }
 
     const { data, error } = await query;
@@ -615,12 +706,10 @@ export default function Home() {
       .gte("event_at", nowIso)
       .order("event_at", { ascending: true });
 
-    if (currentUser?.id && (currentUserRole === "seller" || calendarMode === "mine")) {
+    if (calendarMode === "mine" && currentUser?.id) {
       query = query.eq("created_by", currentUser.id);
-    }
-
-    if (currentUser?.id && currentUserRole !== "seller" && calendarMode === "team") {
-      query = query.neq("created_by", currentUser.id);
+    } else if (visibleUserIds && visibleUserIds.length > 0) {
+      query = query.in("created_by", visibleUserIds);
     }
 
     const { data, error } = await query;
@@ -682,25 +771,25 @@ export default function Home() {
 
     if (ownerIds.length > 0) {
       const { data: ownersData, error: ownersError } = await supabase
-  .from("user_profiles")
-  .select("*")
-  .in("id", ownerIds);
+        .from("profiles")
+        .select("*")
+        .in("id", ownerIds);
 
       if (ownersError) {
         console.warn("Nie udało się pobrać opiekunów spotkań", ownersError);
       }
 
       ownersById = new Map(
-  (ownersData || []).map((owner) => [
-    owner.id,
-    owner.full_name ||
-      owner.display_name ||
-      owner.name ||
-      owner.username ||
-      owner.email ||
-      `ID: ${owner.id.slice(0, 8)}`,
-  ])
-);
+        (ownersData || []).map((owner) => [
+          owner.id,
+          owner.full_name ||
+            owner.display_name ||
+            owner.name ||
+            owner.username ||
+            owner.email ||
+            `ID: ${owner.id.slice(0, 8)}`,
+        ])
+      );
     }
 
     setMeetings(
@@ -740,9 +829,10 @@ export default function Home() {
     const nextMonthStart = new Date(monthStart);
     nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
 
-    const canViewCompanySalesSummary = ["admin", "owner",].includes(currentUserRole);
+    const canViewCompanySalesSummary =
+      canViewCompanySales(currentUserRole as any);
     const shouldShowCompanySalesSummary =
-      canViewCompanySalesSummary && salesSummaryMode === "company";
+      canViewCompanySalesSummary && salesSummaryMode === "team";
 
     let closedMeetingsQuery = supabase
       .from("calendar_events")
@@ -750,8 +840,13 @@ export default function Home() {
       .eq("event_type", "meeting")
       .like("status", "Zakończone - %");
 
-    if (!shouldShowCompanySalesSummary && currentUser?.id) {
-      closedMeetingsQuery = closedMeetingsQuery.eq("created_by", currentUser.id);
+    if (!shouldShowCompanySalesSummary) {
+      if (visibleUserIds && visibleUserIds.length > 0) {
+        closedMeetingsQuery = closedMeetingsQuery.in(
+          "created_by",
+          visibleUserIds
+        );
+      }
     }
 
     const { data: closedMeetings, error: closedMeetingsError } = await closedMeetingsQuery;
@@ -772,7 +867,7 @@ export default function Home() {
     const { data: allSales, error: monthlySalesError } = await supabase
       .from("sales")
       .select("*")
-      .not("status", "eq", "Anulowana");
+      .eq("status", "Zakończona");
 
     if (monthlySalesError) {
       console.warn("Nie udało się pobrać sprzedaży do podsumowania", monthlySalesError);
@@ -786,6 +881,9 @@ export default function Home() {
       const isCurrentMonth = saleDate >= monthStart && saleDate < nextMonthStart;
 
       if (!isCurrentMonth) return false;
+
+      if ((sale as any).deleted_at) return false;
+
       if (shouldShowCompanySalesSummary) return true;
 
       return saleBelongsToCurrentUser(sale as Record<string, unknown>);
@@ -819,8 +917,10 @@ export default function Home() {
     if (value.length <= maxLength) return value;
     return `${value.slice(0, maxLength).trim()}...`;
   }
-  const canManageTeamCalendar = ["admin", "owner", "cc"].includes(currentUserRole);
-  const canViewCompanySalesSummary = ["admin", "owner"].includes(currentUserRole);
+  const canManageTeamCalendar =
+    canViewTeamCalendar(currentUserRole as any);
+  const canViewCompanySalesSummary =
+    canViewCompanySales(currentUserRole as any);
   const visibleClients = clients.slice(0, visibleClientsCount);
   const visibleFollowUps = followUps.slice(0, visibleFollowUpsCount);
   const salesSummaryCircleRadius = 42;
@@ -973,7 +1073,7 @@ export default function Home() {
   }
 
   async function openClientFromFollowUp(clientId: string) {
-    if (currentUserRole !== "seller") {
+    if (!["seller", "cc"].includes(currentUserRole)) {
       router.push(`/clients/${clientId}`);
       return;
     }
@@ -1098,18 +1198,21 @@ export default function Home() {
     }
 
     const { data: profileData, error: profileError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("role, password_reset_required")
       .eq("id", user.id)
       .maybeSingle();
 
     if (profileError) {
-      console.error("Błąd sprawdzania profilu po logowaniu", profileError);
+      console.error(
+  "Błąd sprawdzania profilu po logowaniu",
+  JSON.stringify(profileError, null, 2)
+);
     }
 
     setCurrentUser(user as AuthUser);
     setCurrentUserRole(
-      (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc"
+      (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc"
     );
     setPassword("");
     setAuthLoading(false);
@@ -1138,7 +1241,7 @@ export default function Home() {
     }
 
     const { error: resetFlagError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .update({
         password_reset_required: true,
         password_reset_requested_at: new Date().toISOString(),
@@ -1148,7 +1251,7 @@ export default function Home() {
     if (resetFlagError) {
       console.error("Błąd ustawiania flagi resetu hasła", resetFlagError);
       setResetPasswordStatus(
-        "Link został wysłany, ale nie udało się zablokować starego hasła. Sprawdź kolumnę email w user_profiles."
+        "Link został wysłany, ale nie udało się zablokować starego hasła. Sprawdź kolumnę email w profiles."
       );
       setSendingPasswordReset(false);
       return;
@@ -1293,6 +1396,17 @@ export default function Home() {
       <div>
 
         <section className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+            <h1 className="text-3xl font-bold text-slate-900">
+              Witaj, {currentUser.user_metadata?.display_name || currentUser.email}
+            </h1>
+
+            {managerInfo && (
+              <p className="mt-2 text-sm text-slate-500">
+                Twój przełożony: <span className="font-semibold text-slate-700">{managerInfo.display_name}</span>, {managerInfo.role}
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
             <div ref={meetingsRef} className="xl:col-span-2 self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
             <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
@@ -1493,9 +1607,11 @@ export default function Home() {
                 <div>
                   <h2 className="text-xl font-bold">Podsumowanie sprzedaży</h2>
                   <p className="text-slate-500 text-xs mt-1">
-                    {salesSummaryMode === "company"
-                      ? "Konwersja spotkań i marża całej firmy w tym miesiącu."
-                      : "Konwersja spotkań i marża doradcy w tym miesiącu."}
+                    {salesSummaryMode === "team"
+  ? currentUserRole === "manager"
+    ? "Konwersja spotkań i marża zespołu managera w tym miesiącu."
+    : "Konwersja spotkań i marża całej firmy w tym miesiącu."
+  : "Konwersja spotkań i marża doradcy w tym miesiącu."}
                   </p>
                 </div>
 
@@ -1516,14 +1632,16 @@ export default function Home() {
 
                       <button
                         type="button"
-                        onClick={() => setSalesSummaryMode("company")}
+                        onClick={() => setSalesSummaryMode("team")}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                          salesSummaryMode === "company"
+                          salesSummaryMode === "team"
                             ? "bg-emerald-500 text-white shadow-sm"
                             : "text-emerald-700 hover:bg-white"
                         }`}
                       >
-                        Wyniki firmy
+                        {currentUserRole === "manager"
+  ? "Wyniki zespołu"
+  : "Wyniki firmy"}
                       </button>
                     </div>
                   )}
@@ -1604,7 +1722,11 @@ export default function Home() {
 
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] text-slate-500 leading-tight">
-                        {salesSummaryMode === "company" ? "Marża firmy" : "Zarobek"}
+                        {salesSummaryMode === "team"
+                          ? currentUserRole === "manager"
+                            ? "Marża zespołu"
+                            : "Marża firmy"
+                          : "Zarobek"}
                       </p>
                       <p className="text-lg font-black text-slate-900 leading-tight mt-1">
                         {salesSummary.monthlySellerMargin.toLocaleString("pl-PL", {

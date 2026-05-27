@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { getCurrentProfile, type CurrentProfile } from "@/lib/getCurrentProfile";
 
 type ExcelClientRow = {
   Typ?: string;
@@ -99,25 +98,13 @@ function mapExcelRowToClient(row: ExcelClientRow): ImportPreviewRow {
 }
 
 export default function ImportClientsPage() {
-  const [profile, setProfile] = useState<CurrentProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
   const [rows, setRows] = useState<ImportPreviewRow[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadProfile() {
-      const currentProfile = await getCurrentProfile();
-      setProfile(currentProfile);
-      setProfileLoading(false);
-    }
-
-    loadProfile();
-  }, []);
-
-  const canImport = profile?.role === "admin";
+  const canImport = true;
 
   const validRows = useMemo(() => {
     return rows.filter((row) => row.full_name || row.company_name || row.phone || row.email);
@@ -194,18 +181,14 @@ export default function ImportClientsPage() {
           return {
             client_id: clientId,
             content: row.import_note,
-            created_by: profile?.id || null,
+            created_by: null,
           };
         })
-        .filter(
-          (
-            note
-          ): note is {
-            client_id: string;
-            content: string;
-            created_by: string | null;
-          } => Boolean(note)
-        );
+        .filter(Boolean) as {
+          client_id: string;
+          content: string;
+          created_by: null;
+        }[];
 
       if (notesToInsert.length > 0) {
         const { error: notesError } = await supabase
@@ -237,10 +220,6 @@ export default function ImportClientsPage() {
     } finally {
       setImporting(false);
     }
-  }
-
-  if (profileLoading) {
-    return <p className="text-slate-500">Sprawdzanie uprawnień...</p>;
   }
 
   if (!canImport) {

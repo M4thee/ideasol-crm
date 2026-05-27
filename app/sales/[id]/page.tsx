@@ -157,7 +157,7 @@ export default function SalePage() {
 
       if (!resolvedRole) {
         const { data: currentUserProfileData, error: currentUserProfileError } = await supabase
-          .from("user_profiles")
+          .from("profiles")
           .select("role")
           .eq("id", user.id)
           .maybeSingle();
@@ -496,7 +496,35 @@ export default function SalePage() {
       setSavingSaleNote(false);
     }
   }
+async function deleteSale() {
+  if (!sale || !canDeleteSale) return;
 
+  const confirmed = window.confirm(
+    "Czy na pewno chcesz usunąć tę sprzedaż? Operacja jest nieodwracalna."
+  );
+
+  if (!confirmed) return;
+
+  try {
+    const { error } = await supabase
+      .from("sales")
+      .delete()
+      .eq("id", sale.id);
+
+    if (error) {
+      console.error("Błąd usuwania sprzedaży:", error);
+      alert("Nie udało się usunąć sprzedaży.");
+      return;
+    }
+
+    alert("Sprzedaż została usunięta.");
+
+    window.location.href = "/sales";
+  } catch (error) {
+    console.error("Nieoczekiwany błąd usuwania sprzedaży:", error);
+    alert("Wystąpił nieoczekiwany błąd podczas usuwania sprzedaży.");
+  }
+}
   if (loading) {
     return (
       <main>
@@ -544,6 +572,7 @@ export default function SalePage() {
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
   const canDeleteDocuments = currentUserRole === "admin";
+  const canDeleteSale = currentUserRole === "admin";
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
@@ -555,6 +584,15 @@ export default function SalePage() {
               Karta sprzedaży
             </h1>
           </div>
+          {canDeleteSale && (
+  <button
+    type="button"
+    onClick={deleteSale}
+    className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700 hover:bg-red-100"
+  >
+    Usuń sprzedaż
+  </button>
+)}
         </header>
 
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">

@@ -551,6 +551,146 @@ export default function AdminPanel({
               className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
+
+          <div className="md:col-span-2 xl:col-span-3 mt-2">
+            <div className="rounded-3xl border border-blue-100 bg-blue-50/40 p-5">
+              <h3 className="text-lg font-semibold text-slate-900">
+                Marże ownerów i managerów
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Globalne ustawienia marż ownerów oraz nadprowizji managerów sprzedaży.
+              </p>
+
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    Liczba ownerów
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.ownersCount}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "ownersCount"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    PV &lt; 5 kWp — stawka za kWp
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.pvSmallPerKw}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "pvSmallPerKw"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    PV &lt; 5 kWp — stawka stała
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.pvSmallFixed}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "pvSmallFixed"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    PV &gt; 5 kWp — stawka za kWp
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.pvLargePerKw}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "pvLargePerKw"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    PV &gt; 5 kWp — stawka stała
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.pvLargeFixed}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "pvLargeFixed"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    Magazyn energii — stawka per owner
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.storagePerOwner}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "storagePerOwner"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-700">
+                    Manager Fee (kwota)
+                  </span>
+
+                  <input
+                    type="number"
+                    value={pricingOverrides.margins.managerFeeNet}
+                    onChange={(e) =>
+                      updatePricingValue(
+                        ["margins", "managerFeeNet"],
+                        e.target.value
+                      )
+                    }
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       ) : activeTab === "panels" ? (
         <div className="space-y-6">

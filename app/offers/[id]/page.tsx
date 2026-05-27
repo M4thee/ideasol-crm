@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 
-type UserRole = "owner" | "admin" | "seller" | "cc" | null;
+type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 type SaleCustomerType = "b2c" | "b2b";
 
@@ -392,7 +392,13 @@ function emptySaleForm(): SaleFromOfferForm {
 }
 
 function normalizeRole(value: unknown): UserRole {
-  if (value === "owner" || value === "admin" || value === "seller" || value === "cc") {
+  if (
+    value === "owner" ||
+    value === "admin" ||
+    value === "manager" ||
+    value === "seller" ||
+    value === "cc"
+  ) {
     return value;
   }
 
@@ -411,6 +417,7 @@ export default function OfferDetailsPage() {
   const [creator, setCreator] = useState<UserProfile | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [showSaleForm, setShowSaleForm] = useState(false);
   const [creatingSale, setCreatingSale] = useState(false);
   const [createSaleStatus, setCreateSaleStatus] = useState("");
@@ -420,6 +427,56 @@ export default function OfferDetailsPage() {
     () => ["owner", "admin"].includes(currentUserRole || ""),
     [currentUserRole]
   );
+
+  const canSeeManagerFinancials = useMemo(
+    () => currentUserRole === "manager",
+    [currentUserRole]
+  );
+  async function loadVisibleUserIds(
+    userId: string,
+    role: UserRole
+  ) {
+    if (["admin", "owner"].includes(role || "")) {
+      setVisibleUserIds(null);
+      return null;
+    }
+
+    if (["seller", "cc"].includes(role || "")) {
+      const ids = [userId];
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    if (role === "manager") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId);
+
+      if (error) {
+        console.error("Błąd ładowania zespołu managera", error);
+
+        const ids = [userId];
+        setVisibleUserIds(ids);
+        return ids;
+      }
+
+      const ids = [
+        userId,
+        ...(data || []).map((item) => item.id),
+      ];
+
+      setVisibleUserIds(ids);
+
+      return ids;
+    }
+
+    const fallbackIds = [userId];
+
+    setVisibleUserIds(fallbackIds);
+
+    return fallbackIds;
+  }
 
   useEffect(() => {
     loadOffer();
@@ -442,7 +499,7 @@ export default function OfferDetailsPage() {
     setCreateSaleStatus("");
 
     const { data: profileData, error: profileError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("*")
       .eq("id", user.id)
       .maybeSingle();
@@ -456,6 +513,7 @@ export default function OfferDetailsPage() {
       normalizeRole(user.user_metadata?.role) ||
       normalizeRole(user.app_metadata?.role);
     setCurrentUserRole(role);
+    const visibleIds = await loadVisibleUserIds(user.id, role);
 
     const { data: offerData, error: offerError } = await supabase
       .from("client_offers")
@@ -477,10 +535,17 @@ export default function OfferDetailsPage() {
     }
 
     const loadedOffer = offerData as ClientOffer;
-    const isManager = ["owner", "admin"].includes(role || "");
+    const isPrivilegedUser = ["owner", "admin"].includes(role || "");
     const isOfferOwner = loadedOffer.created_by === user.id;
+    const canManagerAccessOffer =
+      role === "manager" &&
+      visibleIds?.includes(loadedOffer.created_by);
 
-    if (!isManager && !isOfferOwner) {
+    if (
+      !isPrivilegedUser &&
+      !isOfferOwner &&
+      !canManagerAccessOffer
+    ) {
       setOffer(null);
       setClient(null);
       setAccessDenied(true);
@@ -506,7 +571,7 @@ export default function OfferDetailsPage() {
 
     if (loadedOffer.created_by) {
       const { data: creatorData, error: creatorError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("*")
         .eq("id", loadedOffer.created_by)
         .maybeSingle();
@@ -1100,13 +1165,28 @@ export default function OfferDetailsPage() {
 
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-xs font-semibold uppercase text-emerald-700">
-                  {canSeeFullFinancials ? "Marża firmy" : "Moja marża"}
+                  {canSeeFullFinancials
+                    ? "Marża firmy"
+                    : canSeeManagerFinancials
+                      ? "Marża zespołu"
+                      : "Moja marża"}
                 </p>
                 <p className="mt-1 text-xl font-black text-emerald-950">
                   {money(canSeeFullFinancials ? offer.company_margin : offer.seller_margin)}
                 </p>
               </div>
 
+              {!canSeeFullFinancials && canSeeManagerFinancials && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-sm font-semibold text-blue-900">
+                    Manager widzi uproszczone dane finansowe oferty.
+                  </p>
+
+                  <p className="mt-1 text-xs text-blue-700">
+                    Ukryto szczegółowe koszty systemu, rozpiski marż i dane techniczne kalkulatora.
+                  </p>
+                </div>
+              )}
               {canSeeFullFinancials && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase text-slate-400">Marża doradcy</p>

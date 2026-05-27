@@ -84,8 +84,18 @@ const DEFAULT_PRICING_OVERRIDES = {
   },
   margins: {
     marketing: 500,
-    partner1: 2000,
-    partner2: 2000,
+
+    ownersCount: 3,
+
+    pvSmallPerKw: 250,
+    pvSmallFixed: 500,
+
+    pvLargePerKw: 150,
+    pvLargeFixed: 700,
+
+    storagePerOwner: 500,
+
+    managerFeeNet: 500,
   },
   operator: {
     percent: 15,
@@ -168,15 +178,19 @@ export default function Home() {
       setCurrentUserEmail(user.email || "");
 
       const { data, error } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("id, display_name, phone, default_calculator_margin, default_seller_markup, role")
         .eq("id", user.id)
         .maybeSingle();
 
       if (error) {
-        console.error("Błąd ładowania profilu użytkownika kalkulatora", error);
-        return;
-      }
+  console.warn(
+    "Nie znaleziono profilu użytkownika kalkulatora",
+    error
+  );
+
+  return;
+}
 
       if (data) {
         const profile = data as UserProfile;
@@ -228,6 +242,20 @@ export default function Home() {
         margins: {
           ...current.margins,
           marketing: Number(data.marketing_cost ?? current.margins.marketing),
+
+          ownersCount: Number(data.owners_count ?? current.margins.ownersCount),
+
+          pvSmallPerKw: Number(data.pv_small_per_kw ?? current.margins.pvSmallPerKw),
+          pvSmallFixed: Number(data.pv_small_fixed ?? current.margins.pvSmallFixed),
+
+          pvLargePerKw: Number(data.pv_large_per_kw ?? current.margins.pvLargePerKw),
+          pvLargeFixed: Number(data.pv_large_fixed ?? current.margins.pvLargeFixed),
+
+          storagePerOwner: Number(data.storage_per_owner ?? current.margins.storagePerOwner),
+
+          managerFeeNet: Number(
+            data.manager_fee_percent ?? current.margins.managerFeeNet
+          ),
         },
         operator: {
           ...current.operator,
@@ -322,6 +350,19 @@ export default function Home() {
         documentation_cost: pricing.placeholders.documentation,
         ems_cost: pricing.placeholders.ems,
         marketing_cost: pricing.margins.marketing,
+
+        owners_count: pricing.margins.ownersCount,
+
+        pv_small_per_kw: pricing.margins.pvSmallPerKw,
+        pv_small_fixed: pricing.margins.pvSmallFixed,
+
+        pv_large_per_kw: pricing.margins.pvLargePerKw,
+        pv_large_fixed: pricing.margins.pvLargeFixed,
+
+        storage_per_owner: pricing.margins.storagePerOwner,
+
+        manager_fee_percent: pricing.margins.managerFeeNet,
+
         warranty_percent: pricing.operator.percent,
         updated_at: new Date().toISOString(),
       })

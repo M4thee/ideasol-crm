@@ -35,6 +35,7 @@ type AssignableUser = {
   id: string;
   display_name: string | null;
   role: string | null;
+  manager_id?: string | null;
 };
 
 type PhoneStatus =
@@ -84,6 +85,7 @@ export default function EventPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [selectedMeetingOwnerId, setSelectedMeetingOwnerId] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -109,7 +111,56 @@ export default function EventPage() {
   }
 
   function canChooseMeetingOwner() {
-    return ["cc", "admin", "owner"].includes(currentUserRole || "");
+    return ["cc", "admin", "owner", "manager"].includes(currentUserRole || "");
+  }
+
+  function canViewAllEvents() {
+    return ["admin", "owner"].includes(currentUserRole || "");
+  }
+
+  function canManageTeamEvents() {
+    return currentUserRole === "manager";
+  }
+  async function loadVisibleUserIds(
+    userId: string,
+    role: string | null
+  ) {
+    if (["admin", "owner"].includes(role || "")) {
+      setVisibleUserIds(null);
+      return null;
+    }
+
+    if (["seller", "cc"].includes(role || "")) {
+      const ids = [userId];
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    if (role === "manager") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId);
+
+      if (error) {
+        console.error("Błąd ładowania zespołu managera", error);
+        const ids = [userId];
+        setVisibleUserIds(ids);
+        return ids;
+      }
+
+      const ids = [
+        userId,
+        ...(data || []).map((item) => item.id),
+      ];
+
+      setVisibleUserIds(ids);
+      return ids;
+    }
+
+    const fallbackIds = [userId];
+    setVisibleUserIds(fallbackIds);
+    return fallbackIds;
   }
 
   function getMeetingOwnerId(fallbackUserId: string | null | undefined) {
@@ -643,27 +694,45 @@ export default function EventPage() {
 
     setCurrentUserId(user?.id || null);
 
+    let visibleIds: string[] | null = null;
+    let loadedRole: string | null = null;
+
     if (user?.id) {
       const { data: profileData } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("role")
         .eq("id", user.id)
         .maybeSingle();
 
-      const loadedRole = profileData?.role || null;
+      loadedRole = profileData?.role || null;
 
       setCurrentUserRole(loadedRole);
       setSelectedMeetingOwnerId(
         ["cc", "admin", "owner"].includes(loadedRole || "") ? "" : user.id
       );
 
-      if (["cc", "admin", "owner"].includes(loadedRole || "")) {
-        const { data: usersData } = await supabase
-          .from("user_profiles")
-          .select("id, display_name, role")
-          .in("role", ["seller", "owner", "admin", "cc"])
+      visibleIds = await loadVisibleUserIds(user.id, loadedRole);
+
+      if (["cc", "admin", "owner", "manager"].includes(loadedRole || "")) {
+        let usersQuery = supabase
+          .from("profiles")
+          .select("id, display_name, role, manager_id")
           .eq("hidden_from_assignment", false)
           .order("display_name", { ascending: true });
+
+        if (loadedRole === "manager" && visibleIds?.length) {
+          usersQuery = usersQuery.in("id", visibleIds);
+        } else {
+          usersQuery = usersQuery.in("role", [
+            "seller",
+            "manager",
+            "owner",
+            "admin",
+            "cc",
+          ]);
+        }
+
+        const { data: usersData } = await usersQuery;
 
         setAssignableUsers((usersData || []) as AssignableUser[]);
       }
@@ -686,10 +755,21 @@ export default function EventPage() {
       return;
     }
 
+    // Permissions check: if user has visibleUserIds, restrict access
+    if (
+      visibleUserIds &&
+      eventData.created_by &&
+      !visibleUserIds.includes(eventData.created_by)
+    ) {
+      setErrorMessage("Nie masz uprawnień do podglądu tego wydarzenia.");
+      setLoading(false);
+      return;
+    }
+
     setEvent(eventData as CalendarEvent);
     if (eventData.created_by) {
       const { data: ownerData, error: ownerError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .select("id, display_name, role")
         .eq("id", eventData.created_by)
         .maybeSingle();

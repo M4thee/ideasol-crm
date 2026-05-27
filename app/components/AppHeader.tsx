@@ -32,6 +32,7 @@ const navItems = [
 const roleLabels: Record<string, string> = {
   owner: "Właściciel",
   admin: "Administrator",
+  manager: "Manager",
   cc: "Konsultant CC",
   seller: "Doradca Techniczny",
 };
@@ -554,7 +555,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
         }
 
         const { data: profileData, error: profileError } = await supabase
-          .from("user_profiles")
+          .from("profiles")
           .select("id, display_name, role")
           .eq("id", session.user.id)
           .maybeSingle();
@@ -613,7 +614,9 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     };
   }, []);
 
-  return (
+const canManageUsers = profile?.role === "admin";
+
+return (
     <header className="mb-8 text-slate-900 lg:mb-10">
       <div className="flex items-start justify-between gap-4 lg:items-center">
         <div className="min-w-0">
@@ -772,6 +775,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
               )}
             </svg>
           </button>
+
 
           <nav className="ml-3 hidden h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-sm lg:flex">
             {navItems.map((item) => {
@@ -969,6 +973,15 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                   >
                     Ustawienia
                   </Link>
+                  {canManageUsers && (
+                    <Link
+                      href="/admin/users"
+                      className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
+                      Użytkownicy
+                    </Link>
+                  )}
 
                 </div>
               )}
@@ -1092,7 +1105,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                   ? pathname === "/"
                   : pathname.startsWith(item.href);
 
-              return (
+  return (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -1204,6 +1217,15 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
             >
               Ustawienia
             </Link>
+            {canManageUsers && (
+              <Link
+                href="/admin/users"
+                onClick={() => setMobileMenuOpen(false)}
+                className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+              >
+                Użytkownicy
+              </Link>
+            )}
 
             <button
               type="button"

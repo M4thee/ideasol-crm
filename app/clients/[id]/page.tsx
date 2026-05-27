@@ -238,7 +238,7 @@ export default function ClientPage() {
     setCurrentUserId(user.id);
 
     const { data: profileData } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
@@ -373,7 +373,7 @@ setActivities((activitiesData as ClientActivity[]) || []);
     setCurrentUserId(user.id);
 
     const { data: profileData, error: profileError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("id, display_name, role")
       .eq("id", user.id)
       .maybeSingle();
@@ -388,9 +388,10 @@ setActivities((activitiesData as ClientActivity[]) || []);
     if (!["owner", "admin"].includes(role || "")) return;
 
     const { data: usersData, error: usersError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("id, display_name, role")
-      .in("role", ["seller", "owner", "admin", "cc"])
+      .in("role", ["seller", "manager", "owner", "admin", "cc"])
+      .eq("hidden_from_assignment", false)
       .order("display_name", { ascending: true });
 
     if (usersError) {
@@ -429,8 +430,11 @@ setActivities((activitiesData as ClientActivity[]) || []);
   function getRoleLabel(role: string | null) {
     if (role === "owner") return "Członek Zarządu";
     if (role === "admin") return "Administrator";
+    if (role === "manager") return "Manager";
     if (role === "cc") return "Konsultant CC";
-    return "Doradca Techniczny";
+    if (role === "seller") return "Doradca Techniczny";
+
+    return role || "Użytkownik";
   }
 
   function canSeeFullOfferFinancials() {

@@ -61,7 +61,7 @@ export default function ResetPasswordPage() {
 
     if (user?.id) {
       const { error: profileError } = await supabase
-        .from("user_profiles")
+        .from("profiles")
         .update({
           password_changed_at: new Date().toISOString(),
           password_reset_required: false,

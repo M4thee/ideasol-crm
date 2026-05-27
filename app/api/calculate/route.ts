@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { getCurrentProfile } from "@/lib/auth/getCurrentProfile";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -252,32 +253,41 @@ function buildPricing(
   );
 
   const marketingNet = getNumberOverride(overrides?.margins?.marketing, 500);
+  const margins = {
+    marketingNet,
 
-  const managerOverride = {
-    ownersCount: getNumberOverride(overrides?.managerOverride?.ownersCount, 3),
-    smallPvMaxKw: getNumberOverride(overrides?.managerOverride?.smallPvMaxKw, 5),
-    smallPvPerKwNet: getNumberOverride(
-      overrides?.managerOverride?.smallPvPerKwNet,
+    ownersCount: getNumberOverride(
+      overrides?.margins?.ownersCount,
+      3
+    ),
+
+    pvSmallPerKw: getNumberOverride(
+      overrides?.margins?.pvSmallPerKw,
       250
     ),
-    smallPvFixedNet: getNumberOverride(
-      overrides?.managerOverride?.smallPvFixedNet,
+
+    pvSmallFixed: getNumberOverride(
+      overrides?.margins?.pvSmallFixed,
       500
     ),
-    largePvPerKwNet: getNumberOverride(
-      overrides?.managerOverride?.largePvPerKwNet,
+
+    pvLargePerKw: getNumberOverride(
+      overrides?.margins?.pvLargePerKw,
       150
     ),
-    largePvFixedNet: getNumberOverride(
-      overrides?.managerOverride?.largePvFixedNet,
+
+    pvLargeFixed: getNumberOverride(
+      overrides?.margins?.pvLargeFixed,
       700
     ),
-    storageStandalonePerOwnerNet: getNumberOverride(
-      overrides?.managerOverride?.storageStandalonePerOwnerNet,
-      1000
+
+    storagePerOwner: getNumberOverride(
+      overrides?.margins?.storagePerOwner,
+      500
     ),
-    storageWithPvPerOwnerNet: getNumberOverride(
-      overrides?.managerOverride?.storageWithPvPerOwnerNet,
+
+    managerFeeNet: getNumberOverride(
+      overrides?.margins?.managerFeeNet,
       500
     ),
   };
@@ -289,8 +299,7 @@ function buildPricing(
     roofPlaceholders,
     placeholders,
     operatorPercent,
-    marketingNet,
-    managerOverride,
+    margins,
     pvInstallationPerKwNet: getNumberOverride(
       overrides?.installation?.pvPerKwNet,
       500
@@ -306,25 +315,23 @@ function calculateManagerOverrideNet(params: {
   pricing: ReturnType<typeof buildPricing>;
 }) {
   const { pvPowerKw, hasPv, hasStorage, isStorageOnly, pricing } = params;
-  const config = pricing.managerOverride;
+  const config = pricing.margins;
   const ownersCount = Math.max(0, config.ownersCount);
 
   let pvOverridePerOwnerNet = 0;
 
   if (hasPv) {
-    const isSmallPv = pvPowerKw <= config.smallPvMaxKw;
+    const isSmallPv = pvPowerKw <= 5;
 
     pvOverridePerOwnerNet = isSmallPv
-      ? pvPowerKw * config.smallPvPerKwNet + config.smallPvFixedNet
-      : pvPowerKw * config.largePvPerKwNet + config.largePvFixedNet;
+      ? pvPowerKw * config.pvSmallPerKw + config.pvSmallFixed
+      : pvPowerKw * config.pvLargePerKw + config.pvLargeFixed;
   }
 
   let storageOverridePerOwnerNet = 0;
 
   if (hasStorage) {
-    storageOverridePerOwnerNet = isStorageOnly
-      ? config.storageStandalonePerOwnerNet
-      : config.storageWithPvPerOwnerNet;
+    storageOverridePerOwnerNet = config.storagePerOwner;
   }
 
   const perOwnerGrossBeforeOperatorNet =
@@ -344,6 +351,7 @@ function calculateManagerOverrideNet(params: {
 
 export async function POST(request: Request) {
   const body = await request.json();
+  const currentUser = await getCurrentProfile();
 
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
@@ -401,17 +409,48 @@ export async function POST(request: Request) {
       marketing: Number(
         settingsRow?.marketing_cost ?? currentOverrides?.margins?.marketing ?? 500
       ),
-    },
-    managerOverride: {
-      ...(currentOverrides.managerOverride || {}),
-      smallPvPerKwNet: currentOverrides?.managerOverride?.smallPvPerKwNet ?? 250,
-      smallPvFixedNet: currentOverrides?.managerOverride?.smallPvFixedNet ?? 500,
-      largePvPerKwNet: currentOverrides?.managerOverride?.largePvPerKwNet ?? 150,
-      largePvFixedNet: currentOverrides?.managerOverride?.largePvFixedNet ?? 700,
-      storageStandalonePerOwnerNet:
-        currentOverrides?.managerOverride?.storageStandalonePerOwnerNet ?? 1000,
-      storageWithPvPerOwnerNet:
-        currentOverrides?.managerOverride?.storageWithPvPerOwnerNet ?? 500,
+
+      ownersCount: Number(
+        settingsRow?.owners_count ??
+          currentOverrides?.margins?.ownersCount ??
+          3
+      ),
+
+      pvSmallPerKw: Number(
+        settingsRow?.pv_small_per_kw ??
+          currentOverrides?.margins?.pvSmallPerKw ??
+          250
+      ),
+
+      pvSmallFixed: Number(
+        settingsRow?.pv_small_fixed ??
+          currentOverrides?.margins?.pvSmallFixed ??
+          500
+      ),
+
+      pvLargePerKw: Number(
+        settingsRow?.pv_large_per_kw ??
+          currentOverrides?.margins?.pvLargePerKw ??
+          150
+      ),
+
+      pvLargeFixed: Number(
+        settingsRow?.pv_large_fixed ??
+          currentOverrides?.margins?.pvLargeFixed ??
+          700
+      ),
+
+      storagePerOwner: Number(
+        settingsRow?.storage_per_owner ??
+          currentOverrides?.margins?.storagePerOwner ??
+          500
+      ),
+
+      managerFeeNet: Number(
+        settingsRow?.manager_fee_percent ??
+          currentOverrides?.margins?.managerFeeNet ??
+          500
+      ),
     },
   };
 
@@ -504,18 +543,46 @@ export async function POST(request: Request) {
   const grossManagerMarginsBeforeOperatorNet =
     managerOverride.totalGrossBeforeOperatorNet;
 
-  const marketingNet = pricing.marketingNet;
+  const marketingNet = pricing.margins.marketingNet;
 
-  const finalNet = Math.round(
-    purchaseCostNet +
-      grossManagerMarginsBeforeOperatorNet +
-      sellerMarkupNet +
-      marketingNet
-  );
+const shouldApplyManagerFee =
+  currentUser?.role === "seller" &&
+  !!currentUser?.manager_id;
 
-  const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
-  const sellerWarrantyFeeNet = Math.round(sellerMarkupNet * (operatorPercent / 100));
-  const sellerCommissionNet = Math.max(0, sellerMarkupNet - sellerWarrantyFeeNet);
+let managerFeeMultiplier = 0;
+
+if (shouldApplyManagerFee) {
+  if (hasPv) {
+    managerFeeMultiplier += 1;
+  }
+
+  if (hasStorageSelected) {
+    managerFeeMultiplier += 1;
+  }
+}
+
+const managerFeeNet = Math.round(
+  pricing.margins.managerFeeNet * managerFeeMultiplier
+);
+
+const finalNet = Math.round(
+  purchaseCostNet +
+    grossManagerMarginsBeforeOperatorNet +
+    sellerMarkupNet +
+    marketingNet +
+    managerFeeNet
+);
+
+const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
+const sellerWarrantyFeeNet = Math.round(
+  sellerMarkupNet * (operatorPercent / 100)
+);
+
+const sellerCommissionNet = Math.max(
+  0,
+  sellerMarkupNet - sellerWarrantyFeeNet
+);
+
 
   const managerWarrantyFeeNet = Math.max(0, operatorFeeNet - sellerWarrantyFeeNet);
 
@@ -537,7 +604,8 @@ export async function POST(request: Request) {
   const finalGross = Math.round(finalNet * (1 + vatRate / 100));
 
   const companyMargin = Math.round(
-    managerMarginAfterOperatorTotalNet + marketingNet
+    managerMarginAfterOperatorTotalNet +
+      managerFeeNet
   );
 
   return NextResponse.json({
@@ -546,7 +614,10 @@ export async function POST(request: Request) {
     energyStorage: storage.name,
     offerType,
     basePriceNet: Math.round(
-      purchaseCostNet + grossManagerMarginsBeforeOperatorNet + marketingNet
+      purchaseCostNet +
+        grossManagerMarginsBeforeOperatorNet +
+        marketingNet +
+        managerFeeNet
     ),
     sellerMarkupNet,
     finalNet,
@@ -558,6 +629,7 @@ export async function POST(request: Request) {
     operatorFeePerOwnerNet,
     sellerWarrantyFeeNet,
     sellerCommissionNet,
+    managerFeeNet,
     managerWarrantyFeeNet,
     managerOwnersCount: managerOverride.ownersCount,
     marketingNet,
@@ -609,6 +681,10 @@ export async function POST(request: Request) {
       {
         label: "Marketing",
         value: Math.round(marketingNet),
+      },
+      {
+        label: "Manager Fee",
+        value: Math.round(managerFeeNet),
       },
       {
         label: `Rękojmia ${operatorPercent}% od kwoty netto`,

@@ -57,7 +57,7 @@ export default function TasksPage() {
     setCurrentUserId(user.id);
 
     const { data: profileData } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("role, display_name")
       .eq("id", user.id)
       .maybeSingle();
@@ -80,7 +80,7 @@ export default function TasksPage() {
     }
 
     const { data: ownersData, error: ownersError } = await supabase
-      .from("user_profiles")
+      .from("profiles")
       .select("id, display_name, role")
       .in("role", ["seller", "admin", "owner", "cc"])
       .order("display_name", { ascending: true });
@@ -171,7 +171,7 @@ export default function TasksPage() {
 
     const { data: ownersData, error: ownersError } = ownerIds.length > 0
       ? await supabase
-          .from("user_profiles")
+          .from("profiles")
           .select("id, display_name")
           .in("id", ownerIds)
       : { data: [], error: null };
