@@ -27,7 +27,7 @@ const navItems = [
   { href: "/clients", label: "Kontakty" },
   { href: "/zadania", label: "Zadania" },
   { href: "/sales", label: "Sprzedaże" },
-  { href: "/calculator", label: "Kalkulator ofert" },
+  { href: "/calculator", label: "Kalkulator" },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -41,6 +41,7 @@ const roleLabels: Record<string, string> = {
 
 type HeaderProfile = {
   id: string;
+  user_number: number | null;
   email: string | null;
   display_name: string | null;
   role: string | null;
@@ -555,11 +556,38 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
           return;
         }
 
-        const { data: profileData, error: profileError } = await supabase
+        console.log("HEADER SESSION USER:", {
+          id: session.user.id,
+          email: session.user.email,
+          metadata: session.user.user_metadata,
+        });
+
+        let { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("id, display_name, role")
+          .select("id, user_number, display_name, role, email")
           .eq("id", session.user.id)
           .maybeSingle();
+
+        console.log("HEADER PROFILE BY ID:", {
+          profileData,
+          profileError,
+        });
+
+        if (!profileData && session.user.email) {
+          const fallbackResponse = await supabase
+            .from("profiles")
+            .select("id, user_number, display_name, role, email")
+            .eq("email", session.user.email)
+            .maybeSingle();
+
+          profileData = fallbackResponse.data;
+          profileError = fallbackResponse.error;
+
+          console.log("HEADER PROFILE BY EMAIL:", {
+            profileData,
+            profileError,
+          });
+        }
 
         if (profileError) {
           console.error("Błąd ładowania profilu w headerze:", profileError);
@@ -573,12 +601,14 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
               }
             : {
                 id: session.user.id,
+                user_number: null,
                 email: session.user.email || null,
                 display_name:
                   session.user.user_metadata?.display_name ||
                   session.user.email ||
                   null,
-                role: null,
+                role:
+                  session.user.user_metadata?.role || null,
               }
         );
       } catch (error) {
@@ -632,12 +662,20 @@ const canManageUsers = profile?.role === "admin";
           </div>
 
           {authChecked && profile && (
-            <p className="mt-1 max-w-[220px] truncate text-sm text-slate-500 sm:max-w-none sm:text-base">
-              Witaj, {profile.display_name || profile.email}
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500 sm:text-base">
+              <span className="truncate max-w-[220px] sm:max-w-none">
+                Witaj, {profile.display_name || profile.email}
+              </span>
 
               {profile.role && (
-                <span className="ml-2 text-slate-400">
+                <span className="text-slate-400">
                   • {roleLabels[profile.role] || profile.role}
+                </span>
+              )}
+
+              {profile.user_number && (
+                <span className="text-slate-400">
+                  • UID #{profile.user_number}
                 </span>
               )}
             </p>

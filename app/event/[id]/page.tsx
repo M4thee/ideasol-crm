@@ -204,101 +204,6 @@ export default function EventPage() {
     return "bg-slate-100 text-slate-700 border-slate-200";
   }
 
-  async function createSaleFromEvent() {
-    if (!event) return;
-
-    try {
-      setCreatingSale(true);
-
-      const { data: authData } = await supabase.auth.getUser();
-
-      const { data: existingSale, error: existingSaleError } = await supabase
-        .from("sales")
-        .select("id")
-        .eq("event_id", event.id)
-        .maybeSingle<SaleInsertResult>();
-
-      if (existingSaleError) {
-        const supabaseError = existingSaleError as SupabaseErrorDetails;
-
-        console.error("Błąd sprawdzania istniejącej sprzedaży:", existingSaleError);
-
-        alert(
-          `Nie udało się sprawdzić, czy sprzedaż już istnieje.\n\n` +
-            `Message: ${supabaseError.message || "brak"}\n` +
-            `Details: ${supabaseError.details || "brak"}\n` +
-            `Hint: ${supabaseError.hint || "brak"}\n` +
-            `Code: ${supabaseError.code || "brak"}`
-        );
-
-        return;
-      }
-
-      if (existingSale?.id) {
-        setExistingSaleId(existingSale.id);
-        router.push(`/sales/${existingSale.id}`);
-        return;
-      }
-
-      const payload: SaleInsertPayload = {
-        event_id: event.id,
-        client_id: event.client_id,
-        seller_id: authData.user?.id || event.created_by || null,
-        sale_date: new Date().toISOString(),
-        status: "Oczekiwanie na zaksięgowanie zaliczki",
-      };
-
-      console.log("Tworzenie sprzedaży - payload:", payload);
-
-      const { data, error } = await supabase
-        .from("sales")
-        .insert(payload)
-        .select("id")
-        .single<SaleInsertResult>();
-
-      if (error || !data) {
-        const supabaseError = error as SupabaseErrorDetails | null;
-
-        console.error("Błąd tworzenia sprzedaży:", error);
-
-        if (supabaseError?.code === "23505") {
-          const { data: duplicateSale } = await supabase
-            .from("sales")
-            .select("id")
-            .eq("event_id", event.id)
-            .maybeSingle<SaleInsertResult>();
-
-          if (duplicateSale?.id) {
-            setExistingSaleId(duplicateSale.id);
-            router.push(`/sales/${duplicateSale.id}`);
-            return;
-          }
-        }
-
-        alert(
-          `Nie udało się utworzyć sprzedaży.\n\n` +
-            `Message: ${supabaseError?.message || "brak"}\n` +
-            `Details: ${supabaseError?.details || "brak"}\n` +
-            `Hint: ${supabaseError?.hint || "brak"}\n` +
-            `Code: ${supabaseError?.code || "brak"}`
-        );
-
-        return;
-      }
-
-      router.push(`/sales/${data.id}`);
-    } catch (error) {
-      console.error("Nieoczekiwany błąd tworzenia sprzedaży:", error);
-
-      alert(
-        `Wystąpił nieoczekiwany błąd podczas tworzenia sprzedaży.\n\n${
-          error instanceof Error ? error.message : "Brak szczegółów błędu."
-        }`
-      );
-    } finally {
-      setCreatingSale(false);
-    }
-  }
 
   async function saveTaskEffect() {
     if (!event) return;
@@ -549,7 +454,9 @@ export default function EventPage() {
       setShowMeetingEffectPanel(false);
       setSavingMeetingEffect(false);
 
-      await createSaleFromEvent();
+      router.push(
+        `/offers?clientId=${event.client_id || ""}&createSale=1&eventId=${event.id}`
+      );
       return;
     }
 
@@ -961,15 +868,6 @@ export default function EventPage() {
                 >
                   Otwórz sprzedaż
                 </button>
-              ) : isMeetingEvent && !isDoneEvent ? (
-                <button
-                  type="button"
-                  onClick={createSaleFromEvent}
-                  disabled={creatingSale}
-                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold transition"
-                >
-                  {creatingSale ? "Tworzenie sprzedaży..." : "Dodaj sprzedaż"}
-                </button>
               ) : null}
             </div>
           </div>
@@ -1246,7 +1144,7 @@ export default function EventPage() {
 
             {meetingEffectStatus === "Sprzedaż" && (
               <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                Ten efekt otworzy formularz dodania sprzedaży i utworzy nowy Sale ID.
+                Ten efekt zamknie spotkanie jako sprzedaż i przeniesie Cię do wyboru istniejącej oferty klienta.
               </div>
             )}
 

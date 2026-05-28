@@ -351,8 +351,44 @@ function calculateManagerOverrideNet(params: {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const currentUser = await getCurrentProfile();
 
+  const authProfile = await getCurrentProfile();
+
+  const sellerProfileId =
+    body?.advisor?.id ||
+    body?.createdBy ||
+    null;
+
+  const sellerEmail = body?.advisor?.email || null;
+
+  let currentUser = authProfile;
+
+  if (sellerProfileId) {
+    const { data: resolvedProfile } = await supabase
+      .from("profiles")
+      .select("id, role, manager_id, display_name, email")
+      .eq("id", sellerProfileId)
+      .maybeSingle();
+
+    if (resolvedProfile) {
+      currentUser = resolvedProfile;
+    }
+  }
+
+  if ((!currentUser || !currentUser.manager_id) && sellerEmail) {
+    const { data: resolvedByEmail } = await supabase
+      .from("profiles")
+      .select("id, role, manager_id, display_name, email")
+      .eq("email", sellerEmail)
+      .maybeSingle();
+
+    if (resolvedByEmail) {
+      currentUser = resolvedByEmail;
+    }
+  }
+
+  console.log("CURRENT USER CALCULATE:", currentUser);
+  console.log("ADVISOR FROM BODY:", body?.advisor);
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
       .from("pricing_settings")
@@ -545,9 +581,16 @@ export async function POST(request: Request) {
 
   const marketingNet = pricing.margins.marketingNet;
 
-const shouldApplyManagerFee =
-  currentUser?.role === "seller" &&
-  !!currentUser?.manager_id;
+const shouldApplyManagerFee = Boolean(
+  currentUser?.role === "seller" && currentUser?.manager_id
+);
+
+console.log("MANAGER FEE CHECK:", {
+  sellerId: currentUser?.id,
+  role: currentUser?.role,
+  managerId: currentUser?.manager_id,
+  shouldApplyManagerFee,
+});
 
 let managerFeeMultiplier = 0;
 
@@ -639,7 +682,11 @@ const sellerCommissionNet = Math.max(
     managerOverrideGrossPerOwnerNet: Math.round(
       managerOverride.perOwnerGrossBeforeOperatorNet
     ),
-    adminPricingEnabled: true,
+    adminPricingEnabled:
+      process.env.NODE_ENV === "development"
+        ? true
+        : currentUser?.role === "admin" ||
+          currentUser?.role === "owner",
     breakdown: [
       ...(isStorageOnly
         ? [{ label: "Falownik", value: Math.round(inverterCostNet) }]

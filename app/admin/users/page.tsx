@@ -9,6 +9,7 @@ type Role = (typeof ROLES)[number];
 
 type Profile = {
   id: string;
+  user_number: number;
   display_name: string | null;
   email: string | null;
   role: Role;
@@ -24,6 +25,16 @@ export default function AdminUsersPage() {
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const [sortConfig, setSortConfig] = useState<{
+    key: "user_number" | "display_name" | "role";
+    direction: "asc" | "desc";
+  }>({
+    key: "user_number",
+    direction: "asc",
+  });
 
   const [editedProfiles, setEditedProfiles] = useState<
     Record<string, Partial<Profile>>
@@ -85,7 +96,7 @@ export default function AdminUsersPage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, email, role, manager_id, hidden_from_assignment")
+      .select("id, user_number, display_name, email, role, manager_id, hidden_from_assignment")
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -420,6 +431,59 @@ export default function AdminUsersPage() {
     }
   }
 
+  const filteredProfiles = profiles
+    .filter((profile) => {
+      const search = searchTerm.toLowerCase().trim();
+
+      if (!search) return true;
+
+      return (
+        profile.user_number.toString().includes(search) ||
+        (profile.display_name || "")
+          .toLowerCase()
+          .includes(search) ||
+        (profile.email || "")
+          .toLowerCase()
+          .includes(search) ||
+        profile.role.toLowerCase().includes(search)
+      );
+    })
+    .sort((a, b) => {
+      const direction = sortConfig.direction === "asc" ? 1 : -1;
+
+      if (sortConfig.key === "user_number") {
+        return (a.user_number - b.user_number) * direction;
+      }
+
+      if (sortConfig.key === "display_name") {
+        return ((a.display_name || "").localeCompare(
+          b.display_name || "",
+          "pl",
+          {
+            sensitivity: "base",
+          }
+        )) * direction;
+      }
+
+      if (sortConfig.key === "role") {
+        return a.role.localeCompare(b.role, "pl") * direction;
+      }
+
+      return 0;
+    });
+
+  function toggleSort(
+    key: "user_number" | "display_name" | "role"
+  ) {
+    setSortConfig((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "asc"
+          ? "desc"
+          : "asc",
+    }));
+  }
+
   const managers = profiles.filter(
     (profile) => profile.role === "manager"
   );
@@ -567,6 +631,21 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
+          <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative w-full lg:max-w-md">
+              <input
+                type="text"
+                placeholder="Szukaj po UID, nazwisku, emailu, roli..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400"
+              />
+            </div>
+
+            <div className="text-sm text-slate-500">
+              Wyniki: {filteredProfiles.length}
+            </div>
+          </div>
           {loading ? (
             <div className="py-16 text-center text-slate-500">
               Ładowanie użytkowników...
@@ -576,10 +655,56 @@ export default function AdminUsersPage() {
               <table className="min-w-full divide-y divide-slate-200">
                 <thead>
                   <tr className="text-left text-sm font-semibold text-slate-600">
-                    <th className="px-4 py-3">Użytkownik</th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("user_number")}
+                        className="flex items-center gap-2 font-semibold text-slate-600 transition hover:text-slate-900"
+                      >
+                        UID
+                        <span className="text-xs">
+                          {sortConfig.key === "user_number"
+                            ? sortConfig.direction === "asc"
+                              ? "↑"
+                              : "↓"
+                            : "↕"}
+                        </span>
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("display_name")}
+                        className="flex items-center gap-2 font-semibold text-slate-600 transition hover:text-slate-900"
+                      >
+                        Użytkownik
+                        <span className="text-xs">
+                          {sortConfig.key === "display_name"
+                            ? sortConfig.direction === "asc"
+                              ? "A-Z"
+                              : "Z-A"
+                            : "↕"}
+                        </span>
+                      </button>
+                    </th>
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Hasło</th>
-                    <th className="px-4 py-3">Rola</th>
+                    <th className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("role")}
+                        className="flex items-center gap-2 font-semibold text-slate-600 transition hover:text-slate-900"
+                      >
+                        Rola
+                        <span className="text-xs">
+                          {sortConfig.key === "role"
+                            ? sortConfig.direction === "asc"
+                              ? "A-Z"
+                              : "Z-A"
+                            : "↕"}
+                        </span>
+                      </button>
+                    </th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -591,12 +716,17 @@ export default function AdminUsersPage() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {profiles.map((profile) => {
+                  {filteredProfiles.map((profile) => {
                     const isSeller = profile.role === "seller";
                     const editedProfile = editedProfiles[profile.id] || {};
 
                     return (
                       <tr key={profile.id}>
+                        <td className="px-4 py-4">
+                          <div className="inline-flex min-w-[56px] items-center justify-center rounded-2xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
+                            #{profile.user_number}
+                          </div>
+                        </td>
                         <td className="px-4 py-4">
                           <input
                             type="text"

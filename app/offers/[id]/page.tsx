@@ -3,7 +3,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -408,8 +408,10 @@ function normalizeRole(value: unknown): UserRole {
 export default function OfferDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const offerId = String(params.id || "");
-
+  const autoCreateSale = searchParams.get("createSale") === "1";
+  const sourceEventId = searchParams.get("eventId");
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [offer, setOffer] = useState<ClientOffer | null>(null);
@@ -481,7 +483,11 @@ export default function OfferDetailsPage() {
   useEffect(() => {
     loadOffer();
   }, [offerId]);
+  useEffect(() => {
+  if (!offer || !autoCreateSale || showSaleForm) return;
 
+  openSaleFormFromOffer();
+}, [offer, autoCreateSale, showSaleForm]);
   async function loadOffer() {
     setLoading(true);
     setAccessDenied(false);
@@ -746,6 +752,7 @@ export default function OfferDetailsPage() {
         installation_address: installationAddress,
       },
       offer_snapshot: offer,
+      source_event_id: sourceEventId || null,
       payment_method: saleForm.paymentMethod,
       deposit_amount: depositAmount,
     };
@@ -755,7 +762,8 @@ export default function OfferDetailsPage() {
       .insert(salePayload)
       .select("id")
       .single();
-
+      console.log("CREATED SALE:", createdSale);
+console.log("SALE ERROR:", saleError);
     if (saleError || !createdSale) {
       console.error("Błąd tworzenia sprzedaży z oferty:", saleError);
       setCreateSaleStatus(saleError?.message || "Nie udało się utworzyć sprzedaży.");
@@ -771,7 +779,15 @@ export default function OfferDetailsPage() {
     if (updateOfferError) {
       console.error("Błąd aktualizacji statusu oferty:", updateOfferError);
     }
-
+    if (sourceEventId) {
+  await supabase
+    .from("calendar_events")
+    .update({
+      status: "done",
+      meeting_effect: "Sprzedaż",
+    })
+    .eq("id", sourceEventId);
+}
     setCreatingSale(false);
     setShowSaleForm(false);
 
@@ -836,11 +852,19 @@ export default function OfferDetailsPage() {
 
             <button
               type="button"
-              onClick={openSaleFormFromOffer}
+              onClick={(e) => {
+                e.preventDefault();
+                openSaleFormFromOffer();
+              }}
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
             >
               Utwórz sprzedaż z oferty
             </button>
+            {sourceEventId && (
+  <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
+    Sprzedaż tworzona z poziomu zakończonego spotkania
+  </div>
+)}
           </div>
         </div>
 

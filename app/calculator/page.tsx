@@ -401,6 +401,13 @@ export default function Home() {
         sellerMarkup,
         vatRate,
         pricingOverrides,
+        advisor: {
+          id: userProfile?.id || null,
+          name: advisorName,
+          phone: advisorPhone,
+          email: advisorEmail,
+          role: userProfile?.role || currentUserRole,
+        },
       }),
     });
 

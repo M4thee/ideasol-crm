@@ -83,12 +83,21 @@ export default function OfferResult({
   const [pdfStatus, setPdfStatus] = useState("");
 
   const isSeller = currentUserRole === "seller";
+  const showFullAdminBreakdownForSeller =
+    process.env.NODE_ENV === "development";
   const canSeeMarginSummary = canSeeTechnicalView || isSeller;
 
   function findBreakdownValue(keywords: string[]) {
-    const item = result.breakdown.find((breakdownItem) => {
+    const breakdown = Array.isArray(result?.breakdown)
+      ? result.breakdown
+      : [];
+
+    const item = breakdown.find((breakdownItem) => {
       const label = breakdownItem.label.toLowerCase();
-      return keywords.some((keyword) => label.includes(keyword));
+
+      return keywords.some((keyword) =>
+        label.includes(keyword)
+      );
     });
 
     return item?.value || 0;
@@ -348,7 +357,7 @@ export default function OfferResult({
 
             {showMarginSummary && (
               <div className="mt-4 space-y-3">
-                {isSeller ? (
+                {isSeller && !showFullAdminBreakdownForSeller ? (
                   <div className="break-words text-right text-sm font-normal text-slate-500">
                     {sellerCommissionNet.toLocaleString("pl-PL")} zł
                   </div>
@@ -360,7 +369,9 @@ export default function OfferResult({
                     </div>
 
                     <div className="space-y-2">
-                      {result.breakdown.map((item) => (
+                      {(Array.isArray(result?.breakdown)
+                        ? result.breakdown
+                        : []).map((item) => (
                         <div
                           key={item.label}
                           className="flex items-start justify-between gap-3 text-sm text-slate-700"

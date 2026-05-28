@@ -68,7 +68,7 @@ type SellerProfile = {
 
 type ActiveTab = "sale" | "documents" | "financial" | "notes";
 
-type UserRole = "owner" | "admin" | "seller" | "cc" | null;
+type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 
 const SALE_STATUSES = [
@@ -567,7 +567,12 @@ async function deleteSale() {
       : null;
 
   const canSeeFullFinancials =
-    currentUserRole === "owner" || currentUserRole === "admin";
+    currentUserRole === "owner" ||
+    currentUserRole === "admin" ||
+    currentUserRole === "manager";
+
+  const canSeeCompanyMarginOnly =
+    currentUserRole === "seller" || currentUserRole === "cc";
 
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
@@ -1017,6 +1022,12 @@ async function deleteSale() {
                             : sale.margin_value
                         )}
                       </p>
+
+                      {currentUserRole === "manager" && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Manager widzi pełną rozpiskę finansową sprzedaży swojego zespołu.
+                        </p>
+                      )}
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

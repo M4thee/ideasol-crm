@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type Sale = {
@@ -45,6 +46,16 @@ type SalesOwner = {
   hidden_from_assignment?: boolean | null;
 };
 
+type OfferPickerItem = {
+  id: string;
+  offer_public_id: string | null;
+  client_name: string | null;
+  client_email: string | null;
+  final_gross: number | null;
+  created_at: string;
+  created_by?: string | null;
+};
+
 function isHiddenAssignmentUser(profile: {
   display_name?: string | null;
   hidden_from_assignment?: boolean | null;
@@ -54,9 +65,7 @@ function isHiddenAssignmentUser(profile: {
   return (
     profile.hidden_from_assignment === true ||
     displayName === "own1" ||
-    displayName === "seller2" ||
-    displayName.includes("own1") ||
-    displayName.includes("seller2")
+    displayName.includes("own1")
   );
 }
 
@@ -89,6 +98,11 @@ export default function SalesPage() {
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [isSellerFilterOpen, setIsSellerFilterOpen] = useState(false);
 
+  const [isOfferPickerOpen, setIsOfferPickerOpen] = useState(false);
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offers, setOffers] = useState<OfferPickerItem[]>([]);
+  const [offerSearch, setOfferSearch] = useState("");
+
   useEffect(() => {
     initializeSalesPage();
   }, []);
@@ -108,10 +122,15 @@ export default function SalesPage() {
       return null;
     }
 
-    if (["seller", "cc"].includes(role)) {
+    if (role === "seller") {
       const ids = [userId];
       setVisibleUserIds(ids);
       return ids;
+    }
+
+    if (role === "cc") {
+      setVisibleUserIds(null);
+      return null;
     }
 
     if (role === "manager") {
@@ -166,7 +185,7 @@ export default function SalesPage() {
     setCurrentUserRole(role);
     const ids = await loadVisibleUserIds(user.id, role);
 
-    if (["seller", "cc"].includes(role)) {
+    if (role === "seller") {
       setSalesOwners([
         {
           id: user.id,
@@ -176,6 +195,10 @@ export default function SalesPage() {
       ]);
       setSelectedSellerIds([user.id]);
       return;
+    }
+
+    if (role === "cc") {
+      setSelectedSellerIds([]);
     }
 
     let ownersQuery = supabase
@@ -234,23 +257,20 @@ export default function SalesPage() {
 
     let visibleSalesData = salesData;
 
-    if (currentUserRole !== "admin") {
-      const { data: hiddenUsersData, error: hiddenUsersError } = await supabase
-        .from("profiles")
-        .select("id, display_name, hidden_from_assignment");
-
-      if (hiddenUsersError) {
-        console.error("Błąd ładowania ukrytych użytkowników:", hiddenUsersError);
-      }
-
-      const hiddenUserIds = new Set(
-        (hiddenUsersData || [])
-          .filter((userProfile) => isHiddenAssignmentUser(userProfile))
-          .map((userProfile) => userProfile.id)
+    if (currentUserRole === "seller" && currentUserId) {
+      visibleSalesData = salesData.filter(
+        (sale) => sale.seller_id === currentUserId
       );
+    }
+
+    if (currentUserRole === "manager") {
+      const allowedIds = visibleUserIds ||
+        (currentUserId ? [currentUserId] : []);
 
       visibleSalesData = salesData.filter(
-        (sale) => !sale.seller_id || !hiddenUserIds.has(sale.seller_id)
+        (sale) =>
+          !!sale.seller_id &&
+          allowedIds.includes(sale.seller_id)
       );
     }
 
@@ -291,11 +311,6 @@ export default function SalesPage() {
 
       sellersData = (loadedSellers as unknown as SellerProfile[]) || [];
 
-      if (currentUserRole !== "admin") {
-        sellersData = sellersData.filter(
-          (seller) => !isHiddenAssignmentUser(seller)
-        );
-      }
     }
 
     const salesWithClients = visibleSalesData.map((sale) => {
@@ -311,6 +326,54 @@ export default function SalesPage() {
 
     setSales(salesWithClients);
     setLoading(false);
+  }
+
+  async function openOfferPicker() {
+    setIsOfferPickerOpen(true);
+
+    if (offers.length > 0) return;
+
+    setOffersLoading(true);
+
+    let offersQuery = supabase
+      .from("client_offers")
+      .select(
+        "id, offer_public_id, client_name, client_email, final_gross, created_at, created_by"
+      )
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (currentUserRole === "seller" && currentUserId) {
+      offersQuery = offersQuery.eq("created_by", currentUserId);
+    }
+
+    if (currentUserRole === "manager") {
+      const allowedIds = visibleUserIds ||
+        (currentUserId ? [currentUserId] : []);
+
+      if (allowedIds.length > 0) {
+        offersQuery = offersQuery.in("created_by", allowedIds);
+      }
+    }
+
+    if (currentUserRole === "cc") {
+      // CC ma widzieć wszystkie oferty
+    }
+
+    const { data, error } = await offersQuery;
+
+    if (error) {
+      console.error("Błąd ładowania ofert:", error);
+      setOffersLoading(false);
+      return;
+    }
+
+    console.log("ROLE:", currentUserRole);
+    console.log("CURRENT USER:", currentUserId);
+    console.log("VISIBLE IDS:", visibleUserIds);
+    console.log("OFFERS COUNT:", data?.length);
+    setOffers((data as OfferPickerItem[]) || []);
+    setOffersLoading(false);
   }
 
   function toggleSellerFilter(sellerId: string) {
@@ -340,6 +403,26 @@ export default function SalesPage() {
     return `${selectedSellerIds.length} sprzedawców`;
   }
 
+  const filteredOffers = useMemo(() => {
+    const search = offerSearch.toLowerCase().trim();
+
+    if (!search) return offers;
+
+    return offers.filter((offer) => {
+      return (
+        (offer.offer_public_id || "")
+          .toLowerCase()
+          .includes(search) ||
+        (offer.client_name || "")
+          .toLowerCase()
+          .includes(search) ||
+        (offer.client_email || "")
+          .toLowerCase()
+          .includes(search)
+      );
+    });
+  }, [offers, offerSearch]);
+
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
@@ -347,6 +430,15 @@ export default function SalesPage() {
           <div>
             <p className="text-sm text-slate-500 mb-1">Moduł sprzedażowy</p>
             <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Sprzedaże</h1>
+          </div>
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+            <button
+              type="button"
+              onClick={openOfferPicker}
+              className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"
+            >
+              Dodaj sprzedaż
+            </button>
           </div>
         </header>
 
@@ -466,11 +558,23 @@ export default function SalesPage() {
           {loading ? (
             <div className="p-4 text-slate-500 sm:p-6">Ładowanie sprzedaży...</div>
           ) : sales.length === 0 ? (
-            <div className="p-4 text-slate-500 sm:p-6">
-              Brak sprzedaży. Wejdź w kartę wydarzenia i kliknij „Dodaj sprzedaż”.
+            <div className="space-y-4 p-4 text-slate-500 sm:p-6">
+              <p>
+                Brak sprzedaży. Sprzedaże są teraz tworzone wyłącznie na podstawie istniejących ofert.
+              </p>
+              <Link
+                href="/offers?createSale=1"
+                className="inline-flex rounded-2xl bg-emerald-500 px-5 py-3 font-bold text-white transition hover:bg-emerald-400"
+              >
+                Przejdź do ofert
+              </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              <div className="border-b border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-900 sm:px-6">
+                <span className="font-semibold">Nowy workflow sprzedaży:</span> sprzedaże powinny być tworzone wyłącznie z istniejących ofert kalkulatora.
+              </div>
+              <div className="overflow-x-auto">
               <table className="min-w-[980px] w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
                   <tr>
@@ -550,10 +654,107 @@ export default function SalesPage() {
                   })}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </section>
       </div>
+      {isOfferPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-sm text-slate-500">Nowa sprzedaż</p>
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Wybierz ofertę
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsOfferPickerOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="border-b border-slate-100 px-6 py-4">
+              <input
+                type="text"
+                value={offerSearch}
+                onChange={(e) => setOfferSearch(e.target.value)}
+                placeholder="Szukaj po OfferID, nazwisku, emailu..."
+                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-emerald-400"
+              />
+            </div>
+
+            <div className="overflow-auto px-6 py-4">
+              {offersLoading ? (
+                <div className="py-12 text-center text-slate-500">
+                  Ładowanie ofert...
+                </div>
+              ) : filteredOffers.length === 0 ? (
+                <div className="py-12 text-center text-slate-500">
+                  Nie znaleziono ofert.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredOffers.map((offer) => (
+                    <div
+                      key={offer.id}
+                      className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-5 transition hover:border-emerald-300 hover:bg-emerald-50/30 lg:flex-row lg:items-center"
+                    >
+                      <div className="min-w-[140px]">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          OfferID
+                        </p>
+                        <p className="mt-1 text-lg font-bold text-slate-900">
+                          {offer.offer_public_id || "—"}
+                        </p>
+                      </div>
+
+                      <div className="flex-1">
+                        <p className="text-lg font-semibold text-slate-900">
+                          {offer.client_name || "Brak klienta"}
+                        </p>
+
+                        <p className="text-sm text-slate-500">
+                          {offer.client_email || "Brak emaila"}
+                        </p>
+                      </div>
+
+                      <div className="min-w-[160px]">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Wartość oferty
+                        </p>
+                        <p className="mt-1 text-lg font-bold text-emerald-700">
+                          {offer.final_gross
+                            ? `${offer.final_gross.toLocaleString("pl-PL")} zł`
+                            : "—"}
+                        </p>
+                      </div>
+
+                      <div className="min-w-[140px] text-sm text-slate-500">
+                        {new Date(offer.created_at).toLocaleDateString("pl-PL")}
+                      </div>
+
+                      <div>
+                        <Link
+                          href={`/offers/${offer.id}?createSale=1`}
+                          className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"
+                        >
+                          Utwórz sprzedaż
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
