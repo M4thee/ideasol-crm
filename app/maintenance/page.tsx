@@ -26,7 +26,7 @@ export default function MaintenancePage() {
             </h1>
 
             <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-              System jest chwilowo niedostępny, ponieważ wdrażamy poprawki i porządkujemy moduły sprzedaży, ofert oraz uprawnień.
+              Trwają zaplanowane prace konserwacyjne oraz aktualizacja systemu CRM.
             </p>
 
             <div className="mt-10 rounded-3xl border border-slate-200 bg-slate-50 px-8 py-6">
