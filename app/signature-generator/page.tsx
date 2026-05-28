@@ -98,7 +98,7 @@ export default function SignatureGeneratorPage() {
                 className="w-full rounded-xl border border-slate-300 px-3 py-3 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
               >
                 <option value="Doradca Techniczno-handlowy">
-                  Techniczno-handlowy
+                 Doradca Techniczno-handlowy
                 </option>
 
                 <option value="Dyrektor ds. Handlowych">

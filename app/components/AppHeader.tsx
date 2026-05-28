@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+// ...no change above
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -616,7 +617,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
 const canManageUsers = profile?.role === "admin";
 
-return (
+  return (
     <header className="mb-8 text-slate-900 lg:mb-10">
       <div className="flex items-start justify-between gap-4 lg:items-center">
         <div className="min-w-0">
@@ -1105,7 +1106,7 @@ return (
                   ? pathname === "/"
                   : pathname.startsWith(item.href);
 
-  return (
+              return (
                 <Link
                   key={item.href}
                   href={item.href}

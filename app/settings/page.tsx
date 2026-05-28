@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
 
@@ -339,6 +340,25 @@ export default function SettingsPage() {
             >
               {savingMargin ? "Zapisywanie..." : "Zapisz domyślną marżę"}
             </button>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-black text-slate-950">
+            Generator stopek mailowych
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Wygeneruj gotową stopkę mailową dla Outlook Online.
+          </p>
+
+          <div className="mt-5">
+            <Link
+              href="/signature-generator"
+              className="inline-flex rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-500"
+            >
+              Otwórz generator stopek
+            </Link>
           </div>
         </section>
       </div>
