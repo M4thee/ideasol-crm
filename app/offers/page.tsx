@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 
@@ -18,7 +18,7 @@ type Offer = {
   created_by: string | null;
 };
 
-export default function OffersPage() {
+function OffersPageContent() {
   const searchParams = useSearchParams();
 
   const clientId = searchParams.get("clientId");
@@ -43,11 +43,8 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
 
     const user = session?.user;
 
-    console.log("OFFERS SESSION:", session);
-    console.log("OFFERS USER:", user);
 
     if (!user) {
-      console.error("BRAK USERA AUTH W /offers");
       setOffers([]);
       setLoading(false);
       return;
@@ -84,15 +81,14 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
         .select("id, display_name")
         .eq("manager_id", user.id);
 
-      console.log("MANAGER TEAM MEMBERS:", teamMembers);
-      console.log("MANAGER TEAM ERROR:", teamError);
+
 
       const ids = [
         user.id,
         ...((teamMembers || []).map((item: { id: string }) => item.id)),
       ];
 
-      console.log("MANAGER VISIBLE IDS:", ids);
+
 
       setVisibleUserIds(ids);
       await loadOffers(ids, role);
@@ -145,7 +141,6 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
         );
       }
 
-      console.log("OFFERS AFTER FILTER:", visibleOffers);
 
       setOffers(visibleOffers);
     } finally {
@@ -198,10 +193,8 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
             className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 sm:max-w-md"
           />
 
-          <div className="text-sm text-slate-500 space-y-1 text-right">
-            <div>Wyniki: {filteredOffers.length}</div>
-            <div>Rola: {currentUserRole}</div>
-            <div>UserID: {currentUserId || "BRAK SESSION"}</div>
+          <div className="text-sm text-slate-500">
+            Wyniki: {filteredOffers.length}
           </div>
         </div>
 
@@ -243,9 +236,6 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
 
                     <td className="px-4 py-4 text-slate-500">
                       <div>{offer.client_email || "—"}</div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        created_by: {offer.created_by}
-                      </div>
                     </td>
 
                     <td className="px-4 py-4 font-semibold text-slate-900">
@@ -285,5 +275,19 @@ const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
         )}
       </div>
     </div>
+  );
+}
+
+export default function OffersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="py-10 text-center text-slate-500">
+          Ładowanie ofert...
+        </div>
+      }
+    >
+      <OffersPageContent />
+    </Suspense>
   );
 }
