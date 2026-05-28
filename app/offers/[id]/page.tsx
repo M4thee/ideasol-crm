@@ -62,6 +62,8 @@ type ClientOffer = {
 
 type ClientData = {
   id: string;
+  public_id?: number | null;
+  assigned_to?: string | null;
   full_name: string | null;
   company_name: string | null;
   email: string | null;
@@ -367,6 +369,50 @@ function buildFullAddress(
     .join(", ");
 }
 
+async function findDuplicateClient(
+  pesel: string,
+  email: string,
+  phone: string,
+  currentClientId?: string
+) {
+  const conditions: string[] = [];
+
+  if (pesel.trim()) {
+    conditions.push(`pesel.eq.${pesel.trim()}`);
+  }
+
+  if (email.trim()) {
+    conditions.push(`email.ilike.${email.trim()}`);
+  }
+
+  if (phone.trim()) {
+    conditions.push(`phone.eq.${phone.trim()}`);
+  }
+
+  if (conditions.length === 0) {
+    return null;
+  }
+
+  let query = supabase
+    .from("clients")
+    .select("id, public_id, full_name, company_name, assigned_to")
+    .or(conditions.join(","))
+    .limit(1);
+
+  if (currentClientId) {
+    query = query.neq("id", currentClientId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    console.error("DUPLICATE CLIENT CHECK ERROR", error);
+    return null;
+  }
+
+  return data;
+}
+
 function emptySaleForm(): SaleFromOfferForm {
   return {
     customerType: "b2c",
@@ -389,6 +435,24 @@ function emptySaleForm(): SaleFromOfferForm {
     paymentMethod: "gotówka",
     depositAmount: "",
   };
+}
+
+function isValidPesel(pesel: string) {
+  const clean = pesel.replace(/\D/g, "");
+
+  if (!/^\d{11}$/.test(clean)) {
+    return false;
+  }
+
+  const weights = [1, 3, 7, 9, 1, 3, 7, 9, 1, 3];
+
+  const sum = weights.reduce((accumulator, weight, index) => {
+    return accumulator + Number(clean[index]) * weight;
+  }, 0);
+
+  const checksum = (10 - (sum % 10)) % 10;
+
+  return checksum === Number(clean[10]);
 }
 
 function normalizeRole(value: unknown): UserRole {
@@ -424,6 +488,24 @@ export default function OfferDetailsPage() {
   const [creatingSale, setCreatingSale] = useState(false);
   const [createSaleStatus, setCreateSaleStatus] = useState("");
   const [saleForm, setSaleForm] = useState<SaleFromOfferForm>(() => emptySaleForm());
+  const [duplicateClientModal, setDuplicateClientModal] = useState<{
+    open: boolean;
+    client: {
+      id: string;
+      public_id?: number | null;
+      full_name?: string | null;
+      company_name?: string | null;
+      assigned_to?: string | null;
+    } | null;
+  }>({
+    open: false,
+    client: null,
+  });
+
+  const [allowDuplicateClientCreation, setAllowDuplicateClientCreation] = useState(false);
+  const [selectedExistingClientId, setSelectedExistingClientId] = useState<string | null>(null);
+  const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
+  const [invalidFields, setInvalidFields] = useState<string[]>([]);
 
   const canSeeFullFinancials = useMemo(
     () => ["owner", "admin"].includes(currentUserRole || ""),
@@ -599,6 +681,8 @@ export default function OfferDetailsPage() {
       ...current,
       [key]: value,
     }));
+
+    setInvalidFields((current) => current.filter((field) => field !== key));
   }
 
   function openSaleFormFromOffer() {
@@ -655,6 +739,8 @@ export default function OfferDetailsPage() {
   }
 
   function validateSaleForm() {
+    const errors: string[] = [];
+
     const contractAddressComplete =
       saleForm.contractStreet.trim() &&
       saleForm.contractBuildingNumber.trim() &&
@@ -662,25 +748,92 @@ export default function OfferDetailsPage() {
       saleForm.contractCity.trim();
 
     if (saleForm.customerType === "b2c" && !saleForm.fullName.trim()) {
+      errors.push("fullName");
+      setInvalidFields(errors);
       return "Uzupełnij imię i nazwisko klienta.";
     }
 
     if (saleForm.customerType === "b2b") {
-      if (!saleForm.companyName.trim()) return "Uzupełnij nazwę firmy.";
-      if (!saleForm.nip.trim()) return "Uzupełnij NIP.";
-      if (!saleForm.regon.trim()) return "Uzupełnij REGON.";
-      if (!saleForm.representativeName.trim()) return "Uzupełnij osobę reprezentującą.";
+      if (!saleForm.companyName.trim()) {
+        errors.push("companyName");
+        setInvalidFields(errors);
+        return "Uzupełnij nazwę firmy.";
+      }
+
+      if (!saleForm.nip.trim()) {
+        errors.push("nip");
+        setInvalidFields(errors);
+        return "Uzupełnij NIP.";
+      }
+
+      if (!saleForm.regon.trim()) {
+        errors.push("regon");
+        setInvalidFields(errors);
+        return "Uzupełnij REGON.";
+      }
+
+      if (!saleForm.representativeName.trim()) {
+        errors.push("representativeName");
+        setInvalidFields(errors);
+        return "Uzupełnij osobę reprezentującą.";
+      }
     }
 
-    if (!contractAddressComplete) return "Uzupełnij pełny adres na umowie.";
-    if (!saleForm.pesel.trim()) return "Uzupełnij PESEL.";
-    if (!saleForm.phone.trim()) return "Uzupełnij numer telefonu.";
-    if (!saleForm.email.trim()) return "Uzupełnij adres email.";
-    if (!saleForm.paymentMethod) return "Wybierz formę płatności.";
-    if (!saleForm.depositAmount.trim()) return "Uzupełnij wysokość zaliczki.";
+    if (!contractAddressComplete) {
+      if (!saleForm.contractStreet.trim()) errors.push("contractStreet");
+      if (!saleForm.contractBuildingNumber.trim()) errors.push("contractBuildingNumber");
+      if (!saleForm.contractPostalCode.trim()) errors.push("contractPostalCode");
+      if (!saleForm.contractCity.trim()) errors.push("contractCity");
+
+      setInvalidFields(errors);
+      return "Uzupełnij pełny adres na umowie.";
+    }
+
+    if (!saleForm.pesel.trim()) {
+      errors.push("pesel");
+      setInvalidFields(errors);
+      return "Uzupełnij PESEL.";
+    }
+
+    if (!isValidPesel(saleForm.pesel)) {
+      errors.push("pesel");
+      setInvalidFields(errors);
+      return "Podany numer PESEL jest nieprawidłowy.";
+    }
+
+    if (!saleForm.phone.trim()) {
+      errors.push("phone");
+      setInvalidFields(errors);
+      return "Uzupełnij numer telefonu.";
+    }
+
+    if (!saleForm.email.trim()) {
+      errors.push("email");
+      setInvalidFields(errors);
+      return "Uzupełnij adres email.";
+    }
+
+    if (!saleForm.paymentMethod) {
+      errors.push("paymentMethod");
+      setInvalidFields(errors);
+      return "Wybierz formę płatności.";
+    }
+
+    if (!saleForm.depositAmount.trim()) {
+      errors.push("depositAmount");
+      setInvalidFields(errors);
+      return "Uzupełnij wysokość zaliczki.";
+    }
 
     const parsedDeposit = Number(saleForm.depositAmount.replace(",", "."));
-    if (!Number.isFinite(parsedDeposit)) return "Wysokość zaliczki musi być liczbą.";
+
+    if (!Number.isFinite(parsedDeposit)) {
+      errors.push("depositAmount");
+      setInvalidFields(errors);
+      return "Wysokość zaliczki musi być liczbą.";
+    }
+
+    setInvalidFields([]);
 
     return "";
   }
@@ -707,6 +860,27 @@ export default function OfferDetailsPage() {
       return;
     }
 
+    const duplicateClient =
+      allowDuplicateClientCreation || skipDuplicateCheck
+        ? null
+        : await findDuplicateClient(
+            saleForm.pesel,
+            saleForm.email,
+            saleForm.phone,
+            offer.client_id
+          );
+
+    if (duplicateClient) {
+      setDuplicateClientModal({
+        open: true,
+        client: duplicateClient,
+      });
+
+      setCreateSaleStatus("");
+
+      return;
+    }
+
     const contractAddress = buildFullAddress(
       saleForm.contractStreet,
       saleForm.contractBuildingNumber,
@@ -728,7 +902,7 @@ export default function OfferDetailsPage() {
     setCreateSaleStatus("");
 
     const salePayload = {
-      client_id: offer.client_id,
+      client_id: selectedExistingClientId || offer.client_id,
       seller_id: offer.created_by,
       source_offer_id: offer.id,
       sale_date: new Date().toISOString(),
@@ -789,6 +963,9 @@ console.log("SALE ERROR:", saleError);
     .eq("id", sourceEventId);
 }
     setCreatingSale(false);
+    setAllowDuplicateClientCreation(false);
+    setSkipDuplicateCheck(false);
+    setSelectedExistingClientId(null);
     setShowSaleForm(false);
 
     router.push(`/sales/${createdSale.id}`);
@@ -827,6 +1004,12 @@ console.log("SALE ERROR:", saleError);
   const technicalRows = getTechnicalRows(result);
   const savedBreakdownRows = getSavedBreakdownRows(result);
   const formData = (offer.offer_data?.form || {}) as Record<string, any>;
+  const inputClass = (fieldName: string) =>
+    `mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:ring-4 ${
+      invalidFields.includes(fieldName)
+        ? "border-red-400 focus:border-red-400 focus:ring-red-100"
+        : "border-slate-300 focus:border-emerald-400 focus:ring-emerald-100"
+    }`;
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 sm:p-6">
@@ -915,7 +1098,7 @@ console.log("SALE ERROR:", saleError);
                   <input
                     value={saleForm.fullName}
                     onChange={(event) => updateSaleForm("fullName", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass("fullName")}
                   />
                 </label>
               ) : (
@@ -925,7 +1108,7 @@ console.log("SALE ERROR:", saleError);
                     <input
                       value={saleForm.companyName}
                       onChange={(event) => updateSaleForm("companyName", event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                      className={inputClass("companyName")}
                     />
                   </label>
 
@@ -934,7 +1117,7 @@ console.log("SALE ERROR:", saleError);
                     <input
                       value={saleForm.nip}
                       onChange={(event) => updateSaleForm("nip", event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                      className={inputClass("nip")}
                     />
                   </label>
 
@@ -943,7 +1126,7 @@ console.log("SALE ERROR:", saleError);
                     <input
                       value={saleForm.regon}
                       onChange={(event) => updateSaleForm("regon", event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                      className={inputClass("regon")}
                     />
                   </label>
 
@@ -952,7 +1135,7 @@ console.log("SALE ERROR:", saleError);
                     <input
                       value={saleForm.representativeName}
                       onChange={(event) => updateSaleForm("representativeName", event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                      className={inputClass("representativeName")}
                     />
                   </label>
                 </>
@@ -963,7 +1146,7 @@ console.log("SALE ERROR:", saleError);
                 <input
                   value={saleForm.pesel}
                   onChange={(event) => updateSaleForm("pesel", event.target.value)}
-                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  className={inputClass("pesel")}
                 />
               </label>
 
@@ -972,7 +1155,7 @@ console.log("SALE ERROR:", saleError);
                 <input
                   value={saleForm.phone}
                   onChange={(event) => updateSaleForm("phone", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  className={inputClass("phone")}
                 />
               </label>
 
@@ -981,7 +1164,7 @@ console.log("SALE ERROR:", saleError);
                 <input
                   value={saleForm.email}
                   onChange={(event) => updateSaleForm("email", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  className={inputClass("email")}
                 />
               </label>
 
@@ -991,7 +1174,7 @@ console.log("SALE ERROR:", saleError);
                   <input
                     value={saleForm.contractStreet}
                     onChange={(event) => updateSaleForm("contractStreet", event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass("contractStreet")}
                   />
                 </label>
 
@@ -1000,7 +1183,7 @@ console.log("SALE ERROR:", saleError);
                   <input
                     value={saleForm.contractBuildingNumber}
                     onChange={(event) => updateSaleForm("contractBuildingNumber", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass("contractBuildingNumber")}
                   />
                 </label>
 
@@ -1009,7 +1192,7 @@ console.log("SALE ERROR:", saleError);
                   <input
                     value={saleForm.contractPostalCode}
                     onChange={(event) => updateSaleForm("contractPostalCode", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass("contractPostalCode")}
                   />
                 </label>
 
@@ -1018,7 +1201,7 @@ console.log("SALE ERROR:", saleError);
                   <input
                     value={saleForm.contractCity}
                     onChange={(event) => updateSaleForm("contractCity", event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    className={inputClass("contractCity")}
                   />
                 </label>
               </div>
@@ -1068,7 +1251,7 @@ console.log("SALE ERROR:", saleError);
                 <select
                   value={saleForm.paymentMethod}
                   onChange={(event) => updateSaleForm("paymentMethod", event.target.value)}
-                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  className={inputClass("paymentMethod")}
                 >
                   <option value="gotówka">Gotówka</option>
                   <option value="kredyt">Kredyt</option>
@@ -1082,11 +1265,85 @@ console.log("SALE ERROR:", saleError);
                   value={saleForm.depositAmount}
                   onChange={(event) => updateSaleForm("depositAmount", event.target.value)}
                   placeholder="np. 5000"
-                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  className={inputClass("depositAmount")}
                 />
               </label>
             </div>
 
+            {duplicateClientModal.open && duplicateClientModal.client && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-5">
+                <div>
+                  <p className="text-lg font-black text-red-900">
+                    Możliwy duplikat klienta
+                  </p>
+
+                  <p className="mt-2 text-sm font-medium text-red-800">
+                    W systemie istnieje już klient o podobnych danych.
+                  </p>
+
+                  <div className="mt-4 rounded-xl border border-red-200 bg-white p-4">
+                    <p className="text-sm font-bold text-slate-900">
+                      Lead-ID #{duplicateClientModal.client.public_id || "BRAK"}
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-700">
+                      {duplicateClientModal.client.full_name ||
+                        duplicateClientModal.client.company_name ||
+                        "Nieznany klient"}
+                    </p>
+                  </div>
+
+                  <p className="mt-4 text-sm text-red-800">
+                    Chcesz kontynuować na istniejącym kliencie czy utworzyć nowego klienta?
+                  </p>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!duplicateClientModal.client) {
+                        return;
+                      }
+
+                      setSelectedExistingClientId(duplicateClientModal.client.id);
+                      setSkipDuplicateCheck(true);
+
+                      setDuplicateClientModal({
+                        open: false,
+                        client: null,
+                      });
+
+                      setTimeout(() => {
+                        createSaleFromOffer();
+                      }, 50);
+                    }}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                  >
+                    Kontynuuj na istniejącym
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDuplicateClientModal({
+                        open: false,
+                        client: null,
+                      });
+
+                      setAllowDuplicateClientCreation(true);
+
+                      setTimeout(() => {
+                        createSaleFromOffer();
+                      }, 0);
+                    }}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Utwórz nowego klienta
+                  </button>
+                </div>
+              </div>
+            )}
             {createSaleStatus && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
                 {createSaleStatus}

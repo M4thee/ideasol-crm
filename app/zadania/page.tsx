@@ -27,7 +27,8 @@ export default function TasksPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "seller" | "cc">("seller");
+  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "manager" | "seller" | "cc">("seller");
+  const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [taskOwners, setTaskOwners] = useState<TaskOwner[]>([]);
   const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>([]);
   const [isOwnerFilterOpen, setIsOwnerFilterOpen] = useState(false);
@@ -62,9 +63,13 @@ export default function TasksPage() {
       .eq("id", user.id)
       .maybeSingle();
 
-    const role = (profileData?.role || "seller") as "admin" | "owner" | "seller" | "cc";
+    const role = (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc";
 
     setCurrentUserRole(role);
+
+    if (role === "admin" || role === "owner" || role === "cc") {
+      setVisibleUserIds(null);
+    }
 
     if (role === "seller") {
       setTaskOwners([
@@ -75,14 +80,47 @@ export default function TasksPage() {
         },
       ]);
 
+      setVisibleUserIds([user.id]);
       setSelectedOwnerIds([user.id]);
+      return;
+    }
+
+    if (role === "manager") {
+      const { data: teamMembers, error: teamError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", user.id);
+
+      if (teamError) {
+        console.error("Błąd ładowania zespołu managera do zadań", teamError);
+      }
+
+      const ids = [
+        user.id,
+        ...((teamMembers || []).map((item: { id: string }) => item.id)),
+      ];
+
+      setVisibleUserIds(ids);
+      setSelectedOwnerIds(ids);
+
+      const { data: managerOwnersData, error: managerOwnersError } = await supabase
+        .from("profiles")
+        .select("id, display_name, role")
+        .in("id", ids)
+        .order("display_name", { ascending: true });
+
+      if (managerOwnersError) {
+        console.error("Błąd ładowania użytkowników managera do filtra zadań", managerOwnersError);
+      }
+
+      setTaskOwners((managerOwnersData || []) as TaskOwner[]);
       return;
     }
 
     const { data: ownersData, error: ownersError } = await supabase
       .from("profiles")
       .select("id, display_name, role")
-      .in("role", ["seller", "admin", "owner", "cc"])
+      .in("role", ["seller", "manager", "admin", "owner", "cc"])
       .order("display_name", { ascending: true });
 
     if (ownersError) {
@@ -106,6 +144,16 @@ export default function TasksPage() {
 
     if (currentUserRole === "seller" && currentUserId) {
       query = query.eq("created_by", currentUserId);
+    } else if (currentUserRole === "manager") {
+      const allowedIds = selectedOwnerIds.length > 0
+        ? selectedOwnerIds
+        : visibleUserIds || [];
+
+      if (allowedIds.length > 0) {
+        query = query.in("created_by", allowedIds);
+      } else if (currentUserId) {
+        query = query.eq("created_by", currentUserId);
+      }
     } else if (selectedOwnerIds.length > 0) {
       query = query.in("created_by", selectedOwnerIds);
     }
@@ -175,7 +223,7 @@ export default function TasksPage() {
           .select("id, display_name")
           .in("id", ownerIds)
       : { data: [], error: null };
-
+    
     if (ownersError) {
       console.error("Błąd ładowania właścicieli zadań", ownersError);
     }
@@ -231,6 +279,10 @@ export default function TasksPage() {
   }
 
   function selectAllOwners() {
+    if (currentUserRole === "manager") {
+      setSelectedOwnerIds(visibleUserIds || []);
+      return;
+    }
     setSelectedOwnerIds([]);
   }
 
@@ -241,6 +293,7 @@ export default function TasksPage() {
 
   function getOwnerFilterLabel() {
     if (currentUserRole === "seller") return "Moje zadania";
+    if (currentUserRole === "manager" && selectedOwnerIds.length === (visibleUserIds || []).length) return "Mój zespół";
     if (selectedOwnerIds.length === 0) return "Wszyscy użytkownicy";
     if (selectedOwnerIds.length === 1) {
       const owner = taskOwners.find((item) => item.id === selectedOwnerIds[0]);
@@ -253,7 +306,7 @@ export default function TasksPage() {
     <main className="text-slate-900">
       <div className="space-y-6">
 
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+        <section className="relative overflow-visible min-h-[420px] bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
             <div>
               <h1 className="text-3xl font-bold">Zadania i przypomnienia</h1>
@@ -264,7 +317,7 @@ export default function TasksPage() {
             </div>
 
             <div className="flex items-center gap-3 ml-auto">
-              <div className="relative">
+              <div className="relative z-50">
                 <button
                   type="button"
                   onClick={() => setIsOwnerFilterOpen((value) => !value)}
@@ -274,7 +327,7 @@ export default function TasksPage() {
                 </button>
 
                 {isOwnerFilterOpen && currentUserRole !== "seller" && (
-                  <div className="absolute right-0 top-12 z-30 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <div className="absolute right-0 top-full mt-2 z-[99999] max-h-[420px] w-80 overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl">
                     <div className="mb-2 flex gap-2">
                       <button
                         type="button"

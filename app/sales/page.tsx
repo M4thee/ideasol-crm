@@ -93,6 +93,7 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
+  const [visibilityScopeReady, setVisibilityScopeReady] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "manager" | "seller" | "cc">("seller");
   const [salesOwners, setSalesOwners] = useState<SalesOwner[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
@@ -108,10 +109,10 @@ export default function SalesPage() {
   }, []);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !visibilityScopeReady) return;
 
     loadSales();
-  }, [currentUserId, currentUserRole, selectedSellerIds]);
+  }, [currentUserId, currentUserRole, selectedSellerIds, visibleUserIds, visibilityScopeReady]);
 
   async function loadVisibleUserIds(
     userId: string,
@@ -161,6 +162,7 @@ export default function SalesPage() {
   }
 
   async function initializeSalesPage() {
+    setVisibilityScopeReady(false);
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -168,6 +170,7 @@ export default function SalesPage() {
     if (!user) {
       setCurrentUserId(null);
       setSales([]);
+      setVisibilityScopeReady(true);
       setLoading(false);
       return;
     }
@@ -184,6 +187,7 @@ export default function SalesPage() {
 
     setCurrentUserRole(role);
     const ids = await loadVisibleUserIds(user.id, role);
+    setVisibilityScopeReady(true);
 
     if (role === "seller") {
       setSalesOwners([

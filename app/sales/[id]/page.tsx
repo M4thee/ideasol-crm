@@ -567,12 +567,57 @@ async function deleteSale() {
       : null;
 
   const canSeeFullFinancials =
-    currentUserRole === "owner" ||
-    currentUserRole === "admin" ||
-    currentUserRole === "manager";
+  currentUserRole === "owner" || currentUserRole === "admin";
 
-  const canSeeCompanyMarginOnly =
-    currentUserRole === "seller" || currentUserRole === "cc";
+const canSeeManagerFee =
+  currentUserRole === "owner" ||
+  currentUserRole === "admin" ||
+  currentUserRole === "manager";
+
+const canSeeSellerCommission =
+  currentUserRole === "owner" ||
+  currentUserRole === "admin" ||
+  currentUserRole === "manager" ||
+  currentUserRole === "seller";
+
+function isSellerCommissionItem(label?: string | null) {
+  const normalizedLabel = String(label || "").toLowerCase();
+
+  return (
+    normalizedLabel.includes("prowizja handlowca") ||
+    normalizedLabel.includes("handlowca") ||
+    normalizedLabel.includes("seller commission")
+  );
+}
+
+function isManagerFeeItem(label?: string | null) {
+  const normalizedLabel = String(label || "").toLowerCase();
+
+  return (
+    normalizedLabel.includes("manager fee") ||
+    normalizedLabel.includes("manager override") ||
+    normalizedLabel.includes("opłata manager") ||
+    normalizedLabel.includes("oplata manager") ||
+    normalizedLabel.includes("prowizja manager") ||
+    normalizedLabel.includes("prowizja menedżer") ||
+    normalizedLabel.includes("prowizja menedzer")
+  );
+}
+
+function canShowFinancialBreakdownItem(label?: string | null) {
+  if (canSeeFullFinancials) return true;
+
+  if (isSellerCommissionItem(label)) {
+    return canSeeSellerCommission;
+  }
+
+  if (isManagerFeeItem(label)) {
+    return canSeeManagerFee;
+  }
+
+  return false;
+}
+
 
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
@@ -792,17 +837,19 @@ async function deleteSale() {
                     </p>
                   </div>
 
-                  <div>
-                    <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                      Marża doradcy
-                    </p>
+                  {currentUserRole !== "cc" && (
+                    <div>
+                      <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                        Marża doradcy
+                      </p>
 
-                    <p className="text-slate-800">
-                      {sale.margin_value
-                        ? `${sale.margin_value.toLocaleString("pl-PL")} zł`
-                        : "Brak danych"}
-                    </p>
-                  </div>
+                      <p className="text-slate-800">
+                        {sale.margin_value
+                          ? `${sale.margin_value.toLocaleString("pl-PL")} zł`
+                          : "Brak danych"}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -819,18 +866,20 @@ async function deleteSale() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                      Marża doradcy
-                    </label>
+                  {currentUserRole !== "cc" && (
+                    <div>
+                      <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
+                        Marża doradcy
+                      </label>
 
-                    <input
-                      value={marginValueInput}
-                      onChange={(e) => setMarginValueInput(e.target.value)}
-                      placeholder="np. 3500"
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
-                    />
-                  </div>
+                      <input
+                        value={marginValueInput}
+                        onChange={(e) => setMarginValueInput(e.target.value)}
+                        placeholder="np. 3500"
+                        className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
+                      />
+                    </div>
+                  )}
 
                   <div className="md:col-span-2">
                     <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
@@ -1010,24 +1059,34 @@ async function deleteSale() {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                      <p className="text-xs uppercase font-semibold text-emerald-700 mb-1">
-                        {canSeeFullFinancials ? "Marża firmy" : "Marża doradcy"}
+                    <div
+                      className={`rounded-2xl border p-4 ${
+                        currentUserRole === "cc"
+                          ? "border-red-200 bg-red-50"
+                          : "border-emerald-200 bg-emerald-50"
+                      }`}
+                    >
+                      <p
+                        className={`text-xs uppercase font-semibold mb-1 ${
+                          currentUserRole === "cc"
+                            ? "text-red-700"
+                            : "text-emerald-700"
+                        }`}
+                      >
+                        Prowizja handlowca
                       </p>
 
-                      <p className="text-xl font-black text-emerald-950">
-                        {formatMoney(
-                          canSeeFullFinancials
-                            ? companyMargin
-                            : sale.margin_value
-                        )}
+                      <p
+                        className={`text-xl font-black ${
+                          currentUserRole === "cc"
+                            ? "text-red-950"
+                            : "text-emerald-950"
+                        }`}
+                      >
+                        {currentUserRole === "cc"
+                          ? "Odmowa dostępu"
+                          : formatMoney(sale.margin_value)}
                       </p>
-
-                      {currentUserRole === "manager" && (
-                        <p className="mt-2 text-xs text-slate-500">
-                          Manager widzi pełną rozpiskę finansową sprzedaży swojego zespołu.
-                        </p>
-                      )}
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1045,41 +1104,45 @@ async function deleteSale() {
                     </div>
                   </div>
 
-                  {canSeeFullFinancials ? (
+                  {currentUserRole !== "cc" ? (
                     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                       <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3">
                         <p className="text-sm font-black text-slate-900">
-                          Rozpiska kosztów i zysków
+                          Więcej danych finansowych
                         </p>
 
                         <p className="text-sm font-black text-emerald-700">
-                          {formatMoney(companyMargin)}
+                          {canSeeFullFinancials ? formatMoney(companyMargin) : ""}
                         </p>
                       </div>
 
-                      {financialBreakdown.length === 0 ? (
+                      {financialBreakdown
+                        .filter((item: any) => canShowFinancialBreakdownItem(item.label))
+                        .length === 0 ? (
                         <div className="px-4 py-4 text-sm text-amber-700 bg-amber-50">
                           Brak zapisanej rozpiski kosztów w ofercie.
                         </div>
                       ) : (
-                        financialBreakdown.map((item: any, index: number) => (
-                          <div
-                            key={`${item.label}-${index}`}
-                            className={`flex items-center justify-between gap-4 px-4 py-3 ${
-                              index !== financialBreakdown.length - 1
-                                ? "border-b border-slate-100"
-                                : ""
-                            }`}
-                          >
-                            <p className="text-sm text-slate-700">
-                              {item.label}
-                            </p>
+                        financialBreakdown
+                          .filter((item: any) => canShowFinancialBreakdownItem(item.label))
+                          .map((item: any, index: number) => (
+                            <div
+                              key={`${item.label}-${index}`}
+                              className={`flex items-center justify-between gap-4 px-4 py-3 ${
+                                index !== financialBreakdown.filter((item: any) => canShowFinancialBreakdownItem(item.label)).length - 1
+                                  ? "border-b border-slate-100"
+                                  : ""
+                              }`}
+                            >
+                              <p className="text-sm text-slate-700">
+                                {item.label}
+                              </p>
 
-                            <p className="text-sm font-semibold text-slate-950">
-                              {formatMoney(item.value)}
-                            </p>
-                          </div>
-                        ))
+                              <p className="text-sm font-semibold text-slate-950">
+                                {formatMoney(item.value)}
+                              </p>
+                            </div>
+                          ))
                       )}
                     </div>
                   ) : null}

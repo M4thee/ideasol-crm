@@ -79,6 +79,12 @@ type ClientOffer = {
   created_at: string;
 };
 
+type ClientTag = {
+  id: string;
+  name: string;
+  color: string | null;
+};
+
 type ClientActivity = {
   id: string;
   client_id: string;
@@ -183,6 +189,7 @@ export default function ClientPage() {
   const [offers, setOffers] = useState<ClientOffer[]>([]);
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [activities, setActivities] = useState<ClientActivity[]>([]);
+  const [tags, setTags] = useState<ClientTag[]>([]);
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   // removed phoneStatus, contactChannel, activityDescription, followUpAt
@@ -299,6 +306,28 @@ export default function ClientPage() {
     }
 
     setClient(normalizedClient as Client);
+
+    const { data: tagsData, error: tagsError } = await supabase
+      .from("client_tag_links")
+      .select(`
+        tag_id,
+        client_tags (
+          id,
+          name,
+          color
+        )
+      `)
+      .eq("client_id", clientId);
+
+    if (tagsError) {
+      console.error("Błąd ładowania tagów klienta:", tagsError);
+    } else {
+      setTags(
+        (tagsData || [])
+          .map((row: any) => row.client_tags)
+          .filter(Boolean)
+      );
+    }
 
     const { data: eventsData, error: eventsError } = await supabase
       .from("calendar_events")
@@ -907,6 +936,15 @@ setActivities((activitiesData as ClientActivity[]) || []);
                 <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-sm font-semibold">
                   {client.lead_source || "Źródło nieznane"}
                 </span>
+
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-sm font-semibold"
+                  >
+                    {tag.name}
+                  </span>
+                ))}
               </div>
             </div>
 
