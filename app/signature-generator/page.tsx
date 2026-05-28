@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 export default function SignatureGeneratorPage() {
   const [name, setName] = useState("Mateusz Rapczewski");
-  const [position, setPosition] = useState("Doradca Techniczny");
+  const [position, setPosition] = useState("Techniczno-handlowy");
   const [phone, setPhone] = useState("+48 000 000 000");
   const [email, setEmail] = useState("kontakt@ideasol.pl");
   const [logoUrl, setLogoUrl] = useState(
@@ -31,8 +31,9 @@ export default function SignatureGeneratorPage() {
       </div>
 
       <div style="font-size:14px; line-height:22px; color:#374151;">
-        <strong style="color:#111827;">Tel.</strong> ${phone}<br>
-        <strong style="color:#111827;">Mail.</strong> ${email}
+        <strong style="color:#111827;">Tel: </strong> ${phone}<br>
+        <strong style="color:#111827;">Mail: </strong> ${email}<br>
+        <strong style="color:#111827;">Adres: </strong> IdeaSol, ul. Złota 23/316, 25-015 Kielce
       </div>
     </td>
   </tr>
@@ -96,12 +97,12 @@ export default function SignatureGeneratorPage() {
                 onChange={(e) => setPosition(e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-3 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
               >
-                <option value="Doradca Techniczny">
-                  Doradca Techniczny
+                <option value="Doradca Techniczno-handlowy">
+                  Techniczno-handlowy
                 </option>
 
-                <option value="Konsultant">
-                  Konsultant
+                <option value="Dyrektor ds. Handlowych">
+                  Dyrektor ds. Handlowych
                 </option>
               </select>
             </label>
@@ -140,9 +141,35 @@ export default function SignatureGeneratorPage() {
               </button>
             </div>
 
-            <div className="mt-5 rounded-xl bg-cyan-50 p-4 text-sm text-cyan-900">
-              Do Outlooka używaj przycisku{" "}
-              <b>Kopiuj gotową stopkę</b>, a nie samego HTML.
+            <div className="mt-5 rounded-2xl bg-cyan-50 p-5 text-sm text-cyan-900">
+              <p className="mb-3 font-bold text-cyan-950">
+                Instrukcja dodawania stopki w Outlook Online
+              </p>
+
+              <ol className="list-decimal space-y-2 pl-5">
+                <li>
+                  Wygeneruj stopkę powyżej i skopiuj do schowka przyciskiem
+                  <b> Kopiuj gotową stopkę</b>.
+                </li>
+
+                <li>Zaloguj się do Outlook Online.</li>
+
+                <li>Wybierz kolejno Plik &gt; Ustawienia.</li>
+
+                <li>
+                  W panelu ustawień wybierz Konto, a następnie Podpisy.
+                </li>
+
+                <li>
+                  Kliknij „Dodaj podpis”, wprowadź nazwę podpisu, a niżej
+                  wklej skopiowaną zawartość z generatora i kliknij Zapisz.
+                </li>
+
+                <li>
+                  W menu podpisów wybierz, że podpis ma być domyślnym dla
+                  nowych maili (lub również odpowiedzi jeżeli chcesz).
+                </li>
+              </ol>
             </div>
           </section>
 
