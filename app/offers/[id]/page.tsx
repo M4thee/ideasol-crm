@@ -504,6 +504,10 @@ export default function OfferDetailsPage() {
 
   const [allowDuplicateClientCreation, setAllowDuplicateClientCreation] = useState(false);
   const [selectedExistingClientId, setSelectedExistingClientId] = useState<string | null>(null);
+  const [clientConflictDetected, setClientConflictDetected] = useState(false);
+  const [duplicateDecision, setDuplicateDecision] = useState<
+    "existing" | "new" | null
+  >(null);
   const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
   const [invalidFields, setInvalidFields] = useState<string[]>([]);
 
@@ -860,6 +864,8 @@ export default function OfferDetailsPage() {
       return;
     }
 
+    setClientConflictDetected(false);
+    setDuplicateDecision(null);
     const duplicateClient =
       allowDuplicateClientCreation || skipDuplicateCheck
         ? null
@@ -1306,6 +1312,13 @@ console.log("SALE ERROR:", saleError);
                         return;
                       }
 
+                      const hasConflict =
+                        !!duplicateClientModal.client.assigned_to &&
+                        duplicateClientModal.client.assigned_to !== currentUserId;
+
+                      setClientConflictDetected(hasConflict);
+                      setDuplicateDecision("existing");
+
                       setSelectedExistingClientId(duplicateClientModal.client.id);
                       setSkipDuplicateCheck(true);
 
@@ -1326,6 +1339,7 @@ console.log("SALE ERROR:", saleError);
                   <button
                     type="button"
                     onClick={() => {
+                      setDuplicateDecision("new");
                       setDuplicateClientModal({
                         open: false,
                         client: null,
@@ -1342,6 +1356,17 @@ console.log("SALE ERROR:", saleError);
                     Utwórz nowego klienta
                   </button>
                 </div>
+              </div>
+            )}
+            {clientConflictDetected && duplicateDecision === "existing" && (
+              <div className="mt-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-semibold text-orange-900">
+                Wykryto potencjalny konflikt klienta. Klient jest przypisany do innego doradcy. W kolejnym kroku dodamy tag „Możliwy konflikt” i powiadomienie owner/admin.
+              </div>
+            )}
+
+            {duplicateDecision === "new" && (
+              <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+                Utworzono nowego klienta pomimo wykrycia podobnych danych. W kolejnym kroku dodamy tag „Możliwy dubel” oraz powiadomienie owner/admin do weryfikacji.
               </div>
             )}
             {createSaleStatus && (
