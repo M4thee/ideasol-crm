@@ -22,7 +22,7 @@ export default function MaintenancePage() {
             </div>
 
             <h1 className="max-w-3xl text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">
-              Trwają prace konserwacyjne systemu CRM.
+              Przerwa modernizacyjna
             </h1>
 
             <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
@@ -34,7 +34,7 @@ export default function MaintenancePage() {
                 Planowany czas zakończenia
               </p>
               <p className="mt-3 text-2xl font-black text-slate-950 sm:text-3xl">
-                29.05.2026, godz. 06:00
+                30.05.2026, godz. 06:00
               </p>
             </div>
 
