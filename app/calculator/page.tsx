@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import OfferResult from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
 import AdminPanel from "@/components/calculator/AdminPanel";
@@ -12,6 +12,24 @@ type Result = {
   inverter: string;
   energyStorage: string;
   offerType: string;
+
+  billingSystem?: "net_billing" | "net_metering";
+  withEms?: boolean;
+  subsidyProgramCap?: number;
+  subsidyAllocation?: {
+    enabled: boolean;
+    billingSystem: "net_billing" | "net_metering";
+    pvNet: number;
+    storageNet: number;
+    emsNet: number;
+    storageSubsidy: number;
+    emsBonus: number;
+    total: number;
+    programCap: number;
+    storageCapByKwh: number;
+    maxStorageSubsidy: number;
+  };
+
   basePriceNet: number;
   sellerMarkupNet: number;
   finalNet: number;
@@ -111,8 +129,8 @@ export default function Home() {
   const [selectedClientId, setSelectedClientId] = useState("");
   const [savingOffer, setSavingOffer] = useState(false);
   const [saveOfferStatus, setSaveOfferStatus] = useState("");
-
-  const [offerType, setOfferType] = useState("pv_storage");
+  const [savedOfferId, setSavedOfferId] = useState<string | null>(null);
+  const [offerType, setOfferType] = useState("none");
   const [panelModel, setPanelModel] = useState("AMERISOLAR_450_FB");
   const [panelCount, setPanelCount] = useState(16);
   const [manualPowerKw, setManualPowerKw] = useState("");
@@ -120,8 +138,13 @@ export default function Home() {
   const [storages, setStorages] = useState<CatalogStorage[]>([]);
   const [inverters, setInverters] = useState<CatalogInverter[]>([]);
   const [selectedInverterName, setSelectedInverterName] = useState("auto");
-  const [roofType, setRoofType] = useState("dachowka");
-  const [storage, setStorage] = useState("ZBPOWER_10");
+  const [roofType, setRoofType] = useState("blacha");
+  const [storage, setStorage] = useState("none");
+  const [withEms, setWithEms] = useState(false);
+
+  const [billingSystem, setBillingSystem] = useState<
+    "net_billing" | "net_metering"
+  >("net_billing");
   const [sellerMarkup, setSellerMarkup] = useState(3000);
   const [showSettings, setShowSettings] = useState(false);
   const [vatRate, setVatRate] = useState(8);
@@ -132,6 +155,7 @@ export default function Home() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailStatus, setEmailStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
 
   const currentUserRole = String(userProfile?.role || "seller")
     .trim()
@@ -397,6 +421,8 @@ export default function Home() {
         panelCount,
         roofType,
         storage,
+        withEms,
+        billingSystem,
         selectedInverterName,
         sellerMarkup,
         vatRate,
@@ -416,15 +442,24 @@ export default function Home() {
     setCopied(false);
     setEmailStatus("");
     setSaveOfferStatus("");
+    setSavedOfferId(null);
+    window.setTimeout(() => {
+      resultSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
   }
 
   function resetForm() {
-    setOfferType("pv_storage");
+    setOfferType("none");
     setPanelModel("AMERISOLAR_450_FB");
     setPanelCount(16);
     setManualPowerKw("");
-    setRoofType("dachowka");
-    setStorage("ZBPOWER_10");
+    setRoofType("blacha");
+    setStorage("none");
+    setWithEms(false);
+    setBillingSystem("net_billing");
     setSelectedInverterName("auto");
     const defaultMargin = userProfile?.default_seller_markup;
 
@@ -442,6 +477,7 @@ export default function Home() {
     setClientName("");
     setSelectedClientId("");
     setSaveOfferStatus("");
+    setSavedOfferId(null);
     setEmailStatus("");
     setShowSettings(false);
   }
@@ -476,6 +512,14 @@ export default function Home() {
       vat_rate: result.vatRate,
       seller_margin: result.sellerMarkupNet,
       company_margin: result.companyMargin,
+      subsidy_allocation_enabled: result.subsidyAllocation?.enabled ?? false,
+      subsidy_billing_system: result.subsidyAllocation?.billingSystem ?? result.billingSystem ?? null,
+      subsidy_pv_net: result.subsidyAllocation?.pvNet ?? null,
+      subsidy_storage_net: result.subsidyAllocation?.storageNet ?? null,
+      subsidy_ems_net: result.subsidyAllocation?.emsNet ?? null,
+      subsidy_storage_subsidy: result.subsidyAllocation?.storageSubsidy ?? null,
+      subsidy_ems_bonus: result.subsidyAllocation?.emsBonus ?? null,
+      subsidy_total: result.subsidyAllocation?.total ?? null,
       pv_power_kw: result.pvPowerKw,
       panel_model: panelModel,
       panel_count: panelCount,
@@ -492,6 +536,8 @@ export default function Home() {
           manualPowerKw,
           roofType,
           storage,
+          withEms,
+          billingSystem,
           selectedInverterName,
           sellerMarkup,
           vatRate,
@@ -530,6 +576,8 @@ export default function Home() {
       setSavingOffer(false);
       return;
     }
+
+    setSavedOfferId(data.id);
 
     setSaveOfferStatus(
       data?.offer_public_id
@@ -648,7 +696,7 @@ IdeaSol`;
         )}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className={result ? "grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.8fr)]" : "grid grid-cols-1 gap-6"}>
+          <div className="space-y-8">
             <OfferForm
               offerType={offerType}
               setOfferType={setOfferType}
@@ -668,6 +716,10 @@ IdeaSol`;
               setRoofType={setRoofType}
               storage={storage}
               setStorage={setStorage}
+              withEms={withEms}
+              setWithEms={setWithEms}
+              billingSystem={billingSystem}
+              setBillingSystem={setBillingSystem}
               storages={storages}
               panels={panels}
               inverters={inverters}
@@ -685,33 +737,39 @@ IdeaSol`;
             />
 
             {result && (
-              <OfferResult
-                result={result}
-                panelCount={panelCount}
-                panelPowerWp={getPanelPowerWp(panelModel)}
-                panelName={panels.find((panel) => panel.code === panelModel)?.name || panelModel}
-                copied={copied}
-                copyOffer={copyOffer}
-                resetForm={resetForm}
-                setResult={setResult}
-                setCopied={setCopied}
-                setEmailStatus={setEmailStatus}
-                clientEmail={clientEmail}
-                clientName={clientName}
-                setClientEmail={setClientEmail}
-                sendOfferEmail={sendOfferEmail}
-                sendingEmail={sendingEmail}
-                emailStatus={emailStatus}
-                saveOfferToCrm={saveOfferToCrm}
-                savingOffer={savingOffer}
-                saveOfferStatus={saveOfferStatus}
-                selectedClientId={selectedClientId}
-                canSeeTechnicalView={canSeeTechnicalView}
-                currentUserRole={currentUserRole}
-                advisorName={advisorName}
-                advisorPhone={advisorPhone}
-                advisorEmail={advisorEmail}
-              />
+              <div
+                ref={resultSectionRef}
+                className="scroll-mt-6 animate-in fade-in slide-in-from-bottom-3 duration-500"
+              >
+                <OfferResult
+                  result={result}
+                  panelCount={panelCount}
+                  panelPowerWp={getPanelPowerWp(panelModel)}
+                  panelName={panels.find((panel) => panel.code === panelModel)?.name || panelModel}
+                  copied={copied}
+                  copyOffer={copyOffer}
+                  resetForm={resetForm}
+                  setResult={setResult}
+                  setCopied={setCopied}
+                  setEmailStatus={setEmailStatus}
+                  clientEmail={clientEmail}
+                  clientName={clientName}
+                  setClientEmail={setClientEmail}
+                  sendOfferEmail={sendOfferEmail}
+                  sendingEmail={sendingEmail}
+                  emailStatus={emailStatus}
+                  saveOfferToCrm={saveOfferToCrm}
+                  savingOffer={savingOffer}
+                  saveOfferStatus={saveOfferStatus}
+                  savedOfferId={savedOfferId}
+                  selectedClientId={selectedClientId}
+                  canSeeTechnicalView={canSeeTechnicalView}
+                  currentUserRole={currentUserRole}
+                  advisorName={advisorName}
+                  advisorPhone={advisorPhone}
+                  advisorEmail={advisorEmail}
+                />
+              </div>
             )}
           </div>
         </section>

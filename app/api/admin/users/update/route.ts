@@ -9,9 +9,16 @@ export async function POST(request: Request) {
     const {
       user_id,
       values,
+      action,
     } = body;
 
     if (currentUserRole !== "admin") {
+      if (action && !["update", "deactivate", "restore"].includes(action)) {
+        return NextResponse.json(
+          { error: "Nieprawidłowa akcja." },
+          { status: 400 }
+        );
+      }
       return NextResponse.json(
         { error: "Brak uprawnień." },
         { status: 403 }
@@ -22,6 +29,11 @@ export async function POST(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
+
+    // Future workflow:
+    // action = "deactivate" -> save snapshot to user_deactivation_logs
+    // action = "restore" -> restore clients and user settings from snapshot
+    // action = "update" (or undefined) -> standard profile update
 
     const { data, error } = await supabase
       .from("profiles")

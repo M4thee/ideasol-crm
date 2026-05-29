@@ -38,6 +38,7 @@ type Client = {
     email: string | null;
     role: string | null;
   } | null;
+  tags?: ClientTag[];
   created_at: string;
 };
 
@@ -55,6 +56,17 @@ type Profile = {
   email: string | null;
   role: UserRole | null;
   hidden_from_assignment?: boolean | null;
+};
+
+type ClientTag = {
+  id: string;
+  name: string;
+  color: string | null;
+};
+
+type ClientTagLink = {
+  client_id: string;
+  tag_id: string;
 };
 
 
@@ -135,12 +147,18 @@ function ClientsPageContent() {
   const [selectedClientTypes, setSelectedClientTypes] = useState<string[]>([]);
   const [selectedProvinces, setSelectedProvinces] = useState<string[]>([]);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [visibleClientsLimit, setVisibleClientsLimit] = useState(15);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [sellers, setSellers] = useState<Profile[]>([]);
   const [assigningClient, setAssigningClient] = useState<Client | null>(null);
   const [selectedSellerId, setSelectedSellerId] = useState("");
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [bulkAssignSellerId, setBulkAssignSellerId] = useState("");
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [availableTags, setAvailableTags] = useState<ClientTag[]>([]);
+  const [bulkTagId, setBulkTagId] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [savingClient, setSavingClient] = useState(false);
@@ -201,6 +219,7 @@ function ClientsPageContent() {
     selectedClientTypes,
     selectedProvinces,
     selectedCities,
+    selectedTagIds,
   ]);
 
   useEffect(() => {
@@ -254,9 +273,24 @@ function ClientsPageContent() {
     const role = (profileData?.role || "seller") as UserRole;
     setCurrentUserRole(role);
 
-    await Promise.all([loadClients(user.id, role), loadSellers()]);
+    await Promise.all([loadClients(user.id, role), loadSellers(), loadAvailableTags()]);
   }
 
+  async function loadAvailableTags() {
+    const { data, error } = await supabase
+      .from("client_tags")
+      .select("id, name, color")
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Błąd ładowania tagów klientów:", error);
+      setAvailableTags([]);
+      return;
+    }
+
+    setAvailableTags((data || []) as ClientTag[]);
+  }
   async function loadSellers() {
     const { data, error } = await supabase
       .from("profiles")
@@ -285,6 +319,10 @@ function ClientsPageContent() {
   }
 
   function canAnonymizeClients() {
+    return currentUserRole === "admin";
+  }
+
+  function canManageClientTags() {
     return currentUserRole === "admin";
   }
 
@@ -346,6 +384,27 @@ function ClientsPageContent() {
     setSelectedClientTypes([]);
     setSelectedProvinces([]);
     setSelectedCities([]);
+    setSelectedTagIds([]);
+  }
+
+  function toggleSelectedClient(clientId: string) {
+    setSelectedClientIds((current) =>
+      current.includes(clientId)
+        ? current.filter((id) => id !== clientId)
+        : [...current, clientId]
+    );
+  }
+
+  function toggleAllVisibleClients() {
+    const visibleIds = visibleClients.map((client) => client.id);
+
+    if (visibleIds.length === 0) return;
+
+    const allVisibleSelected = visibleIds.every((id) =>
+      selectedClientIds.includes(id)
+    );
+
+    setSelectedClientIds(allVisibleSelected ? [] : visibleIds);
   }
 
   async function loadClients(userId = currentUserId, role = currentUserRole) {
@@ -388,6 +447,52 @@ function ClientsPageContent() {
 
     const clientsWithoutAssignedUsers = (data || []) as ClientRow[];
 
+    const clientIds = clientsWithoutAssignedUsers.map((client) => client.id);
+    let tagsByClientId: Record<string, ClientTag[]> = {};
+
+    if (clientIds.length > 0) {
+      const { data: clientTagLinksData, error: clientTagLinksError } = await supabase
+        .from("client_tag_links")
+        .select("client_id, tag_id")
+        .in("client_id", clientIds);
+
+      if (clientTagLinksError) {
+        console.error("Błąd ładowania powiązań tagów klientów:", clientTagLinksError);
+      }
+
+      const clientTagLinks = (clientTagLinksData || []) as ClientTagLink[];
+      const tagIds = Array.from(new Set(clientTagLinks.map((link) => link.tag_id)));
+
+      if (tagIds.length > 0) {
+        const { data: tagsData, error: tagsError } = await supabase
+          .from("client_tags")
+          .select("id, name, color")
+          .in("id", tagIds)
+          .eq("is_active", true);
+
+        if (tagsError) {
+          console.error("Błąd ładowania tagów klientów:", tagsError);
+        }
+
+        const tagsById = new Map(
+          ((tagsData || []) as ClientTag[]).map((tag) => [tag.id, tag])
+        );
+
+        tagsByClientId = clientTagLinks.reduce((accumulator, link) => {
+          const tag = tagsById.get(link.tag_id);
+
+          if (!tag) return accumulator;
+
+          accumulator[link.client_id] = [
+            ...(accumulator[link.client_id] || []),
+            tag,
+          ];
+
+          return accumulator;
+        }, {} as Record<string, ClientTag[]>);
+      }
+    }
+
     const assignedUserIds = Array.from(
       new Set(
         clientsWithoutAssignedUsers
@@ -424,6 +529,7 @@ function ClientsPageContent() {
       assigned_user: client.assigned_user_id
         ? assignedUsersById[client.assigned_user_id] || null
         : null,
+      tags: tagsByClientId[client.id] || [],
     }));
 
     const sortedClients = normalizedClients.sort((firstClient, secondClient) => {
@@ -717,6 +823,196 @@ function ClientsPageContent() {
     closeAssignModal();
   }
 
+  async function assignSelectedClientsToSeller() {
+    if (selectedClientIds.length === 0) {
+      alert("Zaznacz klientów do przypisania.");
+      return;
+    }
+
+    if (!bulkAssignSellerId) {
+      alert("Wybierz użytkownika, do którego chcesz przypisać klientów.");
+      return;
+    }
+
+    const selectedSeller = sellers.find((seller) => seller.id === bulkAssignSellerId);
+    const selectedSellerName =
+      selectedSeller?.display_name || selectedSeller?.email || "wybranego użytkownika";
+
+    const confirmed = window.confirm(
+      `Czy chcesz przypisać następującą liczbę klientów: ${selectedClientIds.length} do: ${selectedSellerName}?`
+    );
+
+    if (!confirmed) return;
+
+    setBulkActionLoading(true);
+
+    const { error } = await supabase
+      .from("clients")
+      .update({
+        assigned_user_id: bulkAssignSellerId,
+        status: "Przypisany",
+      })
+      .in("id", selectedClientIds);
+
+    if (error) {
+      console.error("Błąd masowego przypisywania klientów:", error);
+      alert(`Nie udało się przypisać klientów: ${error.message}`);
+      setBulkActionLoading(false);
+      return;
+    }
+
+    setSelectedClientIds([]);
+    setBulkAssignSellerId("");
+    await loadClients(currentUserId, currentUserRole);
+    setBulkActionLoading(false);
+  }
+
+  async function addTagToSelectedClients() {
+    if (selectedClientIds.length === 0) {
+      alert("Zaznacz klientów, którym chcesz dodać tag.");
+      return;
+    }
+
+    if (!bulkTagId) {
+      alert("Wybierz tag.");
+      return;
+    }
+
+    const selectedTag = availableTags.find((tag) => tag.id === bulkTagId);
+    const selectedTagName = selectedTag?.name || "wybrany tag";
+
+    const confirmed = window.confirm(
+      `Czy chcesz dodać tag "${selectedTagName}" do następującej liczby klientów: ${selectedClientIds.length}?`
+    );
+
+    if (!confirmed) return;
+
+    setBulkActionLoading(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const rows = selectedClientIds.map((clientId) => ({
+      client_id: clientId,
+      tag_id: bulkTagId,
+      created_by: user?.id || null,
+    }));
+
+    const { error } = await supabase
+      .from("client_tag_links")
+      .upsert(rows, { onConflict: "client_id,tag_id" });
+
+    if (error) {
+      console.error("Błąd masowego dodawania tagu:", error);
+      alert(`Nie udało się dodać tagu: ${error.message}`);
+      setBulkActionLoading(false);
+      return;
+    }
+
+    setBulkTagId("");
+    setSelectedClientIds([]);
+    setBulkActionLoading(false);
+    alert(`Dodano tag "${selectedTagName}" do zaznaczonych klientów.`);
+  }
+
+  async function removeTagFromSelectedClients() {
+    if (selectedClientIds.length === 0) {
+      alert("Zaznacz klientów, którym chcesz usunąć tag.");
+      return;
+    }
+
+    if (!bulkTagId) {
+      alert("Wybierz tag.");
+      return;
+    }
+
+    const selectedTag = availableTags.find((tag) => tag.id === bulkTagId);
+    const selectedTagName = selectedTag?.name || "wybrany tag";
+
+    const confirmed = window.confirm(
+      `Czy chcesz usunąć tag "${selectedTagName}" z następującej liczby klientów: ${selectedClientIds.length}?`
+    );
+
+    if (!confirmed) return;
+
+    setBulkActionLoading(true);
+
+    const { error } = await supabase
+      .from("client_tag_links")
+      .delete()
+      .eq("tag_id", bulkTagId)
+      .in("client_id", selectedClientIds);
+
+    if (error) {
+      console.error("Błąd masowego usuwania tagu:", error);
+      alert(`Nie udało się usunąć tagu: ${error.message}`);
+      setBulkActionLoading(false);
+      return;
+    }
+
+    setBulkTagId("");
+    setSelectedClientIds([]);
+    setBulkActionLoading(false);
+    alert(`Usunięto tag "${selectedTagName}" z zaznaczonych klientów.`);
+  }
+
+  async function anonymizeSelectedClients() {
+    if (selectedClientIds.length === 0) {
+      alert("Zaznacz klientów do anonimizacji.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Czy na pewno chcesz zanonimizować następującą liczbę klientów: ${selectedClientIds.length}?\n\nTa operacja usunie dane osobowe i kontaktowe oraz ustawi status Utracony.`
+    );
+
+    if (!confirmed) return;
+
+    setBulkActionLoading(true);
+
+    for (const clientId of selectedClientIds) {
+      const client = clients.find((item) => item.id === clientId);
+
+      if (!client) continue;
+
+      const maskedFullName = client.full_name ? maskClientName(client.full_name) : null;
+      const maskedCompanyName = client.company_name ? maskClientName(client.company_name) : null;
+
+      const { error } = await supabase
+        .from("clients")
+        .update({
+          full_name: maskedFullName,
+          company_name: maskedCompanyName,
+          phone: null,
+          email: null,
+          city: null,
+          postal_code: null,
+          street: null,
+          building_number: null,
+          province: null,
+          phone_country_code: null,
+          pesel: null,
+          nip: null,
+          contact_person: null,
+          contact_phone: null,
+          status: "Utracony",
+        })
+        .eq("id", client.id);
+
+      if (error) {
+        console.error("Błąd masowej anonimizacji klienta:", error);
+        alert(`Nie udało się zanonimizować klienta ${client.full_name || client.company_name || client.id}: ${error.message}`);
+        setBulkActionLoading(false);
+        return;
+      }
+    }
+
+    setSelectedClientIds([]);
+    await loadClients(currentUserId, currentUserRole);
+    setBulkActionLoading(false);
+  }
+
   async function anonymizeClient(client: Client) {
     const clientName = client.full_name || client.company_name || "ten kontakt";
 
@@ -804,7 +1100,8 @@ function ClientsPageContent() {
     selectedAdvisorIds.length +
     selectedClientTypes.length +
     selectedProvinces.length +
-    selectedCities.length;
+    selectedCities.length +
+    selectedTagIds.length;
 
   const filteredClients = clients.filter((client) => {
     const matchesStatus =
@@ -827,12 +1124,17 @@ function ClientsPageContent() {
       selectedCities.length === 0 ||
       (client.city && selectedCities.includes(client.city));
 
+    const matchesTags =
+      selectedTagIds.length === 0 ||
+      (client.tags || []).some((tag) => selectedTagIds.includes(tag.id));
+
     return (
       matchesStatus &&
       matchesAdvisor &&
       matchesClientType &&
       matchesProvince &&
-      matchesCity
+      matchesCity &&
+      matchesTags
     );
   });
 
@@ -1050,6 +1352,30 @@ function ClientsPageContent() {
                         )}
                       </div>
                     </div>
+
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
+                        Tagi
+                      </p>
+                      <div className="space-y-2">
+                        {availableTags.length === 0 ? (
+                          <p className="text-xs text-slate-400">Brak aktywnych tagów.</p>
+                        ) : (
+                          availableTags.map((tag) => (
+                            <label key={tag.id} className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={selectedTagIds.includes(tag.id)}
+                                onChange={() =>
+                                  toggleFilterValue(tag.id, selectedTagIds, setSelectedTagIds)
+                                }
+                              />
+                              {tag.name}
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1057,6 +1383,89 @@ function ClientsPageContent() {
           </div>
         </section>
 
+        {(canAssignClients() || canAnonymizeClients()) && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="text-sm font-semibold text-slate-600">
+                Zaznaczono: {selectedClientIds.length}
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {canManageClientTags() && (
+                  <>
+                    <select
+                      value={bulkTagId}
+                      onChange={(event) => setBulkTagId(event.target.value)}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm outline-none focus:border-emerald-500"
+                    >
+                      <option value="">Wybierz tag</option>
+                      {availableTags.map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={addTagToSelectedClients}
+                      disabled={bulkActionLoading || selectedClientIds.length === 0 || !bulkTagId}
+                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Dodaj tag
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={removeTagFromSelectedClients}
+                      disabled={bulkActionLoading || selectedClientIds.length === 0 || !bulkTagId}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Usuń tag
+                    </button>
+                  </>
+                )}
+
+                {canAssignClients() && (
+                  <>
+                    <select
+                      value={bulkAssignSellerId}
+                      onChange={(event) => setBulkAssignSellerId(event.target.value)}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm outline-none focus:border-emerald-500"
+                    >
+                      <option value="">Wybierz użytkownika</option>
+                      {sellers.map((seller) => (
+                        <option key={seller.id} value={seller.id}>
+                          {seller.display_name || seller.email || seller.id} — {getRoleLabel(seller.role)}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={assignSelectedClientsToSeller}
+                      disabled={bulkActionLoading || selectedClientIds.length === 0 || !bulkAssignSellerId}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Przypisz zaznaczonych
+                    </button>
+                  </>
+                )}
+
+                {canAnonymizeClients() && (
+                  <button
+                    type="button"
+                    onClick={anonymizeSelectedClients}
+                    disabled={bulkActionLoading || selectedClientIds.length === 0}
+                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Anonimizuj zaznaczonych
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {loading ? (
             <div className="p-6 text-slate-500">Ładowanie klientów...</div>
@@ -1068,11 +1477,22 @@ function ClientsPageContent() {
                 <table className="min-w-[900px] w-full table-fixed text-xs">
                 <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="w-[26%] px-4 py-2.5 text-left font-semibold">Klient</th>
+                    <th className="w-[5%] px-4 py-2.5 text-left font-semibold">
+                      <input
+                        type="checkbox"
+                        checked={
+                          visibleClients.length > 0 &&
+                          visibleClients.every((client) => selectedClientIds.includes(client.id))
+                        }
+                        onChange={toggleAllVisibleClients}
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                    </th>
+                    <th className="w-[24%] px-4 py-2.5 text-left font-semibold">Klient</th>
                     <th className="w-[13%] px-4 py-2.5 text-left font-semibold">Status</th>
                     <th className="w-[17%] px-4 py-2.5 text-left font-semibold">Doradca</th>
-                    <th className="w-[16%] px-4 py-2.5 text-left font-semibold">Miasto</th>
-                    <th className="w-[16%] px-4 py-2.5 text-left font-semibold">Województwo</th>
+                    <th className="w-[15%] px-4 py-2.5 text-left font-semibold">Miasto</th>
+                    <th className="w-[14%] px-4 py-2.5 text-left font-semibold">Województwo</th>
                     <th className="w-[12%] px-4 py-2.5 text-right font-semibold">Akcje</th>
                   </tr>
                 </thead>
@@ -1084,6 +1504,14 @@ function ClientsPageContent() {
                       className="border-b border-slate-100 transition hover:bg-slate-50"
                     >
                       <td className="px-4 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={selectedClientIds.includes(client.id)}
+                          onChange={() => toggleSelectedClient(client.id)}
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
                         <div className="flex min-w-0 items-center gap-2">
                           <span
                             className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${getClientTypeClass(client)}`}
@@ -1091,8 +1519,23 @@ function ClientsPageContent() {
                             {getClientTypeLabel(client)}
                           </span>
 
-                          <div className="min-w-0 truncate font-semibold text-slate-900">
-                            {client.full_name || client.company_name || "Brak nazwy"}
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-slate-900">
+                              {client.full_name || client.company_name || "Brak nazwy"}
+                            </div>
+
+                            {client.tags && client.tags.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {client.tags.slice(0, 3).map((tag) => (
+                                  <span
+                                    key={tag.id}
+                                    className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                                  >
+                                    {tag.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

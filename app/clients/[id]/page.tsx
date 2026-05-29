@@ -85,6 +85,11 @@ type ClientTag = {
   color: string | null;
 };
 
+type ClientTagLink = {
+  id: string;
+  tag_id: string;
+};
+
 type ClientActivity = {
   id: string;
   client_id: string;
@@ -190,6 +195,10 @@ export default function ClientPage() {
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [activities, setActivities] = useState<ClientActivity[]>([]);
   const [tags, setTags] = useState<ClientTag[]>([]);
+  const [availableTags, setAvailableTags] = useState<ClientTag[]>([]);
+  const [showTagPicker, setShowTagPicker] = useState(false);
+  const [tagSearch, setTagSearch] = useState("");
+  const [savingTag, setSavingTag] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   // removed phoneStatus, contactChannel, activityDescription, followUpAt
@@ -307,27 +316,8 @@ export default function ClientPage() {
 
     setClient(normalizedClient as Client);
 
-    const { data: tagsData, error: tagsError } = await supabase
-      .from("client_tag_links")
-      .select(`
-        tag_id,
-        client_tags (
-          id,
-          name,
-          color
-        )
-      `)
-      .eq("client_id", clientId);
+    await loadClientTags();
 
-    if (tagsError) {
-      console.error("Błąd ładowania tagów klienta:", tagsError);
-    } else {
-      setTags(
-        (tagsData || [])
-          .map((row: any) => row.client_tags)
-          .filter(Boolean)
-      );
-    }
 
     const { data: eventsData, error: eventsError } = await supabase
       .from("calendar_events")
@@ -392,7 +382,109 @@ if (activitiesError) {
 setActivities((activitiesData as ClientActivity[]) || []);
     setLoading(false);
   }
+  async function loadClientTags() {
+    const { data, error } = await supabase.rpc("get_client_tags_for_card", {
+      p_client_id: clientId,
+    });
 
+    if (error) {
+      console.error("Błąd ładowania tagów klienta przez RPC:", error);
+      setTags([]);
+      return;
+    }
+
+    setTags((data || []) as ClientTag[]);
+  }
+
+  async function loadAvailableTags() {
+    const { data, error } = await supabase
+      .from("client_tags")
+      .select("id, name, color")
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Błąd ładowania dostępnych tagów:", error);
+      setAvailableTags([]);
+      return;
+    }
+
+    setAvailableTags((data || []) as ClientTag[]);
+  }
+
+  function openTagPicker() {
+    setTagSearch("");
+    setShowTagPicker(true);
+    loadAvailableTags();
+  }
+
+  function closeTagPicker() {
+    setShowTagPicker(false);
+    setTagSearch("");
+  }
+
+  function getTagClass(tag: ClientTag) {
+    if (tag.color === "red") return "bg-red-100 text-red-800 border-red-200";
+    if (tag.color === "amber") return "bg-amber-100 text-amber-900 border-amber-200";
+    if (tag.color === "blue") return "bg-blue-100 text-blue-800 border-blue-200";
+    if (tag.color === "emerald") return "bg-emerald-100 text-emerald-800 border-emerald-200";
+    if (tag.color === "purple") return "bg-purple-100 text-purple-800 border-purple-200";
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+
+  async function addTagToClient(tag: ClientTag) {
+    if (tags.some((currentTag) => currentTag.id === tag.id)) {
+      closeTagPicker();
+      return;
+    }
+
+    setSavingTag(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from("client_tag_links").insert({
+      client_id: clientId,
+      tag_id: tag.id,
+      created_by: user?.id || null,
+    });
+
+    if (error) {
+      console.error("Błąd dodawania tagu do klienta:", error);
+      alert(`Nie udało się dodać tagu: ${error.message}`);
+      setSavingTag(false);
+      return;
+    }
+
+    await loadClientTags();
+    setSavingTag(false);
+    closeTagPicker();
+  }
+
+  async function removeTagFromClient(tag: ClientTag) {
+    const confirmed = window.confirm(`Usunąć tag "${tag.name}" z tego klienta?`);
+
+    if (!confirmed) return;
+
+    setSavingTag(true);
+
+    const { error } = await supabase
+      .from("client_tag_links")
+      .delete()
+      .eq("client_id", clientId)
+      .eq("tag_id", tag.id);
+
+    if (error) {
+      console.error("Błąd usuwania tagu z klienta:", error);
+      alert(`Nie udało się usunąć tagu: ${error.message}`);
+      setSavingTag(false);
+      return;
+    }
+
+    await loadClientTags();
+    setSavingTag(false);
+  }
   async function loadAssignmentData() {
     const {
       data: { user },
@@ -442,6 +534,10 @@ setActivities((activitiesData as ClientActivity[]) || []);
 
   function canEditClient() {
     return ["owner", "admin", "cc"].includes(currentUserRole || "");
+  }
+
+  function canManageClientTags() {
+    return currentUserRole === "admin";
   }
 
   function getAdvisorName() {
@@ -937,14 +1033,39 @@ setActivities((activitiesData as ClientActivity[]) || []);
                   {client.lead_source || "Źródło nieznane"}
                 </span>
 
-                {tags.map((tag) => (
-                  <span
-                    key={tag.id}
-                    className="px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-sm font-semibold"
+                {tags.map((tag) =>
+                  canManageClientTags() ? (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => removeTagFromClient(tag)}
+                      disabled={savingTag}
+                      title="Kliknij, aby usunąć tag z klienta"
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold transition hover:opacity-80 disabled:opacity-50 ${getTagClass(tag)}`}
+                    >
+                      {tag.name}
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  ) : (
+                    <span
+                      key={tag.id}
+                      className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold ${getTagClass(tag)}`}
+                    >
+                      {tag.name}
+                    </span>
+                  )
+                )}
+
+                {canManageClientTags() && (
+                  <button
+                    type="button"
+                    onClick={openTagPicker}
+                    disabled={savingTag}
+                    className="inline-flex items-center justify-center rounded-full border border-dashed border-slate-300 bg-white px-3 py-1 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
                   >
-                    {tag.name}
-                  </span>
-                ))}
+                    + Tag
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1423,6 +1544,68 @@ setActivities((activitiesData as ClientActivity[]) || []);
           </div>
         </section>
       </div>
+      {showTagPicker && canManageClientTags() && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-emerald-600">Tagi klienta</p>
+                <h2 className="mt-1 text-xl font-bold text-slate-900">
+                  Dodaj tag
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeTagPicker}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={tagSearch}
+              onChange={(event) => setTagSearch(event.target.value)}
+              placeholder="Szukaj tagu..."
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500"
+            />
+
+            <div className="mt-4 max-h-[320px] overflow-y-auto rounded-2xl border border-slate-200 bg-white">
+              {availableTags
+                .filter((tag) => !tags.some((currentTag) => currentTag.id === tag.id))
+                .filter((tag) =>
+                  tag.name.toLowerCase().includes(tagSearch.trim().toLowerCase())
+                ).length === 0 ? (
+                <div className="p-5 text-sm text-slate-500">
+                  Brak dostępnych tagów.
+                </div>
+              ) : (
+                availableTags
+                  .filter((tag) => !tags.some((currentTag) => currentTag.id === tag.id))
+                  .filter((tag) =>
+                    tag.name.toLowerCase().includes(tagSearch.trim().toLowerCase())
+                  )
+                  .map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => addTagToClient(tag)}
+                      disabled={savingTag}
+                      className="flex w-full items-center justify-between border-b border-slate-100 px-5 py-4 text-left text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <span className={`rounded-full border px-3 py-1 ${getTagClass(tag)}`}>
+                        {tag.name}
+                      </span>
+                      <span className="text-slate-400">Dodaj</span>
+                    </button>
+                  ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {showEditModal && client && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
           <div className="max-h-[95vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">

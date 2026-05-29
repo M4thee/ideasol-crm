@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 
@@ -395,7 +395,7 @@ async function findDuplicateClient(
 
   let query = supabase
     .from("clients")
-    .select("id, public_id, full_name, company_name, assigned_to")
+    .select("id, public_id, full_name, company_name, assigned_to, assigned_user_id")
     .or(conditions.join(","))
     .limit(1);
 
@@ -455,6 +455,7 @@ function isValidPesel(pesel: string) {
   return checksum === Number(clean[10]);
 }
 
+
 function normalizeRole(value: unknown): UserRole {
   if (
     value === "owner" ||
@@ -467,6 +468,48 @@ function normalizeRole(value: unknown): UserRole {
   }
 
   return null;
+}
+
+// --- Automatic tagging for duplicate/conflict sale creation ---
+async function getSystemClientTagId(name: string) {
+  const { data: existingTag, error: existingTagError } = await supabase
+    .from("client_tags")
+    .select("id")
+    .eq("name", name)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (existingTagError) {
+    console.error(`Błąd sprawdzania tagu systemowego ${name}:`, existingTagError);
+    return null;
+  }
+
+  if (!existingTag?.id) {
+    console.warn(`Brak aktywnego tagu systemowego: ${name}. Utwórz go w panelu admina lub SQL.`);
+    return null;
+  }
+
+  return existingTag.id as string;
+}
+
+async function addSystemTagToClient(clientId: string, tagName: string, color: string) {
+  const { error } = await supabase.rpc("add_client_system_tag", {
+    p_client_id: clientId,
+    p_tag_name: tagName,
+  });
+
+  if (error) {
+    console.error(`Błąd RPC dodawania tagu ${tagName}:`, error);
+    alert(
+      `Nie udało się dodać tagu ${tagName}: ${error.message || "brak szczegółów błędu"}`
+    );
+    return;
+  }
+
+  console.log("SYSTEM TAG RPC INSERTED", {
+    clientId,
+    tagName,
+  });
 }
 
 export default function OfferDetailsPage() {
@@ -485,6 +528,7 @@ export default function OfferDetailsPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [showSaleForm, setShowSaleForm] = useState(false);
+  const [showCancelSaleModal, setShowCancelSaleModal] = useState(false);
   const [creatingSale, setCreatingSale] = useState(false);
   const [createSaleStatus, setCreateSaleStatus] = useState("");
   const [saleForm, setSaleForm] = useState<SaleFromOfferForm>(() => emptySaleForm());
@@ -496,6 +540,7 @@ export default function OfferDetailsPage() {
       full_name?: string | null;
       company_name?: string | null;
       assigned_to?: string | null;
+      assigned_user_id?: string | null;
     } | null;
   }>({
     open: false,
@@ -509,6 +554,16 @@ export default function OfferDetailsPage() {
     "existing" | "new" | null
   >(null);
   const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
+
+  const duplicateWorkflowRef = useRef<{
+    decision: "existing" | "new" | null;
+    clientId: string | null;
+    conflictDetected: boolean;
+  }>({
+    decision: null,
+    clientId: null,
+    conflictDetected: false,
+  });
   const [invalidFields, setInvalidFields] = useState<string[]>([]);
 
   const canSeeFullFinancials = useMemo(
@@ -570,10 +625,11 @@ export default function OfferDetailsPage() {
     loadOffer();
   }, [offerId]);
   useEffect(() => {
-  if (!offer || !autoCreateSale || showSaleForm) return;
+    if (!offer || !autoCreateSale || showSaleForm) return;
+    if (offer.client_id && !client) return;
 
-  openSaleFormFromOffer();
-}, [offer, autoCreateSale, showSaleForm]);
+    openSaleFormFromOffer(client);
+  }, [offer, client, autoCreateSale, showSaleForm]);
   async function loadOffer() {
     setLoading(true);
     setAccessDenied(false);
@@ -659,6 +715,11 @@ export default function OfferDetailsPage() {
       }
 
       setClient((clientData as ClientData) || null);
+      if (autoCreateSale && clientData) {
+        setTimeout(() => {
+          openSaleFormFromOffer(clientData as ClientData);
+        }, 0);
+      }
     }
 
     if (loadedOffer.created_by) {
@@ -689,13 +750,15 @@ export default function OfferDetailsPage() {
     setInvalidFields((current) => current.filter((field) => field !== key));
   }
 
-  function openSaleFormFromOffer() {
+  function openSaleFormFromOffer(clientOverride?: ClientData | null) {
     if (!offer) return;
 
-    const address = getClientContractAddressParts(client);
+    const sourceClient = clientOverride ?? client;
+
+    const address = getClientContractAddressParts(sourceClient);
 
     const inferredCustomerType: SaleCustomerType =
-      client?.company_name || client?.nip ? "b2b" : "b2c";
+      sourceClient?.company_name || sourceClient?.nip ? "b2b" : "b2c";
 
     const contractAddress = buildFullAddress(
       address.street,
@@ -704,16 +767,16 @@ export default function OfferDetailsPage() {
       address.city
     );
 
-    const fullName = getClientField(client, ["full_name", "name", "client_name", "imie_nazwisko"]);
-    const companyName = getClientField(client, ["company_name", "company", "nazwa_firmy"]);
-    const nip = getClientField(client, ["nip", "tax_id"]);
-    const regon = getClientField(client, ["regon"]);
-    const representativeName = getClientField(client, ["contact_person", "representative_name", "osoba_reprezentujaca", "full_name"]);
-    const pesel = getClientField(client, ["pesel"]);
-    const phone = getClientField(client, ["phone", "contact_phone", "telefon", "phone_number"]);
-    const email = getClientField(client, ["email", "contact_email", "mail"]);
-    const correspondenceAddress = getClientField(client, ["correspondence_address", "adres_korespondencyjny"]);
-    const installationAddress = getClientField(client, ["installation_address", "adres_montazu", "mounting_address"]);
+    const fullName = getClientField(sourceClient, ["full_name", "name", "client_name", "imie_nazwisko"]);
+    const companyName = getClientField(sourceClient, ["company_name", "company", "nazwa_firmy"]);
+    const nip = getClientField(sourceClient, ["nip", "tax_id"]);
+    const regon = getClientField(sourceClient, ["regon"]);
+    const representativeName = getClientField(sourceClient, ["contact_person", "representative_name", "osoba_reprezentujaca", "full_name"]);
+    const pesel = getClientField(sourceClient, ["pesel"]);
+    const phone = getClientField(sourceClient, ["phone", "contact_phone", "telefon", "phone_number"]);
+    const email = getClientField(sourceClient, ["email", "contact_email", "mail"]);
+    const correspondenceAddress = getClientField(sourceClient, ["correspondence_address", "adres_korespondencyjny"]);
+    const installationAddress = getClientField(sourceClient, ["installation_address", "adres_montazu", "mounting_address"]);
 
     setSaleForm({
       ...emptySaleForm(),
@@ -844,17 +907,21 @@ export default function OfferDetailsPage() {
 
   function buildSoldItemsFromOffer() {
     return [
-      offer?.pv_power_kw ? `PV ${offer.pv_power_kw} kWp` : null,
+      offer?.pv_power_kw ? `Instalacja PV ${offer.pv_power_kw} kWp` : null,
       offer?.energy_storage && offer.energy_storage !== "Brak"
         ? `Magazyn energii ${offer.energy_storage}`
         : null,
       offer?.inverter && offer.inverter !== "Brak" ? `Falownik ${offer.inverter}` : null,
     ]
       .filter(Boolean)
-      .join(" + ");
+      .join("\n");
   }
 
-  async function createSaleFromOffer() {
+  async function createSaleFromOffer(workflowOverride?: {
+  decision: "existing" | "new" | null;
+  clientId: string | null;
+  conflictDetected: boolean;
+}) {
     if (!offer) return;
 
     const validationError = validateSaleForm();
@@ -864,17 +931,24 @@ export default function OfferDetailsPage() {
       return;
     }
 
+    const duplicateWorkflow = workflowOverride || duplicateWorkflowRef.current;
+
     setClientConflictDetected(false);
     setDuplicateDecision(null);
-    const duplicateClient =
-      allowDuplicateClientCreation || skipDuplicateCheck
-        ? null
-        : await findDuplicateClient(
-            saleForm.pesel,
-            saleForm.email,
-            saleForm.phone,
-            offer.client_id
-          );
+    const shouldSkipDuplicateCheck =
+      allowDuplicateClientCreation ||
+      skipDuplicateCheck ||
+      workflowOverride?.decision === "new" ||
+      workflowOverride?.decision === "existing";
+
+    const duplicateClient = shouldSkipDuplicateCheck
+      ? null
+      : await findDuplicateClient(
+          saleForm.pesel,
+          saleForm.email,
+          saleForm.phone,
+          offer.client_id
+        );
 
     if (duplicateClient) {
       setDuplicateClientModal({
@@ -902,13 +976,75 @@ export default function OfferDetailsPage() {
       ? contractAddress
       : saleForm.installationAddress;
 
+    const installationSplit = saleForm.installationSameAsContract
+      ? {
+          street: saleForm.contractStreet,
+          buildingNumber: saleForm.contractBuildingNumber,
+          postalCode: saleForm.contractPostalCode,
+          city: saleForm.contractCity,
+        }
+      : {
+          ...splitStreetAndBuildingNumber(saleForm.installationAddress),
+          postalCode: "",
+          city: "",
+        };
+
     const depositAmount = Number(saleForm.depositAmount.replace(",", "."));
 
     setCreatingSale(true);
     setCreateSaleStatus("");
 
+    let effectiveClientId =
+      duplicateWorkflow.decision === "existing" && duplicateWorkflow.clientId
+        ? duplicateWorkflow.clientId
+        : selectedExistingClientId || offer.client_id;
+
+    if (duplicateWorkflow.decision === "new") {
+      const newClientPayload = {
+        client_type: saleForm.customerType === "b2b" ? "B2B" : "B2C",
+        full_name: saleForm.customerType === "b2c" ? saleForm.fullName : saleForm.representativeName,
+        company_name: saleForm.customerType === "b2b" ? saleForm.companyName : null,
+        nip: saleForm.customerType === "b2b" ? saleForm.nip : null,
+        regon: saleForm.customerType === "b2b" ? saleForm.regon : null,
+        contact_person: saleForm.customerType === "b2b" ? saleForm.representativeName : null,
+        pesel: saleForm.pesel,
+        phone: saleForm.phone,
+        email: saleForm.email,
+        street: saleForm.contractStreet,
+        building_number: saleForm.contractBuildingNumber,
+        postal_code: saleForm.contractPostalCode,
+        city: saleForm.contractCity,
+        status: "Klient aktywny",
+        assigned_user_id: offer.created_by,
+      };
+
+      const { data: newClient, error: newClientError } = await supabase
+        .from("clients")
+        .insert(newClientPayload)
+        .select("id")
+        .single();
+
+      console.log("NEW DUPLICATE CLIENT CREATED:", newClient);
+      console.log("NEW DUPLICATE CLIENT ERROR:", newClientError);
+
+      if (newClientError || !newClient) {
+        console.error("Błąd tworzenia nowego klienta mimo dubla:", newClientError);
+        setCreateSaleStatus(newClientError?.message || "Nie udało się utworzyć nowego klienta.");
+        setCreatingSale(false);
+        return;
+      }
+
+      effectiveClientId = newClient.id;
+    }
+
+    console.log("SALE TAG DEBUG", {
+      duplicateWorkflow,
+      effectiveClientId,
+      selectedExistingClientId,
+      offerClientId: offer.client_id,
+    });
     const salePayload = {
-      client_id: selectedExistingClientId || offer.client_id,
+      client_id: effectiveClientId,
       seller_id: offer.created_by,
       source_offer_id: offer.id,
       sale_date: new Date().toISOString(),
@@ -927,8 +1063,18 @@ export default function OfferDetailsPage() {
         pesel: saleForm.pesel,
         phone: saleForm.phone,
         email: saleForm.email,
+        contract_street: saleForm.contractStreet,
+        contract_building_number: saleForm.contractBuildingNumber,
+        contract_postal_code: saleForm.contractPostalCode,
+        contract_city: saleForm.contractCity,
         contract_address: contractAddress,
+        correspondence_same_as_contract: saleForm.correspondenceSameAsContract,
         correspondence_address: correspondenceAddress,
+        installation_same_as_contract: saleForm.installationSameAsContract,
+        installation_street: installationSplit.street,
+        installation_building_number: installationSplit.buildingNumber,
+        installation_postal_code: installationSplit.postalCode,
+        installation_city: installationSplit.city,
         installation_address: installationAddress,
       },
       offer_snapshot: offer,
@@ -950,7 +1096,20 @@ console.log("SALE ERROR:", saleError);
       setCreatingSale(false);
       return;
     }
+const { error: updateClientStatusError } = await supabase
+  .from("clients")
+  .update({
+    status: "Klient aktywny",
+    street: saleForm.contractStreet,
+    building_number: saleForm.contractBuildingNumber,
+    postal_code: saleForm.contractPostalCode,
+    city: saleForm.contractCity,
+  })
+  .eq("id", effectiveClientId);
 
+if (updateClientStatusError) {
+  console.error("Błąd aktualizacji statusu klienta po sprzedaży:", updateClientStatusError);
+}
     const { error: updateOfferError } = await supabase
       .from("client_offers")
       .update({ status: "sale_created" })
@@ -959,18 +1118,116 @@ console.log("SALE ERROR:", saleError);
     if (updateOfferError) {
       console.error("Błąd aktualizacji statusu oferty:", updateOfferError);
     }
+
+    if (
+      duplicateWorkflow.decision === "existing" &&
+      duplicateWorkflow.conflictDetected &&
+      duplicateWorkflow.clientId
+    ) {
+      await addSystemTagToClient(
+  effectiveClientId,
+  "Możliwy konflikt",
+  "red"
+);
+      const { data: adminUsers, error: adminUsersError } = await supabase
+        .from("profiles")
+        .select("id")
+        .in("role", ["owner", "admin"]);
+
+      if (adminUsersError) {
+        console.error("Błąd pobierania adminów do powiadomienia konfliktowego:", adminUsersError);
+      }
+
+      const advisorName =
+        creator?.display_name ||
+        creator?.full_name ||
+        creator?.name ||
+        creator?.username ||
+        creator?.email ||
+        "Nieznany doradca";
+
+      if (adminUsers?.length) {
+        const { error: notificationError } = await supabase.from("notifications").insert(
+          adminUsers.map((user) => ({
+            user_id: user.id,
+            title: "Możliwy konflikt klienta",
+            body: `Doradca ${advisorName} utworzył sprzedaż na kliencie przypisanym do innego użytkownika. Zweryfikuj przypisanie klienta.`,
+            client_id: effectiveClientId,
+            is_read: false,
+          }))
+        );
+
+        if (notificationError) {
+          console.error("Błąd tworzenia powiadomienia konfliktowego:", notificationError);
+        }
+      }
+    }
+
+    if (
+      duplicateWorkflow.decision === "new" &&
+      effectiveClientId
+    ) {
+      console.log("DUPLICATE TAG BLOCK ENTERED", {
+        effectiveClientId,
+        duplicateWorkflow,
+      });
+      await addSystemTagToClient(
+        effectiveClientId,
+        "Możliwy dubel",
+        "amber"
+      );
+
+      const { data: adminUsers, error: adminUsersError } = await supabase
+        .from("profiles")
+        .select("id")
+        .in("role", ["owner", "admin"]);
+
+      if (adminUsersError) {
+        console.error("Błąd pobierania adminów do powiadomienia o możliwym dublu:", adminUsersError);
+      }
+
+      const advisorName =
+        creator?.display_name ||
+        creator?.full_name ||
+        creator?.name ||
+        creator?.username ||
+        creator?.email ||
+        "Nieznany doradca";
+
+      if (adminUsers?.length) {
+        const { error: notificationError } = await supabase.from("notifications").insert(
+          adminUsers.map((user) => ({
+            user_id: user.id,
+            title: "Możliwy dubel klienta",
+            body: `Doradca ${advisorName} utworzył nowego klienta pomimo wykrycia podobnych danych. Zweryfikuj możliwy duplikat.`,
+            client_id: effectiveClientId,
+            is_read: false,
+          }))
+        );
+
+        if (notificationError) {
+          console.error("Błąd tworzenia powiadomienia o możliwym dublu:", notificationError);
+        }
+      }
+    }
+
     if (sourceEventId) {
-  await supabase
-    .from("calendar_events")
-    .update({
-      status: "done",
-      meeting_effect: "Sprzedaż",
-    })
-    .eq("id", sourceEventId);
-}
+      await supabase
+        .from("calendar_events")
+        .update({
+          status: "done",
+          meeting_effect: "Sprzedaż",
+        })
+        .eq("id", sourceEventId);
+    }
     setCreatingSale(false);
     setAllowDuplicateClientCreation(false);
     setSkipDuplicateCheck(false);
+    duplicateWorkflowRef.current = {
+      decision: null,
+      clientId: null,
+      conflictDetected: false,
+    };
     setSelectedExistingClientId(null);
     setShowSaleForm(false);
 
@@ -1039,21 +1296,23 @@ console.log("SALE ERROR:", saleError);
               Otwórz klienta
             </Link>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                openSaleFormFromOffer();
-              }}
-              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
-            >
-              Utwórz sprzedaż z oferty
-            </button>
+            {!autoCreateSale && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openSaleFormFromOffer(client);
+                }}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+              >
+                Utwórz sprzedaż z oferty
+              </button>
+            )}
             {sourceEventId && (
-  <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
-    Sprzedaż tworzona z poziomu zakończonego spotkania
-  </div>
-)}
+              <div className="inline-flex items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
+                Sprzedaż tworzona z poziomu zakończonego spotkania
+              </div>
+            )}
           </div>
         </div>
 
@@ -1069,13 +1328,6 @@ console.log("SALE ERROR:", saleError);
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowSaleForm(false)}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                Zamknij
-              </button>
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -1312,12 +1564,22 @@ console.log("SALE ERROR:", saleError);
                         return;
                       }
 
+                      const assignedUserId =
+                        duplicateClientModal.client.assigned_user_id ||
+                        duplicateClientModal.client.assigned_to ||
+                        null;
+
                       const hasConflict =
-                        !!duplicateClientModal.client.assigned_to &&
-                        duplicateClientModal.client.assigned_to !== currentUserId;
+                        !!assignedUserId &&
+                        assignedUserId !== currentUserId;
 
                       setClientConflictDetected(hasConflict);
                       setDuplicateDecision("existing");
+                      duplicateWorkflowRef.current = {
+                        decision: "existing",
+                        clientId: duplicateClientModal.client.id,
+                        conflictDetected: hasConflict,
+                      };
 
                       setSelectedExistingClientId(duplicateClientModal.client.id);
                       setSkipDuplicateCheck(true);
@@ -1327,8 +1589,16 @@ console.log("SALE ERROR:", saleError);
                         client: null,
                       });
 
+                      const workflow = {
+                        decision: "existing" as const,
+                        clientId: duplicateClientModal.client.id,
+                        conflictDetected: hasConflict,
+                      };
+
+                      duplicateWorkflowRef.current = workflow;
+
                       setTimeout(() => {
-                        createSaleFromOffer();
+                        createSaleFromOffer(workflow);
                       }, 50);
                     }}
                     className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
@@ -1340,6 +1610,13 @@ console.log("SALE ERROR:", saleError);
                     type="button"
                     onClick={() => {
                       setDuplicateDecision("new");
+                      const workflow = {
+                        decision: "new" as const,
+                        clientId: null,
+                        conflictDetected: false,
+                      };
+
+                      duplicateWorkflowRef.current = workflow;
                       setDuplicateClientModal({
                         open: false,
                         client: null,
@@ -1348,7 +1625,7 @@ console.log("SALE ERROR:", saleError);
                       setAllowDuplicateClientCreation(true);
 
                       setTimeout(() => {
-                        createSaleFromOffer();
+                        createSaleFromOffer(workflow);
                       }, 0);
                     }}
                     className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
@@ -1369,6 +1646,39 @@ console.log("SALE ERROR:", saleError);
                 Utworzono nowego klienta pomimo wykrycia podobnych danych. W kolejnym kroku dodamy tag „Możliwy dubel” oraz powiadomienie owner/admin do weryfikacji.
               </div>
             )}
+            {showCancelSaleModal && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-5">
+                <p className="text-lg font-black text-red-900">
+                  Czy na pewno chcesz przerwać dodawanie sprzedaży?
+                </p>
+
+                <p className="mt-2 text-sm text-red-800">
+                  Wprowadzone dane zostaną utracone.
+                </p>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelSaleModal(false)}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Wróć do formularza
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCancelSaleModal(false);
+                      setShowSaleForm(false);
+                      router.push('/sales');
+                    }}
+                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                  >
+                    Przerwij dodawanie
+                  </button>
+                </div>
+              </div>
+            )}
             {createSaleStatus && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
                 {createSaleStatus}
@@ -1378,15 +1688,15 @@ console.log("SALE ERROR:", saleError);
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowSaleForm(false)}
+                onClick={() => setShowCancelSaleModal(true)}
                 className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Anuluj
+                Zamknij
               </button>
 
               <button
                 type="button"
-                onClick={createSaleFromOffer}
+                onClick={() => createSaleFromOffer()}
                 disabled={creatingSale}
                 className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300 disabled:text-slate-500"
               >
@@ -1474,7 +1784,7 @@ console.log("SALE ERROR:", saleError);
                   {canSeeFullFinancials
                     ? "Marża firmy"
                     : canSeeManagerFinancials
-                      ? "Marża zespołu"
+                      ? "Marża handlowca"
                       : "Moja marża"}
                 </p>
                 <p className="mt-1 text-xl font-black text-emerald-950">
@@ -1482,17 +1792,6 @@ console.log("SALE ERROR:", saleError);
                 </p>
               </div>
 
-              {!canSeeFullFinancials && canSeeManagerFinancials && (
-                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                  <p className="text-sm font-semibold text-blue-900">
-                    Manager widzi uproszczone dane finansowe oferty.
-                  </p>
-
-                  <p className="mt-1 text-xs text-blue-700">
-                    Ukryto szczegółowe koszty systemu, rozpiski marż i dane techniczne kalkulatora.
-                  </p>
-                </div>
-              )}
               {canSeeFullFinancials && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase text-slate-400">Marża doradcy</p>

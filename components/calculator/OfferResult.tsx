@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 
 type Result = {
@@ -8,6 +9,22 @@ type Result = {
   inverter: string;
   energyStorage: string;
   offerType: string;
+  billingSystem?: "net_billing" | "net_metering";
+  withEms?: boolean;
+  subsidyProgramCap?: number;
+  subsidyAllocation?: {
+    enabled: boolean;
+    billingSystem: "net_billing" | "net_metering";
+    pvNet: number;
+    storageNet: number;
+    emsNet: number;
+    storageSubsidy: number;
+    emsBonus: number;
+    total: number;
+    programCap: number;
+    storageCapByKwh: number;
+    maxStorageSubsidy: number;
+  };
   basePriceNet: number;
   sellerMarkupNet: number;
   finalNet: number;
@@ -43,6 +60,7 @@ type OfferResultProps = {
   saveOfferToCrm?: () => void;
   savingOffer?: boolean;
   saveOfferStatus?: string;
+  savedOfferId?: string | null;
   selectedClientId?: string;
   canSeeTechnicalView: boolean;
   currentUserRole?: string;
@@ -71,6 +89,7 @@ export default function OfferResult({
   saveOfferToCrm,
   savingOffer = false,
   saveOfferStatus = "",
+  savedOfferId = null,
   selectedClientId = "",
   canSeeTechnicalView,
   currentUserRole,
@@ -82,10 +101,7 @@ export default function OfferResult({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
 
-  const isSeller = currentUserRole === "seller";
-  const showFullAdminBreakdownForSeller =
-    process.env.NODE_ENV === "development";
-  const canSeeMarginSummary = canSeeTechnicalView || isSeller;
+  const canSeeMarginSummary = canSeeTechnicalView;
 
   function findBreakdownValue(keywords: string[]) {
     const breakdown = Array.isArray(result?.breakdown)
@@ -105,6 +121,7 @@ export default function OfferResult({
 
   const storageNetFromBreakdown = findBreakdownValue(["magazyn", "storage"]);
   const inverterNetFromBreakdown = findBreakdownValue(["falownik", "inverter"]);
+  const emsNetFromBreakdown = findBreakdownValue(["ems"]);
 
   const storageGrossForSubsidy = Math.round(
     storageNetFromBreakdown * (1 + result.vatRate / 100)
@@ -112,6 +129,9 @@ export default function OfferResult({
 
   const inverterGrossForSubsidy = Math.round(
     inverterNetFromBreakdown * (1 + result.vatRate / 100)
+  );
+  const emsGrossForSubsidy = Math.round(
+    emsNetFromBreakdown * (1 + result.vatRate / 100)
   );
 
   const sellerCommissionNet = Math.round(
@@ -250,16 +270,25 @@ export default function OfferResult({
 
         {saveOfferToCrm && (
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 shadow-sm">
-            <button
-              type="button"
-              onClick={saveOfferToCrm}
-              disabled={savingOffer || !selectedClientId}
-              className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-            >
-              {savingOffer ? "Zapisywanie oferty..." : "Zapisz ofertę w CRM"}
-            </button>
+            {savedOfferId ? (
+              <Link
+                href={`/offers/${savedOfferId}?createSale=1`}
+                className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 sm:text-base"
+              >
+                Wygeneruj sprzedaż
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={saveOfferToCrm}
+                disabled={savingOffer || !selectedClientId}
+                className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+              >
+                {savingOffer ? "Zapisywanie oferty..." : "Zapisz ofertę w CRM"}
+              </button>
+            )}
 
-            {!selectedClientId && (
+            {!selectedClientId && !savedOfferId && (
               <p className="mt-2 text-xs font-medium text-amber-700">
                 Wybierz klienta w formularzu, żeby zapisać ofertę na jego karcie.
               </p>
@@ -321,8 +350,8 @@ export default function OfferResult({
                 : 0;
             })()}
             storageGrossPrice={result.finalNet}
-            inverterGrossPrice={inverterGrossForSubsidy}
-            isNetBilling={true}
+            inverterGrossPrice={result.withEms ? emsGrossForSubsidy : inverterGrossForSubsidy}
+            isNetBilling={result.billingSystem !== "net_metering"}
             isEuStorage={true}
             isEuHybridInverter={true}
           />
@@ -333,56 +362,38 @@ export default function OfferResult({
             <button
               type="button"
               onClick={() => setShowMarginSummary((current) => !current)}
-              className={
-                isSeller
-                  ? "w-full flex items-center justify-end rounded-xl bg-transparent px-1 py-1 text-left"
-                  : "w-full flex items-center justify-between rounded-2xl bg-white border border-slate-200 px-4 py-3 text-left hover:bg-slate-50 transition"
-              }
+              className="w-full flex items-center justify-between rounded-2xl bg-white border border-slate-200 px-4 py-3 text-left hover:bg-slate-50 transition"
             >
-              {isSeller ? (
-                <span className="text-slate-500 text-sm">
-                  {showMarginSummary ? "−" : "+"}
+              <>
+                <span className="font-medium text-slate-500">
+                  Zaawansowane dane finansowe
                 </span>
-              ) : (
-                <>
-                  <span className="font-medium text-slate-500">
-                    Widok techniczny — tylko do testów
-                  </span>
-                  <span className="text-slate-400">
-                    {showMarginSummary ? "Zwiń" : "Rozwiń"}
-                  </span>
-                </>
-              )}
+                <span className="text-slate-400">
+                  {showMarginSummary ? "Zwiń" : "Rozwiń"}
+                </span>
+              </>
             </button>
 
             {showMarginSummary && (
               <div className="mt-4 space-y-3">
-                {isSeller && !showFullAdminBreakdownForSeller ? (
-                  <div className="break-words text-right text-sm font-normal text-slate-500">
-                    {sellerCommissionNet.toLocaleString("pl-PL")} zł
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex justify-between text-sm text-slate-600 mb-4 font-semibold">
-                      <span>Realna marża firmy</span>
-                      <span>{result.companyMargin.toLocaleString("pl-PL")} zł</span>
-                    </div>
+                <div className="flex justify-between text-sm text-slate-600 mb-4 font-semibold">
+                  <span>Realna marża firmy</span>
+                  <span>{result.companyMargin.toLocaleString("pl-PL")} zł</span>
+                </div>
 
-                    <div className="space-y-2">
-                      {(Array.isArray(result?.breakdown)
-                        ? result.breakdown
-                        : []).map((item) => (
-                        <div
-                          key={item.label}
-                          className="flex items-start justify-between gap-3 text-sm text-slate-700"
-                        >
-                          <span className="min-w-0 break-words">{item.label}</span>
-                          <span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span>
-                        </div>
-                      ))}
+                <div className="space-y-2">
+                  {(Array.isArray(result?.breakdown)
+                    ? result.breakdown
+                    : []).map((item) => (
+                    <div
+                      key={item.label}
+                      className="flex items-start justify-between gap-3 text-sm text-slate-700"
+                    >
+                      <span className="min-w-0 break-words">{item.label}</span>
+                      <span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span>
                     </div>
-                  </>
-                )}
+                  ))}
+                </div>
               </div>
             )}
           </div>

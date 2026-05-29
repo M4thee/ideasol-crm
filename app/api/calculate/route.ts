@@ -387,8 +387,6 @@ export async function POST(request: Request) {
     }
   }
 
-  console.log("CURRENT USER CALCULATE:", currentUser);
-  console.log("ADVISOR FROM BODY:", body?.advisor);
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
       .from("pricing_settings")
@@ -496,7 +494,13 @@ export async function POST(request: Request) {
   const isStorageOnly = offerType === "storage";
   const isPvOnly = offerType === "pv";
   const hasPv = !isStorageOnly;
-  const shouldAddEms = offerType === "pv_storage" || offerType === "storage";
+
+  const billingSystem =
+    body.billingSystem === "net_metering"
+      ? "net_metering"
+      : "net_billing";
+
+  const shouldAddEms = Boolean(body.withEms);
 
   const panel = pricing.panels[body.panelModel as keyof typeof pricing.panels];
   const requestedStorageKey = isPvOnly ? "none" : body.storage;
@@ -585,13 +589,6 @@ const shouldApplyManagerFee = Boolean(
   currentUser?.role === "seller" && currentUser?.manager_id
 );
 
-console.log("MANAGER FEE CHECK:", {
-  sellerId: currentUser?.id,
-  role: currentUser?.role,
-  managerId: currentUser?.manager_id,
-  shouldApplyManagerFee,
-});
-
 let managerFeeMultiplier = 0;
 
 if (shouldApplyManagerFee) {
@@ -623,7 +620,7 @@ const sellerWarrantyFeeNet = Math.round(
 
 const sellerCommissionNet = Math.max(
   0,
-  sellerMarkupNet - sellerWarrantyFeeNet
+  sellerMarkupNet
 );
 
 
@@ -651,11 +648,64 @@ const sellerCommissionNet = Math.max(
       managerFeeNet
   );
 
+  const subsidyProgramCap = billingSystem === "net_billing" ? 16000 : 8000;
+  const hasStorageForSubsidy = hasStorageSelected && storage.capacityKwh >= 10;
+  const storageCapByKwh = storage.capacityKwh * 800;
+  const maxStorageSubsidy = hasStorageForSubsidy
+    ? Math.min(storageCapByKwh, subsidyProgramCap)
+    : 0;
+
+  const optimizedEmsNet = shouldAddEms
+    ? Math.min(4000, finalNet)
+    : 0;
+
+  const availableForStorageAfterEmsNet = Math.max(finalNet - optimizedEmsNet, 0);
+  const idealStorageNetForMaxSubsidy = maxStorageSubsidy / 0.3;
+
+  const optimizedStorageNet = hasStorageForSubsidy
+    ? Math.min(idealStorageNetForMaxSubsidy, availableForStorageAfterEmsNet)
+    : 0;
+
+  const storageSubsidy = hasStorageForSubsidy
+    ? Math.min(
+        optimizedStorageNet * 0.3,
+        storageCapByKwh,
+        subsidyProgramCap
+      )
+    : 0;
+
+  const emsBonus = shouldAddEms
+    ? Math.min(optimizedEmsNet * 0.5, 2000)
+    : 0;
+
+  const optimizedPvNet = Math.max(
+    finalNet - optimizedStorageNet - optimizedEmsNet,
+    0
+  );
+
+  const subsidyTotal = Math.round(storageSubsidy + emsBonus);
+
+  const subsidyAllocation = {
+    enabled: hasStorageForSubsidy || shouldAddEms,
+    billingSystem,
+    pvNet: Math.round(optimizedPvNet),
+    storageNet: Math.round(optimizedStorageNet),
+    emsNet: Math.round(optimizedEmsNet),
+    storageSubsidy: Math.round(storageSubsidy),
+    emsBonus: Math.round(emsBonus),
+    total: subsidyTotal,
+    programCap: subsidyProgramCap,
+    storageCapByKwh: Math.round(storageCapByKwh),
+    maxStorageSubsidy: Math.round(maxStorageSubsidy),
+  };
+
   return NextResponse.json({
     pvPowerKw,
     inverter: inverter.name,
     energyStorage: storage.name,
     offerType,
+    billingSystem,
+    withEms: shouldAddEms,
     basePriceNet: Math.round(
       purchaseCostNet +
         grossManagerMarginsBeforeOperatorNet +
@@ -676,6 +726,8 @@ const sellerCommissionNet = Math.max(
     managerWarrantyFeeNet,
     managerOwnersCount: managerOverride.ownersCount,
     marketingNet,
+    subsidyProgramCap,
+    subsidyAllocation,
     managerOverrideNet: Math.round(managerMarginAfterOperatorTotalNet),
     managerOverridePerOwnerNet: Math.round(managerMarginAfterOperatorPerOwnerNet),
     managerOverrideGrossNet: Math.round(grossManagerMarginsBeforeOperatorNet),
@@ -734,7 +786,7 @@ const sellerCommissionNet = Math.max(
         value: Math.round(managerFeeNet),
       },
       {
-        label: `Rękojmia ${operatorPercent}% od kwoty netto`,
+        label: `Fundusz gwarancyjny ${operatorPercent}% od kwoty netto`,
         value: operatorFeeNet,
       },
       {
@@ -746,7 +798,7 @@ const sellerCommissionNet = Math.max(
         value: Math.round(managerMarginAfterOperatorPerOwnerNet),
       },
       {
-        label: "Prowizja handlowca po rękojmi",
+        label: "Prowizja handlowca",
         value: Math.round(sellerCommissionNet),
       },
     ],

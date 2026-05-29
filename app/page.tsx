@@ -268,15 +268,29 @@ export default function Home() {
 
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("role, manager_id")
+          .select("role, manager_id, is_active")
           .eq("id", session.user.id)
           .maybeSingle();
 
         if (profileError) {
           console.error(
-  "Błąd pobierania profilu użytkownika",
-  JSON.stringify(profileError, null, 2)
-);
+            "Błąd pobierania profilu użytkownika",
+            JSON.stringify(profileError, null, 2)
+          );
+        }
+
+        if (profileData?.is_active === false) {
+          await supabase.auth.signOut();
+
+          if (!mounted) return;
+
+          setCurrentUser(null);
+          setCurrentUserRole("seller");
+          setClients([]);
+          setSelectedClient(null);
+          setError("Administrator dezaktywował Twój dostęp do CRM. Skontaktuj się z administratorem systemu.");
+          setAuthLoading(false);
+          return;
         }
 
         if (!mounted) return;
@@ -333,15 +347,29 @@ export default function Home() {
 
         const { data: profileData, error: profileError } = await supabase
           .from("profiles")
-          .select("role, manager_id")
+          .select("role, manager_id, is_active")
           .eq("id", session.user.id)
           .maybeSingle();
 
         if (profileError) {
           console.error(
-  "Błąd pobierania profilu po zmianie sesji",
-  JSON.stringify(profileError, null, 2)
-);
+            "Błąd pobierania profilu po zmianie sesji",
+            JSON.stringify(profileError, null, 2)
+          );
+        }
+
+        if (profileData?.is_active === false) {
+          await supabase.auth.signOut();
+
+          if (!mounted) return;
+
+          setCurrentUser(null);
+          setCurrentUserRole("seller");
+          setClients([]);
+          setSelectedClient(null);
+          setError("Administrator dezaktywował Twój dostęp do CRM.");
+          setAuthLoading(false);
+          return;
         }
 
         if (!mounted) return;
@@ -1191,22 +1219,33 @@ export default function Home() {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      setError("Nie udało się pobrać danych użytkownika po zalogowaniu.");
+      setError("Administrator dezaktywował Twój dostęp do CRM.");
       setAuthLoading(false);
       return;
     }
 
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("role, password_reset_required")
+      .select("role, password_reset_required, is_active")
       .eq("id", user.id)
       .maybeSingle();
 
     if (profileError) {
       console.error(
-  "Błąd sprawdzania profilu po logowaniu",
-  JSON.stringify(profileError, null, 2)
-);
+        "Błąd sprawdzania profilu po logowaniu",
+        JSON.stringify(profileError, null, 2)
+      );
+    }
+
+    if (profileData?.is_active === false) {
+      await supabase.auth.signOut();
+      setCurrentUser(null);
+      setCurrentUserRole("seller");
+      setClients([]);
+      setSelectedClient(null);
+      setError("Administrator dezaktywował Twój dostęp do CRM.");
+      setAuthLoading(false);
+      return;
     }
 
     setCurrentUser(user as AuthUser);

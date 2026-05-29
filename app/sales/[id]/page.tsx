@@ -56,6 +56,10 @@ type Client = {
   phone: string | null;
   email: string | null;
   city: string | null;
+  street?: string | null;
+  building_number?: string | null;
+  postal_code?: string | null;
+  address?: string | null;
 };
 
 type SellerProfile = {
@@ -197,12 +201,12 @@ export default function SalePage() {
     );
     setSoldItemsInput(saleData.sold_items || "");
 
-    if (saleData.client_id) {
-      const { data: clientData, error: clientError } = await supabase
-        .from("clients")
-        .select("id, full_name, company_name, phone, email, city")
-        .eq("id", saleData.client_id)
-        .maybeSingle();
+      if (saleData.client_id) {
+        const { data: clientData, error: clientError } = await supabase
+          .from("clients")
+          .select("id, full_name, company_name, phone, email, city, street, building_number, postal_code, address")
+          .eq("id", saleData.client_id)
+          .maybeSingle();
 
       if (clientError) {
         console.error("Błąd ładowania klienta sprzedaży:", clientError);
@@ -556,6 +560,56 @@ async function deleteSale() {
       : `SID-${sale.id.slice(0, 8).toUpperCase()}`;
   const clientName = client?.full_name || client?.company_name || "Brak klienta";
 
+  const saleCustomerData = sale.customer_data || {};
+
+  function joinAddressParts(parts: Array<string | number | null | undefined>) {
+    return parts
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function formatPostalCity(postalCode?: string | null, city?: string | null) {
+    return [postalCode, city]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function buildMultilineAddress(line1?: string | null, line2?: string | null) {
+    const cleanLine1 = String(line1 || "").trim();
+    const cleanLine2 = String(line2 || "").trim();
+
+    return [cleanLine1, cleanLine2].filter(Boolean).join("\n") || "Brak";
+  }
+
+  const contractAddress = buildMultilineAddress(
+    joinAddressParts([
+      saleCustomerData.contractStreet || saleCustomerData.street || client?.street || client?.address,
+      saleCustomerData.contractBuildingNumber || saleCustomerData.buildingNumber || client?.building_number,
+    ]),
+    formatPostalCity(
+      saleCustomerData.contractPostalCode || saleCustomerData.postalCode || client?.postal_code,
+      saleCustomerData.contractCity || saleCustomerData.city || client?.city
+    )
+  );
+
+  const installationAddress = buildMultilineAddress(
+    joinAddressParts([
+      saleCustomerData.installationStreet || saleCustomerData.mountingStreet || saleCustomerData.contractStreet || client?.street || client?.address,
+      saleCustomerData.installationBuildingNumber || saleCustomerData.mountingBuildingNumber || saleCustomerData.contractBuildingNumber || client?.building_number,
+    ]),
+    formatPostalCity(
+      saleCustomerData.installationPostalCode || saleCustomerData.mountingPostalCode || saleCustomerData.contractPostalCode || client?.postal_code,
+      saleCustomerData.installationCity || saleCustomerData.mountingCity || saleCustomerData.contractCity || client?.city
+    )
+  );
+
+  const soldItemsList = String(sale.sold_items || "")
+    .split(/\n|\s\+\s/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
   const financialData = sale.offer_snapshot?.offer_data?.result || null;
   const financialBreakdown = Array.isArray(financialData?.breakdown)
     ? financialData.breakdown
@@ -634,15 +688,29 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               Karta sprzedaży
             </h1>
           </div>
-          {canDeleteSale && (
-  <button
-    type="button"
-    onClick={deleteSale}
-    className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700 hover:bg-red-100"
-  >
-    Usuń sprzedaż
-  </button>
-)}
+          <div className="flex items-center gap-2 flex-wrap">
+            {sale.client_id && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = `/clients/${sale.client_id}`;
+                }}
+                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Karta klienta
+              </button>
+            )}
+
+            {canDeleteSale && (
+              <button
+                type="button"
+                onClick={deleteSale}
+                className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700 hover:bg-red-100"
+              >
+                Usuń sprzedaż
+              </button>
+            )}
+          </div>
         </header>
 
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
@@ -832,9 +900,20 @@ function canShowFinancialBreakdownItem(label?: string | null) {
                       Sprzedane produkty/usługi
                     </p>
 
-                    <p className="text-slate-800 whitespace-pre-wrap">
-                      {sale.sold_items || "Brak danych"}
-                    </p>
+                    {soldItemsList.length > 0 ? (
+                      <div className="space-y-2">
+                        {soldItemsList.map((item, index) => (
+                          <div
+                            key={`${item}-${index}`}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800"
+                          >
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-800">Brak danych</p>
+                    )}
                   </div>
 
                   {currentUserRole !== "cc" && (
@@ -1250,6 +1329,26 @@ function canShowFinancialBreakdownItem(label?: string | null) {
 
                   <p className="text-slate-900">
                     {client?.city || "Brak"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                    Adres klienta
+                  </p>
+
+                  <p className="whitespace-pre-wrap text-slate-900">
+                    {contractAddress}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                    Adres montażu
+                  </p>
+
+                  <p className="whitespace-pre-wrap text-slate-900">
+                    {installationAddress}
                   </p>
                 </div>
               </div>

@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 type SubsidyOptimizerProps = {
   storageCapacity: number;
   storageGrossPrice: number;
-  inverterGrossPrice: number;
+  inverterGrossPrice?: number;
   isNetBilling: boolean;
   isEuStorage: boolean;
   isEuHybridInverter: boolean;
@@ -30,8 +30,8 @@ export default function SubsidyOptimizer({
   const calculations = useMemo(() => {
     const totalNetPrice = Math.max(storageGrossPrice, 0);
 
-    // PV musi posiadać choć symboliczną wartość na fakturze.
-    const symbolicPvNet = totalNetPrice > 1 ? 1 : 0;
+    // Symboliczna wartość pozostaje tylko informacyjnie.
+    const symbolicPvNet = 0;
 
     const hasStorage = storageCapacity >= 10;
     const storageCapByKwh = storageCapacity * 800;
@@ -45,29 +45,30 @@ export default function SubsidyOptimizer({
 
     const canApplyEuBonus = Boolean(isEuStorage && isEuHybridInverter);
 
-    // EMS/falownik UE musi mieć realną wartość netto,
-    // aby wygenerować bonus 50% max 2000 zł.
-    const eligibleDeviceNet = Math.max(inverterGrossPrice, 0);
-
-    // Żeby uzyskać pełne 2000 zł bonusu,
-    // urządzenie musi mieć minimum 4000 zł netto.
-    const targetInverterNet = canApplyEuBonus
-      ? Math.min(eligibleDeviceNet, 4000)
+    // EMS w optymalizacji dotacyjnej nie oznacza kosztu zakupu EMS.
+    // To wartość EMS możliwa do rozpisania na umowie/fakturze, aby uzyskać bonus 50% max 2000 zł.
+    const eligibleDeviceNet = canApplyEuBonus
+      ? Math.min(4000, totalNetPrice)
       : 0;
+
+    // Żeby uzyskać pełne 2000 zł bonusu, EMS powinien mieć wartość 4000 zł netto,
+    // o ile całkowita cena netto oferty na to pozwala.
+    const targetInverterNet = eligibleDeviceNet;
 
     const inverterBonus = canApplyEuBonus
       ? Math.min(targetInverterNet * 0.5, 2000)
       : 0;
 
-    // Na magazyn można przeznaczyć tylko pozostałą część faktury
-    // po odjęciu EMS/falownika oraz symbolicznej wartości PV.
     const priceAvailableForStorageNet = Math.max(
-      totalNetPrice - symbolicPvNet - targetInverterNet,
+      totalNetPrice - targetInverterNet,
       0
     );
 
+    const idealStorageNet = minStorageNetForMaxSubsidy;
+
     const targetStorageNet = hasStorage
       ? Math.min(
+          idealStorageNet,
           priceAvailableForStorageNet,
           maxStorageNetByProgramLimit
         )
@@ -82,7 +83,7 @@ export default function SubsidyOptimizer({
       : 0;
 
     const remainingNet = Math.max(
-      totalNetPrice - targetStorageNet - targetInverterNet - symbolicPvNet,
+      totalNetPrice - targetStorageNet - targetInverterNet,
       0
     );
 
@@ -106,6 +107,7 @@ export default function SubsidyOptimizer({
       maxStorageSubsidy,
       minStorageNetForMaxSubsidy,
       maxStorageNetByProgramLimit,
+      idealStorageNet,
       targetStorageNet,
       eligibleDeviceNet,
       targetInverterNet,
@@ -123,7 +125,6 @@ export default function SubsidyOptimizer({
   }, [
     storageCapacity,
     storageGrossPrice,
-    inverterGrossPrice,
     isNetBilling,
     isEuStorage,
     isEuHybridInverter,
@@ -169,10 +170,10 @@ export default function SubsidyOptimizer({
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
+        <div className="mt-5 grid gap-3 grid-cols-1 md:grid-cols-3">
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
-              Maks. dotacja
+              Maksymalna dotacja
             </p>
             <div className="mt-2 text-3xl font-black text-emerald-700">
               {formatMoney(calculations.totalSubsidy)} zł
@@ -184,50 +185,106 @@ export default function SubsidyOptimizer({
 
           <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-700">
-              Magazyn energii netto
+              Dotacja ME
             </p>
-            <div className="mt-2 text-2xl font-black text-blue-700">
-              {formatMoney(calculations.targetStorageNet)} zł
+            <div className="mt-2 text-3xl font-black text-blue-700">
+              {formatMoney(calculations.storageSubsidy)} zł
             </div>
             <p className="mt-1 text-xs text-blue-700/80">
-              {storageCapacity > 0
-                ? `${storageCapacity} kWh • ${formatMoney(calculations.storageNetPerKwh)} zł/kWh`
-                : "Brak pojemności"}
+              Limit: {formatMoney(calculations.maxStorageSubsidy)} zł
             </p>
           </div>
 
-          <div className={`rounded-2xl border p-4 ${statusClass}`}>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] opacity-80">
-              Status
+          <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">
+              Bonus EMS
             </p>
-            <div className="mt-2 text-lg font-black">{statusLabel}</div>
-            <p className="mt-1 text-xs opacity-80">
-              Limit programu: {formatMoney(calculations.programCap)} zł
+            <div className="mt-2 text-3xl font-black text-cyan-700">
+              {formatMoney(calculations.inverterBonus)} zł
+            </div>
+            <p className="mt-1 text-xs text-cyan-700/80">
+              EMS: {formatMoney(calculations.targetInverterNet)} zł netto
             </p>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Falownik / EMS UE netto
-            </p>
-            <div className="mt-2 text-xl font-black text-slate-950">
-              {formatMoney(calculations.targetInverterNet)} zł
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Rozpiska ceny netto do umowy / faktury
+              </p>
+              <h3 className="mt-1 text-lg font-black text-slate-950">
+                Proponowany podział wartości
+              </h3>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Bonus EMS/UE: {formatMoney(calculations.inverterBonus)} zł
-            </p>
+
+            <div className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${statusClass}`}>
+              {statusLabel}
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Pozostała część instalacji / PV / montaż netto
-            </p>
-            <div className="mt-2 text-xl font-black text-slate-950">
-              PV + montaż + pozostałe elementy: {formatMoney(calculations.remainingNet)} zł netto
+          <div className="mt-4 space-y-3">
+            <div className="rounded-2xl border border-white bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Magazyn energii</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {storageCapacity > 0
+                      ? `${storageCapacity} kWh • ${formatMoney(calculations.storageNetPerKwh)} zł/kWh`
+                      : "Brak pojemności"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-black text-blue-700">
+                    {formatMoney(calculations.targetStorageNet)} zł
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    dotacja: {formatMoney(calculations.storageSubsidy)} zł
+                  </p>
+                </div>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
+
+            <div className="rounded-2xl border border-white bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">EMS / HEMS</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Wartość optymalizowana pod bonus 50%, maks. 2 000 zł.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-black text-cyan-700">
+                    {formatMoney(calculations.targetInverterNet)} zł
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    bonus: {formatMoney(calculations.inverterBonus)} zł
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">PV + montaż + pozostałe elementy</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Pozostała część ceny netto oferty.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-black text-slate-950">
+                    {formatMoney(calculations.remainingNet)} zł
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+            <p>
+              Optymalizator najpierw rezerwuje wartość EMS dla bonusu, potem ustawia wartość magazynu energii na poziomie potrzebnym do maksymalnej możliwej dotacji, a resztę zostawia jako PV, montaż i pozostałe elementy.
             </p>
           </div>
         </div>
@@ -240,7 +297,7 @@ export default function SubsidyOptimizer({
 
         {showDetails && (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="grid gap-3 text-sm lg:grid-cols-2">
+            <div className="grid gap-3 text-sm grid-cols-1 xl:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <h3 className="font-black text-slate-950">Mechanika wyliczenia</h3>
                 <div className="mt-3 space-y-2">
@@ -269,15 +326,15 @@ export default function SubsidyOptimizer({
                     </strong>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Bonus EMS/UE</span>
+                    <span className="text-slate-500">Bonus EMS</span>
                     <strong className="text-slate-950">
                       {formatMoney(calculations.inverterBonus)} zł
                     </strong>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Symboliczna wartość PV</span>
+                    <span className="text-slate-500">Cena ME dla maks. dotacji</span>
                     <strong className="text-slate-950">
-                      {formatMoney(calculations.symbolicPvNet)} zł
+                      {formatMoney(calculations.idealStorageNet)} zł
                     </strong>
                   </div>
                 </div>
@@ -290,13 +347,11 @@ export default function SubsidyOptimizer({
                     Żeby uzyskać maksymalną dotację do magazynu, jego wartość
                     na fakturze powinna wynieść minimum:
                   </p>
-                  <div className="rounded-xl bg-white px-4 py-3 font-black text-blue-700 ring-1 ring-blue-100">
+                  <div className="rounded-xl bg-white px-4 py-3 text-center font-black text-blue-700 ring-1 ring-blue-100">
                     {formatMoney(calculations.minStorageNetForMaxSubsidy)} zł netto
                   </div>
                   <p className="text-xs leading-5 text-slate-500">
-                    Jeżeli cała oferta jest zbyt niska, moduł przeznacza na magazyn
-                    możliwie największą część ceny, a resztę pozostawia jako PV,
-                    montaż i pozostałe elementy.
+                    Wartość ME pokazana powyżej jest minimalną wartością potrzebną do osiągnięcia maksymalnej możliwej dotacji dla magazynu. Jeżeli klient nie chce optymalizacji na umowie/fakturze, przy sprzedaży będzie można wybrać standardową rozpiskę.
                   </p>
                 </div>
               </div>
