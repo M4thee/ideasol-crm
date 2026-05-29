@@ -19,10 +19,10 @@ export async function POST(request: Request) {
     }
 
     const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = Number(process.env.SMTP_PORT || 465);
+    const smtpPort = Number(process.env.SMTP_PORT || 587);
     const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-    const mailFrom = process.env.MAIL_FROM || smtpUser;
+    const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+    const mailFrom = process.env.MAIL_FROM || process.env.SMTP_FROM || smtpUser;
     const appUrl = process.env.APP_URL || "http://localhost:3000";
     const logoUrl = `${appUrl}/logo.png`;
 
@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
+      requireTLS: smtpPort === 587,
       auth: {
         user: smtpUser,
         pass: smtpPass,
