@@ -11,9 +11,11 @@ type Result = {
   offerType: string;
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
+  includeSubsidy?: boolean;
   subsidyProgramCap?: number;
   subsidyAllocation?: {
     enabled: boolean;
+    requested?: boolean;
     billingSystem: "net_billing" | "net_metering";
     pvNet: number;
     storageNet: number;
@@ -24,6 +26,13 @@ type Result = {
     programCap: number;
     storageCapByKwh: number;
     maxStorageSubsidy: number;
+    existingPvPowerKw?: number;
+    newPvPowerKw?: number;
+    totalPvPowerForSubsidyKw?: number;
+    requiredStorageCapacityKwh?: number;
+    storageCapacityKwh?: number;
+    hasStorageMinimumCapacity?: boolean;
+    hasRequiredStorageToPvRatio?: boolean;
   };
   basePriceNet: number;
   sellerMarkupNet: number;
@@ -54,7 +63,7 @@ type OfferResultProps = {
   clientEmail: string;
   clientName: string;
   setClientEmail: (value: string) => void;
-  sendOfferEmail: () => void;
+  sendOfferEmail: (mode?: "anonymous" | "public") => void;
   sendingEmail: boolean;
   emailStatus: string;
   saveOfferToCrm?: () => void;
@@ -100,6 +109,8 @@ export default function OfferResult({
   const [showMarginSummary, setShowMarginSummary] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
+  const [sendMode, setSendMode] = useState<"anonymous" | "public">("anonymous");
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   const canSeeMarginSummary = canSeeTechnicalView;
 
@@ -189,6 +200,19 @@ export default function OfferResult({
       setIsGeneratingPdf(false);
     }
   }
+
+  const confirmationText =
+    sendMode === "anonymous"
+      ? {
+          title: "Uwaga! Wysyłasz mail z ofertą anonimowo.",
+          body: "Klient nie będzie znał Twojego imienia, nazwiska, telefonu i adresu e-mail. Ewentualna odpowiedź na maila będzie kierowana na skrzynkę ogólną. Czy chcesz kontynuować?",
+          confirm: "Tak, wyślij anonimowo",
+        }
+      : {
+          title: "Uwaga! Wysyłasz mail z ofertą w wersji jawnej.",
+          body: "Klient otrzyma wiadomość z Twoim imieniem i nazwiskiem, numerem telefonu i adresem e-mail, a odpowiedź na maila będzie kierowana na Twój służbowy e-mail. Czy chcesz kontynuować?",
+          confirm: "Tak, wyślij jawnie",
+        };
 
   return (
     <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50 sm:p-6">
@@ -327,20 +351,46 @@ export default function OfferResult({
             />
           </label>
 
-          <button
-            onClick={sendOfferEmail}
-            disabled={sendingEmail || !clientEmail}
-            className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-          >
-            {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
-          </button>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSendMode("anonymous")}
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
+                  sendMode === "anonymous"
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                Anonimowo
+              </button>
 
-          {emailStatus && (
-            <p className="text-sm text-slate-600">{emailStatus}</p>
-          )}
+              <button
+                type="button"
+                onClick={() => setSendMode("public")}
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
+                  sendMode === "public"
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                Jawnie
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSendConfirm(true)}
+              disabled={sendingEmail || !clientEmail}
+              className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            >
+              {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
+            </button>
+          </div>
         </div>
 
-        {result.energyStorage !== "Brak" && (
+        {result.energyStorage !== "Brak" &&
+          (result.includeSubsidy || result.subsidyAllocation?.requested) && (
           <SubsidyOptimizer
             storageCapacity={(() => {
               const match = result.energyStorage.match(/(\d+(?:[.,]\d+)?)\s*kWh/i);
@@ -354,6 +404,10 @@ export default function OfferResult({
             isNetBilling={result.billingSystem !== "net_metering"}
             isEuStorage={true}
             isEuHybridInverter={true}
+            subsidyEnabled={Boolean(result.subsidyAllocation?.enabled)}
+            withEms={Boolean(result.withEms)} 
+            requiredStorageCapacityKwh={result.subsidyAllocation?.requiredStorageCapacityKwh || 0}
+            totalPvPowerForSubsidyKw={result.subsidyAllocation?.totalPvPowerForSubsidyKw || result.pvPowerKw || 0}
           />
         )}
 
@@ -399,6 +453,41 @@ export default function OfferResult({
           </div>
         )}
       </div>
+
+      {showSendConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-950 mb-3">
+              {confirmationText.title}
+            </h3>
+
+            <p className="text-sm text-slate-600 leading-6 mb-6">
+              {confirmationText.body}
+            </p>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSendConfirm(false)}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700"
+              >
+                Nie, wróć
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSendConfirm(false);
+                  sendOfferEmail(sendMode);
+                }}
+                className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white"
+              >
+                {confirmationText.confirm}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

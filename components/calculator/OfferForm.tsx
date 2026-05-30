@@ -63,6 +63,12 @@ type OfferFormProps = {
   setWithEms: (value: boolean) => void;
   billingSystem: "net_billing" | "net_metering";
   setBillingSystem: (value: "net_billing" | "net_metering") => void;
+  includeSubsidy: boolean;
+  setIncludeSubsidy: (value: boolean) => void;
+  isUpsell: boolean;
+  setIsUpsell: (value: boolean) => void;
+  existingPvPowerKw: string;
+  setExistingPvPowerKw: (value: string) => void;
   storages: CatalogStorage[];
   panels: CatalogPanel[];
   inverters: CatalogInverter[];
@@ -104,6 +110,12 @@ export default function OfferForm({
   setWithEms,
   billingSystem,
   setBillingSystem,
+  includeSubsidy,
+  setIncludeSubsidy,
+  isUpsell,
+  setIsUpsell,
+  existingPvPowerKw,
+  setExistingPvPowerKw,
   storages,
   panels,
   inverters,
@@ -302,43 +314,9 @@ export default function OfferForm({
     setResult(null);
   }
 
-  const panelsToShow =
-    panels.length > 0
-      ? panels
-      : [
-          {
-            code: "AMERISOLAR_450_FB",
-            name: "AMERISOLAR 450 FB",
-            power_wp: 450,
-            price_net: 230,
-          },
-          {
-            code: "HORAY_435_BIFACIAL",
-            name: "HORAY 435 BIFACIAL",
-            power_wp: 435,
-            price_net: 240,
-          },
-        ];
+  const panelsToShow = panels;
 
-  const storagesToShow =
-    storages.length > 0
-      ? storages
-      : [
-          {
-            code: "ZBPOWER_10",
-            name: "ZBPOWER ZB-G512200 10 kWh",
-            capacity_kwh: 10,
-            price_net: 4394.5,
-            installation_net: 1500,
-          },
-          {
-            code: "ZBPOWER_16",
-            name: "ZBPOWER ZB-G512314 16 kWh",
-            capacity_kwh: 16,
-            price_net: 5372,
-            installation_net: 1500,
-          },
-        ];
+  const storagesToShow = storages;
 
   const invertersToShow =
     inverters.length > 0
@@ -366,6 +344,9 @@ export default function OfferForm({
       setOfferType("none");
       setStorage("none");
       setWithEms(false);
+      setIncludeSubsidy(false);
+      setIsUpsell(false);
+      setExistingPvPowerKw("0");
       setSelectedInverterName("auto");
       setResult(null);
       setEmailStatus("");
@@ -385,17 +366,22 @@ export default function OfferForm({
     if (nextOfferType === "pv") {
       setStorage("none");
       setWithEms(false);
+      setIncludeSubsidy(false);
+      setIsUpsell(false);
+      setExistingPvPowerKw("0");
     }
 
     if (nextOfferType === "pv_storage") {
-      setWithEms(true);
+      setWithEms(false);
+      setIncludeSubsidy(true);
       if (storage === "none") {
         setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
       }
     }
 
     if (nextOfferType === "storage") {
-      setWithEms(true);
+      setWithEms(false);
+      setIncludeSubsidy(true);
       if (storage === "none") {
         setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
       }
@@ -576,23 +562,62 @@ export default function OfferForm({
                 : "border-slate-200 bg-slate-50"
             }`}
           >
-            <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                checked={hasPvSelected}
-                onChange={(event) => {
-                  updateOfferModules(event.target.checked, hasStorageSelected);
-                }}
-                className="mt-1 h-5 w-5"
-              />
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={hasPvSelected}
+                  onChange={(event) => {
+                    updateOfferModules(event.target.checked, hasStorageSelected);
+                  }}
+                  className="h-5 w-5"
+                />
 
-              <div>
-                <div className="font-semibold text-slate-900">PV</div>
-                <div className="mt-1 text-xs text-slate-500">
-                  Instalacja fotowoltaiczna z montażem.
+                <div className="font-semibold text-slate-900">Fotowoltaika</div>
+              </label>
+
+              {hasPvSelected && (
+                <div className="rounded-2xl border border-[#C787FF] bg-[#C787FF]/10 px-4 py-3">
+                  <div className="grid gap-3 lg:grid-cols-[auto_220px] lg:items-center">
+                    <label className="flex cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isUpsell}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsUpsell(checked);
+                          if (!checked) {
+                            setExistingPvPowerKw("0");
+                          }
+                          setResult(null);
+                        }}
+                        className="h-5 w-5 accent-[#C787FF]"
+                      />
+                      <span className="flex flex-col leading-tight">
+                        <span className="font-semibold text-slate-900">Czy Upsell?</span>
+                        <span className="mt-1 text-xs font-normal text-slate-500">
+                          Wpisz moc obecnej PV klienta
+                        </span>
+                      </span>
+                    </label>
+
+                    {isUpsell && (
+                      <input
+                        className="w-full rounded-2xl border border-[#C787FF] bg-white px-4 py-2.5 text-slate-900 shadow-inner shadow-violet-100/60 outline-none transition focus:border-[#C787FF] focus:bg-white focus:ring-4 focus:ring-[#C787FF]/20"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Wpisz moc obecnej PV klienta"
+                        value={existingPvPowerKw}
+                        onChange={(e) => {
+                          setExistingPvPowerKw(e.target.value);
+                          setResult(null);
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-            </label>
+              )}
+            </div>
 
             {hasPvSelected && (
               <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -716,9 +741,9 @@ export default function OfferForm({
               />
 
               <div>
-                <div className="font-semibold text-slate-900">ME</div>
+                <div className="font-semibold text-slate-900">Magazyn Energii</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Magazyn energii z montażem.
+                
                 </div>
               </div>
             </label>
@@ -762,7 +787,7 @@ export default function OfferForm({
                     </div>
 
                     <div className="text-xs text-slate-500">
-                      Uwzględnij system zarządzania energią w kalkulacji i optymalizacji dotacji.
+                      Dolicz system zarządzania energią.
                     </div>
                   </div>
                 </label>
@@ -809,6 +834,31 @@ export default function OfferForm({
           Funkcja automatyczna dobiera falownik po mocyinstalacji. Ręczny wybór pozwala zmienić model i typ falownika np. sieciowy na hybrydowy.”.
         </p>
       </label>
+      )}
+
+      {hasStorageSelected && (
+        <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={includeSubsidy}
+              onChange={(e) => {
+                setIncludeSubsidy(e.target.checked);
+                setResult(null);
+              }}
+              className="mt-1 h-5 w-5"
+            />
+
+            <div>
+              <div className="font-semibold text-slate-900">
+                Uwzględnij dotację PME
+              </div>
+              <div className="mt-1 text-xs leading-relaxed text-slate-500">
+                Dotacja będzie liczona tylko wtedy, gdy magazyn energii spełnia warunki programu, w tym minimalną pojemność oraz relację pojemności ME do mocy PV.
+              </div>
+            </div>
+          </label>
+        </div>
       )}
 
       {(hasPvSelected || hasStorageSelected) && (

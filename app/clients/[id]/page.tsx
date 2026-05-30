@@ -100,6 +100,8 @@ type ClientActivity = {
   follow_up_at: string | null;
   created_by: string | null;
   created_at: string;
+  author_name?: string | null;
+  author_email?: string | null;
 };
 
 
@@ -109,6 +111,8 @@ type ClientNote = {
   content: string;
   created_by: string | null;
   created_at: string;
+  author_name?: string | null;
+  author_email?: string | null;
 };
 
 
@@ -168,11 +172,44 @@ const contactChannelLabels: Record<ContactChannel, string> = {
   meeting: "Spotkanie",
 };
 
-const contactChannelStyles: Record<string, string> = {
-  phone: "bg-emerald-100 text-emerald-900 border-emerald-200",
-  sms: "bg-blue-100 text-blue-900 border-blue-200",
-  email: "bg-violet-100 text-violet-900 border-violet-200",
-  meeting: "bg-amber-100 text-amber-900 border-amber-200",
+const contactChannelStyles: Record<
+  string,
+  {
+    bar: string;
+    border: string;
+    body: string;
+    bodyHover: string;
+    shadow: string;
+  }
+> = {
+  phone: {
+    bar: "bg-[#C93200] text-white",
+    border: "border-[#C93200]/35",
+    body: "bg-[#C93200]/8",
+    bodyHover: "group-hover:bg-[#C93200]/12",
+    shadow: "hover:shadow-[0_10px_22px_rgba(201,50,0,0.12)]",
+  },
+  sms: {
+    bar: "bg-[#910049] text-white",
+    border: "border-[#910049]/35",
+    body: "bg-[#910049]/8",
+    bodyHover: "group-hover:bg-[#910049]/12",
+    shadow: "hover:shadow-[0_10px_22px_rgba(145,0,73,0.12)]",
+  },
+  email: {
+    bar: "bg-[#187B96] text-white",
+    border: "border-[#187B96]/35",
+    body: "bg-[#187B96]/8",
+    bodyHover: "group-hover:bg-[#187B96]/12",
+    shadow: "hover:shadow-[0_10px_22px_rgba(24,123,150,0.12)]",
+  },
+  meeting: {
+    bar: "bg-[#3A752A] text-white",
+    border: "border-[#3A752A]/35",
+    body: "bg-[#3A752A]/8",
+    bodyHover: "group-hover:bg-[#3A752A]/12",
+    shadow: "hover:shadow-[0_10px_22px_rgba(58,117,42,0.12)]",
+  },
 };
 
 type ActiveTab = "dashboard" | "sales" | "offers" | "meetings";
@@ -363,23 +400,92 @@ export default function ClientPage() {
 
     if (notesError) {
       console.error("Błąd ładowania notatek klienta:", notesError);
+      setNotes([]);
+    } else {
+      const authorIds = Array.from(
+        new Set((notesData || []).map((note) => note.created_by).filter(Boolean))
+      ) as string[];
+
+      let profilesById: Record<
+        string,
+        { display_name: string | null; email: string | null }
+      > = {};
+
+      if (authorIds.length > 0) {
+        const { data: noteAuthorsData, error: noteAuthorsError } = await supabase
+          .from("profiles")
+          .select("id, display_name, email")
+          .in("id", authorIds);
+
+        if (noteAuthorsError) {
+          console.error("Błąd ładowania autorów notatek:", noteAuthorsError);
+        }
+
+        profilesById = Object.fromEntries(
+          (noteAuthorsData || []).map((profile) => [profile.id, profile])
+        );
+      }
+
+      const notesWithAuthors = (notesData || []).map((note) => {
+        const author = note.created_by ? profilesById[note.created_by] : null;
+
+        return {
+          ...note,
+          author_name: author?.display_name || "Nieznany użytkownik",
+          author_email: author?.email || null,
+        };
+      });
+
+      setNotes(notesWithAuthors as ClientNote[]);
     }
-
-    setNotes((notesData as ClientNote[]) || []);
-    console.log("Załadowane notatki klienta:", notesData);
     const { data: activitiesData, error: activitiesError } = await supabase
-  .from("client_activities")
-  .select(
-    "id, client_id, activity_type, contact_type, status, description, follow_up_at, created_by, created_at"
-  )
-  .eq("client_id", clientId)
-  .order("created_at", { ascending: false });
+      .from("client_activities")
+      .select(
+        "id, client_id, activity_type, contact_type, status, description, follow_up_at, created_by, created_at"
+      )
+      .eq("client_id", clientId)
+      .order("created_at", { ascending: false });
 
-if (activitiesError) {
-  console.error("Błąd ładowania historii kontaktów klienta:", activitiesError);
-}
+    if (activitiesError) {
+      console.error("Błąd ładowania historii kontaktów klienta:", activitiesError);
+      setActivities([]);
+    } else {
+      const activityAuthorIds = Array.from(
+        new Set((activitiesData || []).map((activity) => activity.created_by).filter(Boolean))
+      ) as string[];
 
-setActivities((activitiesData as ClientActivity[]) || []);
+      let activityProfilesById: Record<
+        string,
+        { display_name: string | null; email: string | null }
+      > = {};
+
+      if (activityAuthorIds.length > 0) {
+        const { data: activityAuthorsData, error: activityAuthorsError } = await supabase
+          .from("profiles")
+          .select("id, display_name, email")
+          .in("id", activityAuthorIds);
+
+        if (activityAuthorsError) {
+          console.error("Błąd ładowania autorów historii kontaktów:", activityAuthorsError);
+        }
+
+        activityProfilesById = Object.fromEntries(
+          (activityAuthorsData || []).map((profile) => [profile.id, profile])
+        );
+      }
+
+      const activitiesWithAuthors = (activitiesData || []).map((activity) => {
+        const author = activity.created_by ? activityProfilesById[activity.created_by] : null;
+
+        return {
+          ...activity,
+          author_name: author?.display_name || "Nieznany użytkownik",
+          author_email: author?.email || null,
+        };
+      });
+
+      setActivities(activitiesWithAuthors as ClientActivity[]);
+    }
     setLoading(false);
   }
   async function loadClientTags() {
@@ -763,7 +869,32 @@ setActivities((activitiesData as ClientActivity[]) || []);
       return;
     }
 
-    setNotes((currentNotes) => [data as ClientNote, ...currentNotes]);
+    let authorName = "Nieznany użytkownik";
+    let authorEmail: string | null = null;
+
+    if (user?.id) {
+      const { data: noteAuthorData, error: noteAuthorError } = await supabase
+        .from("profiles")
+        .select("display_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (noteAuthorError) {
+        console.error("Błąd ładowania autora dodanej notatki:", noteAuthorError);
+      }
+
+      authorName = noteAuthorData?.display_name || "Nieznany użytkownik";
+      authorEmail = noteAuthorData?.email || null;
+    }
+
+    setNotes((currentNotes) => [
+      {
+        ...(data as ClientNote),
+        author_name: authorName,
+        author_email: authorEmail,
+      },
+      ...currentNotes,
+    ]);
     setNewNote("");
     setSavingNote(false);
   }
@@ -827,8 +958,28 @@ setActivities((activitiesData as ClientActivity[]) || []);
       return;
     }
 
+    let activityAuthorName = "Nieznany użytkownik";
+    let activityAuthorEmail: string | null = null;
+
+    const { data: activityAuthorData, error: activityAuthorError } = await supabase
+      .from("profiles")
+      .select("display_name, email")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (activityAuthorError) {
+      console.error("Błąd ładowania autora dodanego kontaktu:", activityAuthorError);
+    }
+
+    activityAuthorName = activityAuthorData?.display_name || "Nieznany użytkownik";
+    activityAuthorEmail = activityAuthorData?.email || null;
+
     setActivities((currentActivities) => [
-      activityData as ClientActivity,
+      {
+        ...(activityData as ClientActivity),
+        author_name: activityAuthorName,
+        author_email: activityAuthorEmail,
+      },
       ...currentActivities,
     ]);
 
@@ -956,7 +1107,7 @@ setActivities((activitiesData as ClientActivity[]) || []);
   const isB2B = clientType === "B2B";
   const meetings = events.filter((event) => event.event_type === "meeting");
   const reminders = events.filter((event) => event.event_type === "reminder");
-  const visibleActivities = showAllActivities ? activities : activities.slice(0, 3);
+  const visibleActivities = activities;
 
   function isReminderDone(status: string | null) {
     return status === "done" || status?.startsWith("Zakończone");
@@ -1009,15 +1160,20 @@ setActivities((activitiesData as ClientActivity[]) || []);
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
+        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-[#C7EAF0] px-6 py-6 flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <p className="text-sm text-slate-500 mb-1">{visibleLeadId}</p>
+              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <p className="text-sm font-semibold text-slate-600">{visibleLeadId}</p>
+                <p className="text-[11px] font-medium text-slate-500">
+                  Dodano: {new Date(client.created_at).toLocaleString("pl-PL")}
+                </p>
+              </div>
 
               <h1 className="text-3xl font-bold text-slate-900">{clientName}</h1>
 
               <p className="mt-1 text-xs font-medium text-slate-400">
-                Lead dodany przez: {getLeadCreatorName()}
+                Lead dodany przez: {getLeadCreatorName()} | Opiekun klienta: {getAdvisorName()}
               </p>
 
               <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -1069,17 +1225,7 @@ setActivities((activitiesData as ClientActivity[]) || []);
               </div>
             </div>
 
-            <div className="flex flex-1 items-end justify-between gap-6 flex-wrap">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">
-                  Data dodania
-                </p>
-
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {new Date(client.created_at).toLocaleString("pl-PL")}
-                </p>
-              </div>
-
+            <div className="ml-auto flex items-start justify-end">
               <div className="flex items-center gap-2 flex-nowrap">
                 {canEditClient() && (
                   <button
@@ -1104,74 +1250,103 @@ setActivities((activitiesData as ClientActivity[]) || []);
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 text-sm">
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                {isB2B ? "Nazwa firmy" : "Imię i nazwisko"}
-              </p>
-              <p className="font-semibold text-slate-900">{clientName}</p>
-            </div>
+          <div className="border-t border-slate-200 bg-[#EBF8FA] px-6 py-5">
+            <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                    Dane adresowe
+                  </h3>
 
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                Doradca klienta
-              </p>
-              <p className="font-semibold text-slate-900">{getAdvisorName()}</p>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Telefon</p>
-              <p className="font-semibold text-slate-900">{client.phone || "Brak"}</p>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Email</p>
-              <p className="font-semibold text-slate-900 break-all">{client.email || "Brak"}</p>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 lg:col-span-2">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Adres</p>
-              <p className="font-semibold text-slate-900">{fullAddress}</p>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Miejscowość</p>
-              <p className="font-semibold text-slate-900">{client.city || "Brak"}</p>
-            </div>
-
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-              <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Województwo</p>
-              <p className="font-semibold text-slate-900">{client.province || "Brak"}</p>
-            </div>
-
-            {isB2B ? (
-              <>
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">NIP</p>
-                  <p className="font-semibold text-slate-900">{client.nip || "Brak"}</p>
+                  <div className="mt-2 border-t border-slate-200 pt-3">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {[client.street, client.building_number].filter(Boolean).join(" ") || "Brak adresu"}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {[client.postal_code, client.city].filter(Boolean).join(" ") || "Brak miejscowości"}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {client.province || "Brak województwa"}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">REGON</p>
-                  <p className="font-semibold text-slate-900">{client.regon || "Brak"}</p>
-                </div>
+                {!isB2B && (
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                      Dane identyfikacyjne
+                    </h3>
 
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Osoba kontaktowa</p>
-                  <p className="font-semibold text-slate-900">{client.contact_person || "Brak"}</p>
-                </div>
+                    <div className="mt-2 border-t border-slate-200 pt-3">
+                      <div className="flex items-center justify-start gap-3">
+                        <span className="text-sm font-semibold text-slate-700">PESEL</span>
 
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">Telefon osoby kontaktowej</p>
-                  <p className="font-semibold text-slate-900">{client.contact_phone || "Brak"}</p>
-                </div>
-              </>
-            ) : (
-              <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs uppercase font-semibold text-slate-400 mb-1">PESEL</p>
-                <p className="font-semibold text-slate-900">{client.pesel || "Brak"}</p>
+                        <details>
+                          <summary className="cursor-pointer list-none text-sm font-bold text-[#119182] hover:underline">
+                            Pokaż
+                          </summary>
+                          <p className="mt-2 font-mono text-sm text-slate-900">
+                            {client.pesel || "Brak"}
+                          </p>
+                        </details>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {isB2B && (
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                      Dane firmowe
+                    </h3>
+
+                    <div className="mt-2 grid gap-3 border-t border-slate-200 pt-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">NIP</p>
+                        <p className="mt-1 font-semibold text-slate-900">{client.nip || "Brak"}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">REGON</p>
+                        <p className="mt-1 font-semibold text-slate-900">{client.regon || "Brak"}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Osoba kontaktowa</p>
+                        <p className="mt-1 font-semibold text-slate-900">{client.contact_person || "Brak"}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Telefon osoby kontaktowej</p>
+                        <p className="mt-1 font-semibold text-slate-900">{client.contact_phone || "Brak"}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                  Kontakt
+                </h3>
+
+                <div className="mt-2 border-t border-slate-200 pt-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Telefon</p>
+                    <p className="mt-1 text-lg font-bold text-slate-900">
+                      {client.phone || "Brak"}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 border-t border-slate-200 pt-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">E-mail</p>
+                    <p className="mt-1 break-all text-sm font-semibold text-slate-900">
+                      {client.email || "Brak"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1196,196 +1371,117 @@ setActivities((activitiesData as ClientActivity[]) || []);
           <div className="p-6">
             {activeTab === "dashboard" && (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50">
-                    <h3 className="text-lg font-bold text-slate-900">Historia kontaktów</h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Telefony, maile, SMS-y i spotkania.
-                    </p>
+                <div className="space-y-8">
+                  <ClientContactForm
+                    onSubmit={addContactActivity}
+                    isSubmitting={savingActivity}
+                  />
 
-                    <div className="mt-4">
-                      <ClientContactForm
-                        onSubmit={addContactActivity}
-                        isSubmitting={savingActivity}
-                      />
-                    </div>
+                  <div>
+                    <h3 className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                      HISTORIA KONTAKTÓW
+                    </h3>
 
-                  <div className="space-y-3">
-                    {activities.length === 0 ? (
-                      <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center">
-                        <p className="font-semibold text-slate-900">
-                          Brak historii kontaktów.
-                        </p>
-                      </div>
-                    ) : (
-                      visibleActivities.map((activity) => {
-                        const activityType = activity.activity_type || "phone";
-                        const activityLabel =
-                          contactChannelLabels[activityType as ContactChannel] || activityType;
-                        const activityStyle =
-                          contactChannelStyles[activityType] ||
-                          "bg-slate-100 text-slate-800 border-slate-200";
+                    <div className="max-h-[460px] space-y-3 overflow-y-auto px-1 py-2">
+                      {activities.length === 0 ? (
+                        <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center">
+                          <p className="font-semibold text-slate-900">
+                            Brak historii kontaktów.
+                          </p>
+                        </div>
+                      ) : (
+                        visibleActivities.map((activity) => {
+                          const activityType = activity.activity_type || "phone";
+                          const activityLabel =
+                            contactChannelLabels[activityType as ContactChannel] || activityType;
+                          const activityVisual =
+                            contactChannelStyles[activityType] || contactChannelStyles.phone;
+                          const contactTypeLabel = activity.contact_type || "Kontakt";
 
-                        return (
-                          <div
-                            key={activity.id}
-                            className="border border-slate-200 rounded-2xl bg-white p-4"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span
-                                    className={`inline-flex px-3 py-1 rounded-full border text-xs font-bold ${activityStyle}`}
-                                  >
+                          return (
+                            <div
+                              key={activity.id}
+                              className={`group overflow-hidden rounded-lg border bg-white shadow-sm transition-all duration-200 hover:-translate-y-px ${activityVisual.border} ${activityVisual.shadow}`}
+                            >
+                              <div
+                                className={`flex flex-col gap-1 border-b px-3 py-1.5 transition-colors duration-200 sm:flex-row sm:items-center sm:justify-between ${activityVisual.bar} ${activityVisual.border}`}
+                              >
+                                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                  <p className="text-[12px] font-bold">
+                                    {activity.author_name || "Nieznany użytkownik"}
+                                  </p>
+                                  <span className="text-[11px] opacity-80">•</span>
+                                  <p className="text-[11px] font-semibold opacity-90">
+                                    {contactTypeLabel}
+                                  </p>
+                                  <span className="text-[11px] opacity-80">•</span>
+                                  <p className="text-[11px] font-semibold opacity-90">
                                     {activityLabel}
-                                  </span>
-
-                                  <p className="font-bold text-slate-900">
-                                    {activity.status || activityLabel}
                                   </p>
                                 </div>
 
-                                <p className="text-xs text-slate-500 mt-2">
+                                <p className="text-[10px] font-medium opacity-90">
                                   {new Date(activity.created_at).toLocaleString("pl-PL")}
                                 </p>
                               </div>
+
+                              <div
+                                className={`p-3 text-[13px] leading-6 text-slate-800 whitespace-pre-line transition-colors duration-200 ${activityVisual.body} ${activityVisual.bodyHover}`}
+                              >
+                                {activity.description || "Brak opisu"}
+
+                                {activity.follow_up_at && (
+                                  <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                                    Ponowny kontakt: {new Date(activity.follow_up_at).toLocaleString("pl-PL")}
+                                  </div>
+                                )}
+                              </div>
                             </div>
+                          );
+                        })
+                      )}
 
-                            <div className="flex items-center gap-2 flex-wrap mt-3">
-                              <span className="inline-flex px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                                {activity.contact_type || "Kontakt marketingowy"}
-                              </span>
-
-                              {activity.status && (
-                                <span className="inline-flex px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                                  {activity.status}
-                                </span>
-                              )}
-
-                              {activity.follow_up_at && (
-                                <span className="inline-flex px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold">
-                                  Ponowny kontakt: {new Date(activity.follow_up_at).toLocaleString("pl-PL")}
-                                </span>
-                              )}
-                            </div>
-
-                            {activity.description && (
-                              <p className="text-sm text-slate-900 whitespace-pre-wrap mt-3">
-                                {activity.description}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-
-                    {activities.length > 3 && (
-                      <div className="mt-4 flex justify-center">
-                        <button
-                          type="button"
-                          onClick={() => setShowAllActivities((current) => !current)}
-                          className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          {showAllActivities ? "Pokaż mniej" : "Pokaż więcej"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-                <div className="space-y-4">
-                  <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50">
-                    <h3 className="text-lg font-bold text-slate-900">Notatki</h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Historia notatek handlowych klienta.
-                    </p>
-
-                    <textarea
-                      value={newNote}
-                      onChange={(event) => setNewNote(event.target.value)}
-                      placeholder="Dodaj notatkę..."
-                      className="w-full min-h-[120px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-400 mt-4"
-                    />
-
-                    <div className="flex justify-end mt-4">
-                      <button
-                        type="button"
-                        onClick={addNote}
-                        disabled={savingNote || !newNote.trim()}
-                        className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-bold text-sm"
-                      >
-                        {savingNote ? "Zapisywanie..." : "Dodaj notatkę"}
-                      </button>
                     </div>
                   </div>
+                </div>
 
+                <div className="space-y-4">
                   <div className="space-y-3">
-                    {notes.length === 0 ? (
-                      <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center">
-                        <p className="font-semibold text-slate-900">
-                          Brak notatek dla tego klienta.
-                        </p>
-                      </div>
-                    ) : (
-                      notes.map((note) => (
-                        <div
-                          key={note.id}
-                          className="border border-slate-200 rounded-2xl bg-white p-4"
-                        >
-                          <p className="text-sm text-slate-900 whitespace-pre-wrap">
-                            {note.content}
-                          </p>
-
-                          <p className="text-xs text-slate-400 mt-3">
-                            {new Date(note.created_at).toLocaleString("pl-PL")}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                    <h3 className="text-lg font-bold text-slate-900">Przypomnienia</h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Najbliższe przypomnienia dla tego klienta.
-                    </p>
-
-                    <div className="space-y-3 mt-4">
+                    <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                      PRZYPOMNIENIA
+                    </h3>
+                    <div className="max-h-[220px] space-y-3 overflow-y-auto px-1 py-2">
                       {reminders.length === 0 ? (
-                        <p className="text-sm text-slate-500">Brak przypomnień dla tego klienta.</p>
+                        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">
+                          Brak przypomnień dla tego klienta.
+                        </p>
                       ) : (
                         reminders.map((event) => {
                           const reminderVisualState = getReminderVisualState(event);
-
                           return (
                             <Link
                               key={event.id}
                               href={`/event/${event.id}`}
-                              className={`block rounded-2xl border p-4 transition ${reminderVisualState.cardClass}`}
+                              className="group block overflow-hidden rounded-lg border border-blue-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-blue-400 hover:shadow-[0_10px_22px_rgba(37,99,235,0.10)]"
                             >
-                              <div className="flex items-start justify-between gap-4">
-                                <div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <p className={`font-bold ${reminderVisualState.titleClass}`}>
-                                      {event.title}
-                                    </p>
-
-                                    <span
-                                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${reminderVisualState.badgeClass}`}
-                                    >
-                                      {reminderVisualState.label}
-                                    </span>
-                                  </div>
-
-                                  <p className={`text-sm mt-1 ${reminderVisualState.textClass}`}>
-                                    {event.description || "Brak opisu"}
+                              <div className="flex flex-col gap-1 border-b border-blue-200 bg-blue-100 px-3 py-1.5 text-blue-950 transition-colors duration-200 group-hover:bg-blue-200 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                  <p className="text-[12px] font-bold">
+                                    {event.title}
+                                  </p>
+                                  <span className="text-[11px] opacity-70">•</span>
+                                  <p className="text-[11px] font-semibold opacity-90">
+                                    {reminderVisualState.label}
                                   </p>
                                 </div>
 
-                                <p className={`text-sm font-semibold whitespace-nowrap ${reminderVisualState.dateClass}`}>
+                                <p className="text-[10px] font-medium opacity-90">
                                   {new Date(event.event_at).toLocaleString("pl-PL")}
                                 </p>
+                              </div>
+
+                              <div className="bg-blue-50 p-3 text-[13px] leading-6 text-slate-800 transition-colors duration-200 group-hover:bg-blue-100 whitespace-pre-line">
+                                {event.description || "Brak opisu"}
                               </div>
                             </Link>
                           );
@@ -1393,6 +1489,62 @@ setActivities((activitiesData as ClientActivity[]) || []);
                       )}
                     </div>
                   </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                      NOTATKI NA KLIENCIE
+                    </h3>
+
+                    <textarea
+                      value={newNote}
+                      onChange={(event) => setNewNote(event.target.value)}
+                      placeholder="Dodaj nową notatkę..."
+                      className="min-h-[78px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                    />
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={addNote}
+                        disabled={savingNote || !newNote.trim()}
+                        className="rounded-lg bg-[#119182] px-3.5 py-1.5 text-xs font-black text-white shadow-sm transition hover:bg-[#0f7f72] disabled:bg-slate-300 disabled:text-slate-500 disabled:shadow-none"
+                      >
+                        {savingNote ? "Zapisywanie..." : "Dodaj notatkę"}
+                      </button>
+                    </div>
+
+                    <div className="mt-6 max-h-[460px] space-y-3 overflow-y-auto px-1 py-2">
+                      {notes.length === 0 ? (
+                        <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
+                          Brak notatek dla tego klienta.
+                        </p>
+                      ) : (
+                        notes.map((note) => (
+                          <div
+                            key={note.id}
+                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-[#119182] hover:shadow-[0_10px_22px_rgba(17,145,130,0.10)]"
+                          >
+                            <div className="flex flex-col gap-1 border-b border-[#9EECEF] bg-[#BDF6F9] px-3 py-1.5 transition-colors duration-200 group-hover:border-[#119182]/40 group-hover:bg-[#9FECEF] sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-xs font-semibold text-slate-900">
+                                  {note.author_name || "Nieznany użytkownik"}
+                                </p>
+                              </div>
+
+                              <p className="text-[11px] font-medium text-slate-500">
+                                {new Date(note.created_at).toLocaleString("pl-PL")}
+                              </p>
+                            </div>
+
+                            <div className="bg-slate-100 p-3 text-[13px] leading-6 text-slate-800 whitespace-pre-line transition-colors duration-200 group-hover:bg-slate-200">
+                              {note.content}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
                 </div>
               </div>
             )}

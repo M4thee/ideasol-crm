@@ -501,6 +501,8 @@ export async function POST(request: Request) {
       : "net_billing";
 
   const shouldAddEms = Boolean(body.withEms);
+  const includeSubsidy = body.includeSubsidy === false ? false : true;
+  const existingPvPowerKw = Math.max(0, Number(body.existingPvPowerKw || 0));
 
   const panel = pricing.panels[body.panelModel as keyof typeof pricing.panels];
   const requestedStorageKey = isPvOnly ? "none" : body.storage;
@@ -649,13 +651,21 @@ const sellerCommissionNet = Math.max(
   );
 
   const subsidyProgramCap = billingSystem === "net_billing" ? 16000 : 8000;
-  const hasStorageForSubsidy = hasStorageSelected && storage.capacityKwh >= 10;
-  const storageCapByKwh = storage.capacityKwh * 800;
+  const totalPvPowerForSubsidyKw = Number((existingPvPowerKw + pvPowerKw).toFixed(2));
+  const requiredStorageCapacityKwh = Number((totalPvPowerForSubsidyKw * 2).toFixed(2));
+  const hasStorageMinimumCapacity = hasStorageSelected && storage.capacityKwh >= 10;
+  const hasRequiredStorageToPvRatio =
+    hasStorageSelected &&
+    totalPvPowerForSubsidyKw > 0 &&
+    storage.capacityKwh >= requiredStorageCapacityKwh;
+  const hasStorageForSubsidy =
+    includeSubsidy && hasStorageMinimumCapacity && hasRequiredStorageToPvRatio;
+  const storageCapByKwh = hasStorageForSubsidy ? storage.capacityKwh * 800 : 0;
   const maxStorageSubsidy = hasStorageForSubsidy
     ? Math.min(storageCapByKwh, subsidyProgramCap)
     : 0;
 
-  const optimizedEmsNet = shouldAddEms
+  const optimizedEmsNet = hasStorageForSubsidy && shouldAddEms
     ? Math.min(4000, finalNet)
     : 0;
 
@@ -674,19 +684,19 @@ const sellerCommissionNet = Math.max(
       )
     : 0;
 
-  const emsBonus = shouldAddEms
+  const emsBonus = hasStorageForSubsidy && shouldAddEms
     ? Math.min(optimizedEmsNet * 0.5, 2000)
     : 0;
 
-  const optimizedPvNet = Math.max(
-    finalNet - optimizedStorageNet - optimizedEmsNet,
-    0
-  );
+  const optimizedPvNet = hasStorageForSubsidy
+    ? Math.max(finalNet - optimizedStorageNet - optimizedEmsNet, 0)
+    : 0;
 
   const subsidyTotal = Math.round(storageSubsidy + emsBonus);
 
   const subsidyAllocation = {
-    enabled: hasStorageForSubsidy || shouldAddEms,
+    enabled: hasStorageForSubsidy,
+    requested: includeSubsidy,
     billingSystem,
     pvNet: Math.round(optimizedPvNet),
     storageNet: Math.round(optimizedStorageNet),
@@ -697,6 +707,13 @@ const sellerCommissionNet = Math.max(
     programCap: subsidyProgramCap,
     storageCapByKwh: Math.round(storageCapByKwh),
     maxStorageSubsidy: Math.round(maxStorageSubsidy),
+    existingPvPowerKw,
+    newPvPowerKw: pvPowerKw,
+    totalPvPowerForSubsidyKw,
+    requiredStorageCapacityKwh,
+    storageCapacityKwh: storage.capacityKwh,
+    hasStorageMinimumCapacity,
+    hasRequiredStorageToPvRatio,
   };
 
   return NextResponse.json({
@@ -706,6 +723,8 @@ const sellerCommissionNet = Math.max(
     offerType,
     billingSystem,
     withEms: shouldAddEms,
+    includeSubsidy,
+    existingPvPowerKw,
     basePriceNet: Math.round(
       purchaseCostNet +
         grossManagerMarginsBeforeOperatorNet +

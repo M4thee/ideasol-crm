@@ -15,6 +15,8 @@ type Result = {
 
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
+  includeSubsidy?: boolean;
+  existingPvPowerKw?: number;
   subsidyProgramCap?: number;
   subsidyAllocation?: {
     enabled: boolean;
@@ -28,6 +30,14 @@ type Result = {
     programCap: number;
     storageCapByKwh: number;
     maxStorageSubsidy: number;
+    requested?: boolean;
+    existingPvPowerKw?: number;
+    newPvPowerKw?: number;
+    totalPvPowerForSubsidyKw?: number;
+    requiredStorageCapacityKwh?: number;
+    storageCapacityKwh?: number;
+    hasStorageMinimumCapacity?: boolean;
+    hasRequiredStorageToPvRatio?: boolean;
   };
 
   basePriceNet: number;
@@ -141,6 +151,9 @@ export default function Home() {
   const [roofType, setRoofType] = useState("blacha");
   const [storage, setStorage] = useState("none");
   const [withEms, setWithEms] = useState(false);
+  const [includeSubsidy, setIncludeSubsidy] = useState(false);
+  const [isUpsell, setIsUpsell] = useState(false);
+  const [existingPvPowerKw, setExistingPvPowerKw] = useState("0");
 
   const [billingSystem, setBillingSystem] = useState<
     "net_billing" | "net_metering"
@@ -422,6 +435,11 @@ export default function Home() {
         roofType,
         storage,
         withEms,
+        includeSubsidy,
+        isUpsell,
+        existingPvPowerKw: isUpsell
+          ? Number(String(existingPvPowerKw).replace(",", ".")) || 0
+          : 0,
         billingSystem,
         selectedInverterName,
         sellerMarkup,
@@ -459,6 +477,9 @@ export default function Home() {
     setRoofType("blacha");
     setStorage("none");
     setWithEms(false);
+    setIncludeSubsidy(false);
+    setIsUpsell(false);
+    setExistingPvPowerKw("0");
     setBillingSystem("net_billing");
     setSelectedInverterName("auto");
     const defaultMargin = userProfile?.default_seller_markup;
@@ -537,6 +558,9 @@ export default function Home() {
           roofType,
           storage,
           withEms,
+          includeSubsidy,
+          isUpsell,
+          existingPvPowerKw: isUpsell ? existingPvPowerKw : "0",
           billingSystem,
           selectedInverterName,
           sellerMarkup,
@@ -628,7 +652,7 @@ IdeaSol`;
     setCopied(true);
   }
 
-  async function sendOfferEmail() {
+  async function sendOfferEmail(mode: "anonymous" | "public" = "anonymous") {
     if (!result) return;
 
     setSendingEmail(true);
@@ -642,13 +666,30 @@ IdeaSol`;
         },
         body: JSON.stringify({
           clientEmail,
+          sendMode: mode,
+          advisor: {
+            id: userProfile?.id || null,
+            name: advisorName,
+            phone: advisorPhone,
+            email: advisorEmail,
+            role: userProfile?.role || currentUserRole,
+          },
+          advisorName,
+          advisorPhone,
+          advisorEmail,
           offerType: result.offerType,
           pvPowerKw: result.pvPowerKw,
+          panelName: panels.find((panel) => panel.code === panelModel)?.name || panelModel,
+          panelModel,
+          panelCount,
+          panelPowerWp: getPanelPowerWp(panelModel),
           inverter: result.inverter,
           energyStorage: result.energyStorage,
           finalNet: result.finalNet,
           finalGross: result.finalGross,
           vatRate: result.vatRate,
+          subsidyAllocation: result.subsidyAllocation || null,
+          subsidyTotal: result.subsidyAllocation?.total || 0,
         }),
       });
 
@@ -720,6 +761,12 @@ IdeaSol`;
               setWithEms={setWithEms}
               billingSystem={billingSystem}
               setBillingSystem={setBillingSystem}
+              includeSubsidy={includeSubsidy}
+              setIncludeSubsidy={setIncludeSubsidy}
+              isUpsell={isUpsell}
+              setIsUpsell={setIsUpsell}
+              existingPvPowerKw={existingPvPowerKw}
+              setExistingPvPowerKw={setExistingPvPowerKw}
               storages={storages}
               panels={panels}
               inverters={inverters}

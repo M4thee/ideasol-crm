@@ -62,6 +62,13 @@ const EMPTY_STORAGE_FORM = {
   installation_net: "1500",
 };
 
+function parseDecimal(value: string | number) {
+  const normalized = String(value ?? "").replace(",", ".");
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function AdminPanel({
   adminStatus,
   pricingOverrides,
@@ -301,9 +308,9 @@ export default function AdminPanel({
         .update({
           code: storage.code,
           name: storage.name,
-          capacity_kwh: Number(storage.capacity_kwh),
-          price_net: Number(storage.price_net),
-          installation_net: Number(storage.installation_net),
+          capacity_kwh: parseDecimal(storage.capacity_kwh),
+          price_net: parseDecimal(storage.price_net),
+          installation_net: parseDecimal(storage.installation_net),
           active: Boolean(storage.active),
         })
         .eq("id", storage.id);
@@ -330,9 +337,9 @@ export default function AdminPanel({
     const { error } = await supabase.from("storages").insert({
       code: storageForm.code.trim().toUpperCase().replaceAll(" ", "_"),
       name: storageForm.name.trim(),
-      capacity_kwh: Number(storageForm.capacity_kwh),
-      price_net: Number(storageForm.price_net),
-      installation_net: Number(storageForm.installation_net),
+      capacity_kwh: parseDecimal(storageForm.capacity_kwh),
+      price_net: parseDecimal(storageForm.price_net),
+      installation_net: parseDecimal(storageForm.installation_net),
       active: true,
     });
 
@@ -950,6 +957,8 @@ export default function AdminPanel({
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 type="number"
+                step="0.01"
+                min="0"
                 placeholder="Pojemność kWh"
                 value={storageForm.capacity_kwh}
                 onChange={(e) =>
@@ -960,6 +969,8 @@ export default function AdminPanel({
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 type="number"
+                step="0.01"
+                min="0"
                 placeholder="Cena netto"
                 value={storageForm.price_net}
                 onChange={(e) =>
@@ -970,6 +981,8 @@ export default function AdminPanel({
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 type="number"
+                step="0.01"
+                min="0"
                 placeholder="Montaż netto"
                 value={storageForm.installation_net}
                 onChange={(e) =>
@@ -1018,12 +1031,14 @@ export default function AdminPanel({
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                     type="number"
+                    step="0.01"
+                    min="0"
                     value={storage.capacity_kwh}
                     onChange={(e) =>
                       updateStorage(
                         storage.id,
                         "capacity_kwh",
-                        Number(e.target.value)
+                        parseDecimal(e.target.value)
                       )
                     }
                   />
@@ -1031,12 +1046,14 @@ export default function AdminPanel({
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                     type="number"
+                    step="0.01"
+                    min="0"
                     value={storage.price_net}
                     onChange={(e) =>
                       updateStorage(
                         storage.id,
                         "price_net",
-                        Number(e.target.value)
+                        parseDecimal(e.target.value)
                       )
                     }
                   />
@@ -1044,12 +1061,14 @@ export default function AdminPanel({
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                     type="number"
+                    step="0.01"
+                    min="0"
                     value={storage.installation_net}
                     onChange={(e) =>
                       updateStorage(
                         storage.id,
                         "installation_net",
-                        Number(e.target.value)
+                        parseDecimal(e.target.value)
                       )
                     }
                   />

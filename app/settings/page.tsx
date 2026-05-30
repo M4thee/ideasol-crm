@@ -13,7 +13,7 @@ type UserProfile = {
   display_name?: string | null;
   full_name?: string | null;
   role?: string | null;
-  default_calculator_margin?: number | null;
+  default_seller_markup?: number | null;
 };
 
 export default function SettingsPage() {
@@ -64,12 +64,12 @@ export default function SettingsPage() {
       ...(profileFromDb || {}),
       id: user.id,
       email: profileFromDb?.email || user.email,
-      default_calculator_margin:
-        profileFromDb?.default_calculator_margin ?? 0,
+      default_seller_markup:
+        profileFromDb?.default_seller_markup ?? 0,
     } as UserProfile;
 
     setProfile(loadedProfile);
-    setMarginInput(String(loadedProfile.default_calculator_margin || 0));
+    setMarginInput(String(loadedProfile.default_seller_markup || 0));
     setLoading(false);
   }
 
@@ -197,7 +197,7 @@ export default function SettingsPage() {
     const { error } = await supabase
       .from("profiles")
       .update({
-        default_calculator_margin: normalizedValue,
+        default_seller_markup: normalizedValue,
       })
       .eq("id", profile.id);
 
@@ -212,7 +212,7 @@ export default function SettingsPage() {
       current
         ? {
             ...current,
-            default_calculator_margin: normalizedValue,
+            default_seller_markup: normalizedValue,
           }
         : current
     );

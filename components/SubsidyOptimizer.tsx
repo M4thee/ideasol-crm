@@ -9,6 +9,10 @@ type SubsidyOptimizerProps = {
   isNetBilling: boolean;
   isEuStorage: boolean;
   isEuHybridInverter: boolean;
+  subsidyEnabled?: boolean;
+  withEms?: boolean;
+  requiredStorageCapacityKwh?: number;
+  totalPvPowerForSubsidyKw?: number;
 };
 
 function formatMoney(value: number) {
@@ -24,11 +28,42 @@ export default function SubsidyOptimizer({
   isNetBilling,
   isEuStorage,
   isEuHybridInverter,
+  subsidyEnabled = false,
+  withEms = false,
+  requiredStorageCapacityKwh = 0,
+  totalPvPowerForSubsidyKw = 0,
 }: SubsidyOptimizerProps) {
   const [showDetails, setShowDetails] = useState(false);
 
   const calculations = useMemo(() => {
     const totalNetPrice = Math.max(storageGrossPrice, 0);
+
+    if (!subsidyEnabled) {
+      return {
+        totalNetPrice,
+        symbolicPvNet: 0,
+        priceAvailableForStorageNet: 0,
+        hasStorage: false,
+        storageCapByKwh: 0,
+        programCap: isNetBilling ? 16000 : 8000,
+        maxStorageSubsidy: 0,
+        minStorageNetForMaxSubsidy: 0,
+        maxStorageNetByProgramLimit: 0,
+        idealStorageNet: 0,
+        targetStorageNet: 0,
+        eligibleDeviceNet: 0,
+        targetInverterNet: 0,
+        remainingNet: totalNetPrice,
+        storageSubsidy: 0,
+        inverterBonus: 0,
+        totalSubsidy: 0,
+        priceAfterSubsidy: totalNetPrice,
+        storageNetPerKwh: 0,
+        canApplyEuBonus: false,
+        hasEnoughNetForFullStorageSubsidy: false,
+        storageLimitValid: false,
+      };
+    }
 
     // Symboliczna wartość pozostaje tylko informacyjnie.
     const symbolicPvNet = 0;
@@ -47,7 +82,7 @@ export default function SubsidyOptimizer({
 
     // EMS w optymalizacji dotacyjnej nie oznacza kosztu zakupu EMS.
     // To wartość EMS możliwa do rozpisania na umowie/fakturze, aby uzyskać bonus 50% max 2000 zł.
-    const eligibleDeviceNet = canApplyEuBonus
+    const eligibleDeviceNet = canApplyEuBonus && withEms
       ? Math.min(4000, totalNetPrice)
       : 0;
 
@@ -128,6 +163,8 @@ export default function SubsidyOptimizer({
     isNetBilling,
     isEuStorage,
     isEuHybridInverter,
+    subsidyEnabled,
+    withEms,
   ]);
 
   const statusLabel = !calculations.hasStorage
@@ -170,6 +207,21 @@ export default function SubsidyOptimizer({
           </button>
         </div>
 
+        {!subsidyEnabled && (
+          <div className="mt-4 mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900">
+            <p className="text-sm font-black uppercase tracking-[0.14em] text-red-700">
+              Dotacja PME nie przysługuje w tej konfiguracji.
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-red-900">
+              Pojemność magazynu energii musi być minimum dwukrotnością mocy szczytowej PV.
+              Obecnie wybrany magazyn ma {Number(storageCapacity).toLocaleString("pl-PL", { maximumFractionDigits: 2 })} kWh,
+              a moc fotowoltaiki to {Number(totalPvPowerForSubsidyKw).toLocaleString("pl-PL", { maximumFractionDigits: 2 })} kWp.
+              Minimalny magazyn dla takiej mocy PV to {Number(requiredStorageCapacityKwh).toLocaleString("pl-PL", { maximumFractionDigits: 2 })} kWh.
+            </p>
+          </div>
+        )}
+
         <div className="mt-5 grid gap-3 grid-cols-1 md:grid-cols-3">
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
@@ -197,13 +249,15 @@ export default function SubsidyOptimizer({
 
           <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">
-              Bonus EMS
+              Bonus EMS / HEMS
             </p>
             <div className="mt-2 text-3xl font-black text-cyan-700">
               {formatMoney(calculations.inverterBonus)} zł
             </div>
             <p className="mt-1 text-xs text-cyan-700/80">
-              EMS: {formatMoney(calculations.targetInverterNet)} zł netto
+              {withEms
+                ? `EMS: ${formatMoney(calculations.targetInverterNet)} zł netto`
+                : "EMS / HEMS nie wybrany"}
             </p>
           </div>
         </div>

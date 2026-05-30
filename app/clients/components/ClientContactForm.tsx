@@ -76,6 +76,33 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
 
   const minimumDateTime = getMinimumLocalDateTime();
 
+  const contactMethods = [
+    {
+      value: "phone",
+      label: "Telefon",
+      activeClass: "border-[#C93200] bg-[#C93200] text-white shadow-sm",
+      inactiveClass: "border-[#C93200] bg-white text-[#C93200] hover:bg-[#C93200] hover:text-white",
+    },
+    {
+      value: "sms",
+      label: "SMS",
+      activeClass: "border-[#910049] bg-[#910049] text-white shadow-sm",
+      inactiveClass: "border-[#910049] bg-white text-[#910049] hover:bg-[#910049] hover:text-white",
+    },
+    {
+      value: "email",
+      label: "E-mail",
+      activeClass: "border-[#187B96] bg-[#187B96] text-white shadow-sm",
+      inactiveClass: "border-[#187B96] bg-white text-[#187B96] hover:bg-[#187B96] hover:text-white",
+    },
+    {
+      value: "meeting",
+      label: "Spotkanie",
+      activeClass: "border-[#3A752A] bg-[#3A752A] text-white shadow-sm",
+      inactiveClass: "border-[#3A752A] bg-white text-[#3A752A] hover:bg-[#3A752A] hover:text-white",
+    },
+  ] as const;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -137,30 +164,16 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="space-y-4"
     >
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold text-slate-900">
-          Dodaj kontakt
-        </h3>
-        <p className="text-sm text-slate-500">
-          Zapisz rozmowę, SMS, e-mail, spotkanie albo zaplanuj ponowny kontakt.
-        </p>
-      </div>
+      <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+        DODAJ KONTAKT
+      </h3>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="md:col-span-2">
-          <label className="mb-2 block text-sm font-medium text-slate-700">
-            Forma kontaktu
-          </label>
-
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {[
-              { value: "phone", label: "Telefon" },
-              { value: "sms", label: "SMS" },
-              { value: "email", label: "E-mail" },
-              { value: "meeting", label: "Spotkanie" },
-            ].map((method) => {
+            {contactMethods.map((method) => {
               const isActive = contactMethod === method.value;
 
               return (
@@ -175,10 +188,8 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
                     setReminderAt("");
                     setMeetingAt("");
                   }}
-                  className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
-                    isActive
-                      ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  className={`rounded-md border px-4 py-2 text-sm font-bold transition ${
+                    isActive ? method.activeClass : method.inactiveClass
                   }`}
                 >
                   {method.label}
@@ -203,7 +214,7 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
                 setReminderAt("");
                 setMeetingAt("");
               }}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
             >
               <option value="marketing">Kontakt marketingowy</option>
               <option value="relationship">Kontakt relacyjny</option>
@@ -224,7 +235,7 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
                 setReminderAt("");
                 setMeetingAt("");
               }}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
             >
               <option value="">Wybierz status</option>
               {statuses.map((status) => (
@@ -241,13 +252,18 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
             <label className="mb-1 block text-sm font-medium text-slate-700">
               Data ponownego kontaktu
             </label>
-            <input
-              type="datetime-local"
-              value={reminderAt}
-              min={minimumDateTime}
-              onChange={(e) => setReminderAt(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            />
+            <div className="relative">
+              <input
+                type="datetime-local"
+                value={reminderAt}
+                min={minimumDateTime}
+                onChange={(e) => setReminderAt(e.target.value)}
+                className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 pr-10 text-sm font-medium text-slate-800 outline-none transition hover:border-[#119182]/60 focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                ⏱
+              </span>
+            </div>
           </div>
         )}
 
@@ -256,18 +272,23 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
             <label className="mb-1 block text-sm font-medium text-slate-700">
               Data spotkania
             </label>
-            <input
-              type="datetime-local"
-              value={meetingAt}
-              min={minimumDateTime}
-              onChange={(e) => setMeetingAt(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            />
+            <div className="relative">
+              <input
+                type="datetime-local"
+                value={meetingAt}
+                min={minimumDateTime}
+                onChange={(e) => setMeetingAt(e.target.value)}
+                className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 pr-10 text-sm font-medium text-slate-800 outline-none transition hover:border-[#119182]/60 focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                📅
+              </span>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="mt-4">
+      <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">
           Opis
         </label>
@@ -280,7 +301,7 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
         />
       </div>
 
-      <div className="mt-5 flex justify-end">
+      <div className="flex justify-end">
         <button
           type="submit"
           disabled={isSubmitting}
