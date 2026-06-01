@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 
 type Result = {
@@ -38,6 +39,14 @@ type Result = {
   sellerMarkupNet: number;
   finalNet: number;
   finalGross: number;
+  additionalServices?: {
+    id: number | null;
+    name: string;
+    priceNet: number;
+    quantity: number;
+    totalNet: number;
+  }[];
+  additionalServicesNet?: number;
   vatRate: number;
   companyMargin: number;
   operatorPercent?: number;
@@ -78,6 +87,62 @@ type OfferResultProps = {
   advisorEmail?: string;
 };
 
+function FileTextIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" />
+      <path d="M8 13h8" />
+      <path d="M8 17h6" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
 export default function OfferResult({
   result,
   panelCount,
@@ -111,6 +176,8 @@ export default function OfferResult({
   const [pdfStatus, setPdfStatus] = useState("");
   const [sendMode, setSendMode] = useState<"anonymous" | "public">("anonymous");
   const [showSendConfirm, setShowSendConfirm] = useState(false);
+  const [isMailPanelOpen, setIsMailPanelOpen] = useState(false);
+  const [showSaveAnimation, setShowSaveAnimation] = useState(false);
 
   const canSeeMarginSummary = canSeeTechnicalView;
 
@@ -145,10 +212,31 @@ export default function OfferResult({
     emsNetFromBreakdown * (1 + result.vatRate / 100)
   );
 
+  const additionalServices = Array.isArray(result.additionalServices)
+    ? result.additionalServices
+    : [];
+  const additionalServicesNet = Math.round(
+    result.additionalServicesNet ??
+      additionalServices.reduce((sum, service) => sum + Number(service.totalNet || 0), 0)
+  );
+
   const sellerCommissionNet = Math.round(
     result.sellerCommissionNet ??
       result.sellerMarkupNet * (1 - (result.operatorPercent ?? 15) / 100)
   );
+
+  async function handleSaveOfferToCrm() {
+    if (!saveOfferToCrm) return;
+
+    setShowSaveAnimation(true);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    try {
+      await saveOfferToCrm();
+    } finally {
+      setShowSaveAnimation(false);
+    }
+  }
 
   async function downloadOfferPdf() {
     setIsGeneratingPdf(true);
@@ -271,6 +359,42 @@ export default function OfferResult({
           </div>
         )}
 
+        {additionalServices.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-slate-500 text-sm">Usługi dodatkowe</p>
+                <div className="mt-2 space-y-2">
+                  {additionalServices.map((service) => (
+                    <div
+                      key={`${service.id}-${service.name}`}
+                      className="flex items-start justify-between gap-3 text-sm"
+                    >
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {service.name}
+                          {service.quantity > 1 ? ` x ${service.quantity}` : ""}
+                        </p>
+                        {service.quantity > 1 && (
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {Math.round(service.priceNet).toLocaleString("pl-PL")} zł netto / szt.
+                          </p>
+                        )}
+                      </div>
+                      <p className="shrink-0 font-bold text-slate-900">
+                        {Math.round(service.totalNet).toLocaleString("pl-PL")} zł netto
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="shrink-0 text-sm font-bold text-slate-900">
+                {additionalServicesNet.toLocaleString("pl-PL")} zł netto
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
           <p className="text-slate-500 text-sm">Cena netto</p>
           <p className="text-xl font-bold text-slate-950 sm:text-2xl">
@@ -285,30 +409,31 @@ export default function OfferResult({
           </p>
         </div>
 
-        <button
-          onClick={copyOffer}
-          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold sm:text-base text-slate-950 shadow-sm transition hover:bg-slate-50 hover:shadow-md"
-        >
-          {copied ? "Skopiowano maila" : "Skopiuj ofertę do schowka"}
-        </button>
 
         {saveOfferToCrm && (
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 shadow-sm">
             {savedOfferId ? (
               <Link
                 href={`/offers/${savedOfferId}?createSale=1`}
-                className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 sm:text-base"
+                className="inline-flex w-full items-center justify-center rounded-2xl bg-[#F54927] px-4 py-4 text-sm font-bold text-white shadow-md shadow-orange-100 transition hover:bg-[#d93f20] sm:text-base"
               >
                 Wygeneruj sprzedaż
               </Link>
             ) : (
               <button
                 type="button"
-                onClick={saveOfferToCrm}
-                disabled={savingOffer || !selectedClientId}
+                onClick={handleSaveOfferToCrm}
+                disabled={savingOffer || showSaveAnimation || !selectedClientId}
                 className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
               >
-                {savingOffer ? "Zapisywanie oferty..." : "Zapisz ofertę w CRM"}
+                {savingOffer || showSaveAnimation ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Zapisywanie...
+                  </span>
+                ) : (
+                  "Zapisz ofertę w CRM"
+                )}
               </button>
             )}
 
@@ -326,20 +451,64 @@ export default function OfferResult({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={downloadOfferPdf}
-          disabled={isGeneratingPdf}
-          className="w-full rounded-2xl bg-amber-400 px-4 py-4 text-sm font-bold sm:text-base text-slate-950 shadow-md shadow-amber-100 transition hover:bg-amber-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-        >
-          {isGeneratingPdf ? "Generowanie PDF..." : "Pobierz ofertę PDF"}
-        </button>
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={downloadOfferPdf}
+              disabled={isGeneratingPdf}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5 disabled:border-slate-200 disabled:text-slate-300"
+              aria-label="Pobierz PDF"
+              title="Pobierz PDF"
+            >
+              <FileTextIcon />
+              <span className="sr-only">Pobierz PDF</span>
+            </button>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Pobierz PDF</span>
+          </div>
+
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setIsMailPanelOpen((current) => !current)}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5"
+              aria-expanded={isMailPanelOpen}
+              aria-label="Pokaż wysyłkę mailem"
+              title="Wyślij mailem"
+            >
+              <MailIcon />
+            </button>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Wyślij e-mail</span>
+          </div>
+
+          <div className="flex flex-col items-center gap-1">
+            <button
+              type="button"
+              onClick={copyOffer}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5"
+              aria-label="Kopiuj treść maila"
+              title="Kopiuj treść maila"
+            >
+              <CopyIcon />
+            </button>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Kopiuj treść do schowka</span>
+          </div>
+
+          {isGeneratingPdf && (
+            <span className="text-sm font-medium text-slate-500">Generowanie PDF...</span>
+          )}
+        </div>
+
+        {copied && (
+          <p className="text-sm text-slate-600">Skopiowano treść maila do schowka.</p>
+        )}
 
         {pdfStatus && (
           <p className="text-sm text-slate-600">{pdfStatus}</p>
         )}
 
-        <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
+        {isMailPanelOpen && (
+          <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
           <label className="block">
             <span className="text-sm text-slate-700">E-mail klienta</span>
             <input
@@ -387,7 +556,8 @@ export default function OfferResult({
               {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
             </button>
           </div>
-        </div>
+          </div>
+        )}
 
         {result.energyStorage !== "Brak" &&
           (result.includeSubsidy || result.subsidyAllocation?.requested) && (

@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 type CatalogPanel = {
   code: string;
   name: string;
+  display_name: string | null;
   power_wp: number;
   price_net: number;
 };
@@ -11,6 +12,7 @@ type CatalogPanel = {
 type CatalogStorage = {
   code: string;
   name: string;
+  display_name: string | null;
   capacity_kwh: number;
   price_net: number;
   installation_net: number;
@@ -18,9 +20,28 @@ type CatalogStorage = {
 
 type CatalogInverter = {
   name: string;
+  display_name: string | null;
   type: string;
   max_pv_kw: number;
   price_net: number;
+};
+
+type CatalogAdditionalService = {
+  id: number;
+  name: string;
+  unit_label: string | null;
+  price_net: number;
+  allows_quantity: boolean;
+  active: boolean;
+};
+
+type SelectedAdditionalService = {
+  id: number;
+  name: string;
+  unit_label?: string;
+  price_net: number;
+  allows_quantity: boolean;
+  quantity: number;
 };
 
 type CrmClientOption = {
@@ -83,6 +104,8 @@ type OfferFormProps = {
   setShowSettings: (value: boolean | ((current: boolean) => boolean)) => void;
   sellerMarkup: number;
   setSellerMarkup: (value: number) => void;
+  selectedAdditionalServices?: SelectedAdditionalService[];
+  setSelectedAdditionalServices?: (value: SelectedAdditionalService[]) => void;
 };
 
 export default function OfferForm({
@@ -130,9 +153,36 @@ export default function OfferForm({
   setShowSettings,
   sellerMarkup,
   setSellerMarkup,
+  selectedAdditionalServices = [],
+  setSelectedAdditionalServices = () => {},
 }: OfferFormProps) {
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
+  const [existingPvAnswer, setExistingPvAnswer] = useState<"yes" | "no" | "">("");
+
+  const [additionalServices, setAdditionalServices] = useState<CatalogAdditionalService[]>([]);
+  const [showAdditionalServices, setShowAdditionalServices] = useState(false);
+  const [additionalServicesStatus, setAdditionalServicesStatus] = useState("");
+  useEffect(() => {
+    async function loadAdditionalServices() {
+      const { data, error } = await supabase
+        .from("additional_services")
+        .select("id, name, unit_label, price_net, allows_quantity, active")
+        .eq("active", true)
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error("OfferForm: błąd ładowania usług dodatkowych", error);
+        setAdditionalServicesStatus(`Błąd ładowania usług dodatkowych: ${error.message}`);
+        return;
+      }
+
+      setAdditionalServices((data || []) as CatalogAdditionalService[]);
+      setAdditionalServicesStatus("");
+    }
+
+    loadAdditionalServices();
+  }, []);
 
   const [internalCrmClients, setInternalCrmClients] = useState<CrmClientOption[]>([]);
   const [internalTodayMeetingClients, setInternalTodayMeetingClients] = useState<CrmClientOption[]>([]);
@@ -314,6 +364,48 @@ export default function OfferForm({
     setResult(null);
   }
 
+  function isAdditionalServiceSelected(serviceId: number) {
+    return selectedAdditionalServices.some((service) => service.id === serviceId);
+  }
+
+  function toggleAdditionalService(service: CatalogAdditionalService) {
+    if (isAdditionalServiceSelected(service.id)) {
+      setSelectedAdditionalServices(
+        selectedAdditionalServices.filter((item) => item.id !== service.id)
+      );
+      setResult(null);
+      return;
+    }
+
+    setSelectedAdditionalServices([
+      ...selectedAdditionalServices,
+      {
+        id: service.id,
+        name: service.name,
+        price_net: Number(service.price_net || 0),
+        allows_quantity: Boolean(service.allows_quantity),
+        quantity: 1,
+      },
+    ]);
+    setResult(null);
+  }
+
+  function updateAdditionalServiceQuantity(serviceId: number, quantity: number) {
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+
+    setSelectedAdditionalServices(
+      selectedAdditionalServices.map((service) =>
+        service.id === serviceId
+          ? {
+              ...service,
+              quantity: safeQuantity,
+            }
+          : service
+      )
+    );
+    setResult(null);
+  }
+
   const panelsToShow = panels;
 
   const storagesToShow = storages;
@@ -324,12 +416,14 @@ export default function OfferForm({
       : [
           {
             name: "Deye SUN-10K-SG05LP3-EU",
+            display_name: "Deye SUN-10K-SG05LP3-EU",
             type: "hybrid",
             max_pv_kw: 10.8,
             price_net: 5631.25,
           },
           {
             name: "Falownik Sieciowy 10K",
+            display_name: "Falownik Sieciowy 10K",
             type: "ongrid",
             max_pv_kw: 10.8,
             price_net: 1000,
@@ -338,6 +432,10 @@ export default function OfferForm({
 
   const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
   const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
+  const existingPvPowerNumber = Number(String(existingPvPowerKw || "0").replace(",", "."));
+  const canConfigureOffer =
+    existingPvAnswer === "no" ||
+    (existingPvAnswer === "yes" && Number.isFinite(existingPvPowerNumber) && existingPvPowerNumber > 0);
 
   function updateOfferModules(nextHasPv: boolean, nextHasStorage: boolean) {
     if (!nextHasPv && !nextHasStorage) {
@@ -367,8 +465,6 @@ export default function OfferForm({
       setStorage("none");
       setWithEms(false);
       setIncludeSubsidy(false);
-      setIsUpsell(false);
-      setExistingPvPowerKw("0");
     }
 
     if (nextOfferType === "pv_storage") {
@@ -446,12 +542,13 @@ export default function OfferForm({
           </div>
         )}
       </div>
-
-      {/* CRM CLIENT SELECTOR - moved up */}
-      <div className="relative mb-5 min-w-0">
+      {/* CRM CLIENT SELECTOR */}
+      <div className="relative mb-5 min-w-0 rounded-3xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-md shadow-blue-100/70">
         <label className="block">
-          <span className="text-sm text-slate-700">
-            Klient z CRM <span className="text-slate-500">lub wpisz ręcznie</span>
+          <span className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-blue-700">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs text-white">1</span>
+            Wyszukaj klienta
+            <span className="normal-case tracking-normal text-slate-500">lub wpisz ręcznie</span>
           </span>
 
           <input
@@ -550,9 +647,86 @@ export default function OfferForm({
         )}
       </div>
 
+      <div className="mb-5 rounded-3xl border-2 border-emerald-200 bg-emerald-50/70 p-4 shadow-sm shadow-emerald-100">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-700">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">2</span>
+              Czy klient posiada fotowoltaikę?
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              To pole wpływa na warunek dotacji PME: pojemność magazynu musi wynosić minimum dwukrotność łącznej mocy PV klienta.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+            <button
+              type="button"
+              onClick={() => {
+                setExistingPvAnswer("yes");
+                setIsUpsell(true);
+                setResult(null);
+                setEmailStatus("");
+              }}
+              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
+                existingPvAnswer === "yes"
+                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100"
+                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300"
+              }`}
+            >
+              TAK
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setExistingPvAnswer("no");
+                setIsUpsell(false);
+                setExistingPvPowerKw("0");
+                setResult(null);
+                setEmailStatus("");
+              }}
+              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
+                existingPvAnswer === "no"
+                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100"
+                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300"
+              }`}
+            >
+              NIE
+            </button>
+          </div>
+        </div>
+
+        {existingPvAnswer === "yes" && (
+          <label className="mt-4 block max-w-md">
+            <span className="text-sm font-semibold text-slate-700">Moc obecnej instalacji PV klienta</span>
+            <input
+              className="mt-2 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-emerald-100/40 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+              type="text"
+              inputMode="decimal"
+              placeholder="np. 6,44"
+              value={existingPvPowerKw === "0" ? "" : existingPvPowerKw}
+              onChange={(e) => {
+                setExistingPvPowerKw(e.target.value);
+                setIsUpsell(true);
+                setResult(null);
+                setEmailStatus("");
+              }}
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              Po wpisaniu mocy odblokujemy wybór PV / ME w kalkulatorze.
+            </p>
+          </label>
+        )}
+
+      </div>
+
       {/* MODULE/PRODUCT SECTION */}
-      <div className="mb-5">
-        <span className="text-sm text-slate-700">Co klient chce kupić?</span>
+      <div className={`mb-5 transition ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
+        <div className="mb-4 flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">3</span>
+          <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Wybierz elementy oferty</span>
+        </div>
 
         <div className="mt-3 space-y-3">
           <div
@@ -567,6 +741,7 @@ export default function OfferForm({
                 <input
                   type="checkbox"
                   checked={hasPvSelected}
+                  disabled={!canConfigureOffer}
                   onChange={(event) => {
                     updateOfferModules(event.target.checked, hasStorageSelected);
                   }}
@@ -576,47 +751,6 @@ export default function OfferForm({
                 <div className="font-semibold text-slate-900">Fotowoltaika</div>
               </label>
 
-              {hasPvSelected && (
-                <div className="rounded-2xl border border-[#C787FF] bg-[#C787FF]/10 px-4 py-3">
-                  <div className="grid gap-3 lg:grid-cols-[auto_220px] lg:items-center">
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isUpsell}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setIsUpsell(checked);
-                          if (!checked) {
-                            setExistingPvPowerKw("0");
-                          }
-                          setResult(null);
-                        }}
-                        className="h-5 w-5 accent-[#C787FF]"
-                      />
-                      <span className="flex flex-col leading-tight">
-                        <span className="font-semibold text-slate-900">Czy Upsell?</span>
-                        <span className="mt-1 text-xs font-normal text-slate-500">
-                          Wpisz moc obecnej PV klienta
-                        </span>
-                      </span>
-                    </label>
-
-                    {isUpsell && (
-                      <input
-                        className="w-full rounded-2xl border border-[#C787FF] bg-white px-4 py-2.5 text-slate-900 shadow-inner shadow-violet-100/60 outline-none transition focus:border-[#C787FF] focus:bg-white focus:ring-4 focus:ring-[#C787FF]/20"
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="Wpisz moc obecnej PV klienta"
-                        value={existingPvPowerKw}
-                        onChange={(e) => {
-                          setExistingPvPowerKw(e.target.value);
-                          setResult(null);
-                        }}
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
 
             {hasPvSelected && (
@@ -734,6 +868,7 @@ export default function OfferForm({
               <input
                 type="checkbox"
                 checked={hasStorageSelected}
+                disabled={!canConfigureOffer}
                 onChange={(event) => {
                   updateOfferModules(hasPvSelected, event.target.checked);
                 }}
@@ -796,7 +931,97 @@ export default function OfferForm({
           </div>
         </div>
       </div>
-{(hasPvSelected || hasStorageSelected) && (
+      {(hasPvSelected || hasStorageSelected) && (
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <button
+            type="button"
+            onClick={() => setShowAdditionalServices((current) => !current)}
+            className="flex w-full items-center justify-between gap-4 text-left"
+          >
+            <div>
+              <div className="font-semibold text-slate-900">Usługi dodatkowe</div>
+              <div className="mt-1 text-xs text-slate-500">
+                {selectedAdditionalServices.length > 0
+                  ? `Wybrano: ${selectedAdditionalServices.length}`
+                  : "Opcjonalne dodatki do oferty"}
+              </div>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+              {showAdditionalServices ? "Ukryj" : "Pokaż"}
+            </span>
+          </button>
+
+          {showAdditionalServices && (
+            <div className="mt-4 space-y-3">
+              {additionalServicesStatus && (
+                <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {additionalServicesStatus}
+                </div>
+              )}
+
+              {additionalServices.length === 0 && !additionalServicesStatus && (
+                <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                  Brak aktywnych usług dodatkowych w panelu admina.
+                </div>
+              )}
+
+              {additionalServices.map((service) => {
+                const selectedService = selectedAdditionalServices.find(
+                  (item) => item.id === service.id
+                );
+
+                return (
+                  <div
+                    key={service.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedService)}
+                          onChange={() => toggleAdditionalService(service)}
+                          className="mt-1 h-5 w-5"
+                        />
+                        <div>
+                          <div className="font-semibold text-slate-900">{service.name}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {Number(service.price_net || 0).toLocaleString("pl-PL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} zł netto
+                            {service.allows_quantity ? " / szt." : ""}
+                          </div>
+                        </div>
+                      </label>
+
+                      {selectedService && service.allows_quantity && (
+                        <label className="block sm:w-32">
+                          <span className="text-xs font-semibold text-slate-500">Ilość szt.</span>
+                          <input
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={selectedService.quantity}
+                            onChange={(e) =>
+                              updateAdditionalServiceQuantity(
+                                service.id,
+                                Number(e.target.value)
+                              )
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {(hasPvSelected || hasStorageSelected) && (
 <label className="block mb-5">
         <span className="text-sm text-slate-700">Falownik</span>
 
@@ -823,9 +1048,9 @@ export default function OfferForm({
               if (hasStorageSelected) return inverterItem.type === "hybrid";
               return inverterItem.type !== "hybrid";
             })
-            .map((inverterItem) => (
-              <option key={inverterItem.name} value={inverterItem.name}>
-                {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
+            .map((inverterItem, index) => (
+              <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
+                {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
               </option>
             ))}
         </select>
@@ -838,6 +1063,11 @@ export default function OfferForm({
 
       {hasStorageSelected && (
         <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+          <div className="mb-4 flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">4</span>
+            <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Czy uwzględnić dotację?</span>
+          </div>
+
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
@@ -863,7 +1093,10 @@ export default function OfferForm({
 
       {(hasPvSelected || hasStorageSelected) && (
         <div className="mb-5">
-          <span className="text-sm text-slate-700">System rozliczeń klienta</span>
+          <div className="mb-4 flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">5</span>
+            <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Forma rozliczeń</span>
+          </div>
 
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <label
@@ -945,10 +1178,14 @@ export default function OfferForm({
 
       <button
         onClick={calculate}
-        disabled={!hasPvSelected && !hasStorageSelected}
+        disabled={!canConfigureOffer || (!hasPvSelected && !hasStorageSelected)}
         className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:text-slate-500 disabled:shadow-none sm:text-base"
       >
-        {hasPvSelected || hasStorageSelected ? "Oblicz ofertę" : "Wybierz PV lub ME"}
+        {!canConfigureOffer
+          ? "Uzupełnij informację o obecnej PV klienta"
+          : hasPvSelected || hasStorageSelected
+            ? "Oblicz ofertę"
+            : "Wybierz PV lub ME"}
       </button>
     </section>
   );

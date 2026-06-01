@@ -13,6 +13,7 @@ type Sale = {
   client_id: string | null;
   seller_id: string | null;
   source_offer_id?: string | null;
+  contract_number?: string | null;
   sale_date: string;
   contract_value: number | null;
   margin_value: number | null;
@@ -94,15 +95,120 @@ const DOCUMENT_TYPES = [
   "Inne",
 ];
 
-function formatMoney(value: number | null | undefined) {
-  if (value === null || value === undefined) {
+function formatMoney(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") {
     return "Brak danych";
   }
 
-  return `${Number(value).toLocaleString("pl-PL", {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number(String(value).replace(/\s/g, "").replace(",", "."));
+
+  if (!Number.isFinite(parsed)) {
+    return "Brak danych";
+  }
+
+  return `${parsed.toLocaleString("pl-PL", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} zł`;
+}
+
+function getCustomerMoneyValue(customerData: Record<string, any> | null | undefined, key: string) {
+  const value = customerData?.[key];
+
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number(String(value).replace(/\s/g, "").replace(",", "."));
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getContractPriceRows(customerData: Record<string, any> | null | undefined) {
+  const rows = [
+    {
+      label: "Instalacja fotowoltaiczna wraz z montażem",
+      netAfterDiscount: getCustomerMoneyValue(customerData, "contract_pv_net_after_discount"),
+      beforeDiscount: getCustomerMoneyValue(customerData, "contract_pv_gross_before_discount"),
+      afterDiscount:
+        getCustomerMoneyValue(customerData, "contract_pv_gross_after_discount") ??
+        getCustomerMoneyValue(customerData, "contract_pv_gross"),
+    },
+    {
+      label: "Magazyn energii wraz z montażem",
+      netAfterDiscount: getCustomerMoneyValue(customerData, "contract_storage_net_after_discount"),
+      beforeDiscount: getCustomerMoneyValue(customerData, "contract_storage_gross_before_discount"),
+      afterDiscount:
+        getCustomerMoneyValue(customerData, "contract_storage_gross_after_discount") ??
+        getCustomerMoneyValue(customerData, "contract_storage_gross"),
+    },
+    {
+      label: "System zarządzania energią (EMS)",
+      netAfterDiscount: getCustomerMoneyValue(customerData, "contract_ems_net_after_discount"),
+      beforeDiscount: getCustomerMoneyValue(customerData, "contract_ems_gross_before_discount"),
+      afterDiscount:
+        getCustomerMoneyValue(customerData, "contract_ems_gross_after_discount") ??
+        getCustomerMoneyValue(customerData, "contract_ems_gross"),
+    },
+    {
+      label: "Zasilanie awaryjne budynku z magazynu energii (Backup)",
+      netAfterDiscount: getCustomerMoneyValue(customerData, "contract_backup_net_after_discount"),
+      beforeDiscount: getCustomerMoneyValue(customerData, "contract_backup_gross_before_discount"),
+      afterDiscount:
+        getCustomerMoneyValue(customerData, "contract_backup_gross_after_discount") ??
+        getCustomerMoneyValue(customerData, "contract_backup_gross"),
+    },
+    {
+      label: "Usługi dodatkowe wymienione w §1 umowy",
+      netAfterDiscount: getCustomerMoneyValue(customerData, "contract_additional_services_net_after_discount"),
+      beforeDiscount: getCustomerMoneyValue(customerData, "contract_additional_services_gross_before_discount"),
+      afterDiscount:
+        getCustomerMoneyValue(customerData, "contract_additional_services_gross_after_discount") ??
+        getCustomerMoneyValue(customerData, "contract_additional_services_gross"),
+    },
+  ];
+
+  const totalBeforeDiscount = getCustomerMoneyValue(customerData, "contract_total_gross_before_discount");
+  const totalNetAfterDiscount = getCustomerMoneyValue(customerData, "contract_total_net_after_discount");
+  const totalAfterDiscount =
+    getCustomerMoneyValue(customerData, "contract_total_gross_after_discount") ??
+    getCustomerMoneyValue(customerData, "contract_total_gross");
+
+  return {
+    rows,
+    totalNetAfterDiscount,
+    totalBeforeDiscount,
+    totalAfterDiscount,
+    hasAnyValue: rows.some((row) => row.beforeDiscount !== null || row.afterDiscount !== null),
+  };
+}
+
+function formatDateOnly(value: unknown) {
+  const rawValue = String(value || "").trim();
+
+  if (!rawValue) {
+    return "Brak";
+  }
+
+  const date = new Date(`${rawValue}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return rawValue;
+  }
+
+  return date.toLocaleDateString("pl-PL");
+}
+
+function formatYesNo(value: unknown) {
+  if (value === true) return "Tak";
+  if (value === false) return "Nie";
+  return "Brak";
 }
 
 export default function SalePage() {
@@ -561,6 +667,22 @@ async function deleteSale() {
   const clientName = client?.full_name || client?.company_name || "Brak klienta";
 
   const saleCustomerData = sale.customer_data || {};
+  const contractPriceRows = getContractPriceRows(saleCustomerData);
+
+  const contractNumber =
+    sale.contract_number ||
+    saleCustomerData.contract_number ||
+    "Brak";
+
+  const ownershipLabel =
+    saleCustomerData.ownership_type === "co_owner"
+      ? "Współwłasność"
+      : saleCustomerData.ownership_type === "single"
+        ? "Własność"
+        : "Brak";
+
+  const visitLabel = formatYesNo(saleCustomerData.visit_previously_scheduled);
+  const realizationVariantLabel = saleCustomerData.realization_variant || "Nie dotyczy";
 
   function joinAddressParts(parts: Array<string | number | null | undefined>) {
     return parts
@@ -689,6 +811,16 @@ function canShowFinancialBreakdownItem(label?: string | null) {
             </h1>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = `/sales/${sale.id}/contract`;
+              }}
+              className="rounded-xl bg-[#119182] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#0f7f72]"
+            >
+              Generuj umowę
+            </button>
+
             {sale.client_id && (
               <button
                 type="button"
@@ -749,8 +881,8 @@ function canShowFinancialBreakdownItem(label?: string | null) {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <section className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_360px] gap-6">
+          <section className="min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 px-6 py-4 flex items-center gap-3 overflow-x-auto">
               <button
                 type="button"
@@ -858,7 +990,89 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               </div>
 
               {!editingSaleData ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <>
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">
+                          Dane umowy
+                        </p>
+                        <p className="mt-2 font-mono text-xl font-black text-emerald-950">
+                          {contractNumber}
+                        </p>
+                      </div>
+
+                      <div className="text-right text-sm text-emerald-900">
+                        <p>
+                          <span className="font-bold">Podpis:</span> {saleCustomerData.contract_place || "Brak"}, {formatDateOnly(saleCustomerData.contract_date)}
+                        </p>
+                        <p className="mt-1">
+                          <span className="font-bold">Zaliczka do:</span> {formatDateOnly(saleCustomerData.deposit_due_date)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div>
+                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                          Rodzaj własności
+                        </p>
+                        <p className="font-semibold text-emerald-950">{ownershipLabel}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                          Wizyta umówiona
+                        </p>
+                        <p className="font-semibold text-emerald-950">{visitLabel}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                          Wariant realizacji
+                        </p>
+                        <p className="font-semibold text-emerald-950">{realizationVariantLabel}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                          Zaliczka
+                        </p>
+                        <p className="font-semibold text-emerald-950">
+                          {formatMoney(sale.deposit_amount)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {saleCustomerData.ownership_type === "co_owner" && (
+                      <div className="mt-5 rounded-xl border border-emerald-200 bg-white/70 p-4">
+                        <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
+                          Klient 2 / współwłaściciel
+                        </p>
+                        <div className="mt-3 grid gap-4 md:grid-cols-2">
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                              Imię i nazwisko
+                            </p>
+                            <p className="font-semibold text-slate-900">
+                              {saleCustomerData.second_client_name || "Brak"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                              PESEL
+                            </p>
+                            <p className="font-semibold text-slate-900">
+                              {saleCustomerData.second_client_pesel || "Brak"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
                       Data sprzedaży
@@ -868,6 +1082,96 @@ function canShowFinancialBreakdownItem(label?: string | null) {
                       {new Date(sale.sale_date).toLocaleString("pl-PL")}
                     </p>
                   </div>
+
+                  {contractPriceRows.hasAnyValue && (
+                    <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-black text-slate-950">
+                            Rozpiska cen do umowy i księgowości
+                          </p>
+                          <p className="mt-1 text-xs font-medium text-slate-500">
+                            Dane zapisane historycznie w sprzedaży. Używane do §3 umowy PDF.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        {contractPriceRows.rows.map((row) => (
+                          <div
+                            key={row.label}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          >
+                            <p className="text-sm font-black leading-snug text-slate-950">
+                              {row.label}
+                            </p>
+
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                                  Netto po rabacie
+                                </p>
+                                <p className="mt-1 text-sm font-black text-slate-900">
+                                  {formatMoney(row.netAfterDiscount)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                                  Brutto przed rabatem
+                                </p>
+                                <p className="mt-1 text-sm font-black text-slate-900">
+                                  {formatMoney(row.beforeDiscount)}
+                                </p>
+                              </div>
+
+                              <div className="rounded-xl bg-emerald-50 px-3 py-3 ring-1 ring-emerald-200">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                  Brutto po rabacie
+                                </p>
+                                <p className="mt-1 text-sm font-black text-emerald-800">
+                                  {formatMoney(row.afterDiscount)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                          <p className="text-sm font-black text-emerald-950">Suma</p>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
+                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
+                                Netto po rabacie
+                              </p>
+                              <p className="mt-1 text-sm font-black text-emerald-950">
+                                {formatMoney(contractPriceRows.totalNetAfterDiscount)}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
+                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
+                                Brutto przed rabatem
+                              </p>
+                              <p className="mt-1 text-sm font-black text-emerald-950">
+                                {formatMoney(contractPriceRows.totalBeforeDiscount)}
+                              </p>
+                            </div>
+
+                            <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-emerald-200">
+                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                Brutto po rabacie
+                              </p>
+                              <p className="mt-1 text-base font-black text-emerald-700">
+                                {formatMoney(contractPriceRows.totalAfterDiscount)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
@@ -929,7 +1233,8 @@ function canShowFinancialBreakdownItem(label?: string | null) {
                       </p>
                     </div>
                   )}
-                </div>
+                  </div>
+                </>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
@@ -1295,7 +1600,7 @@ function canShowFinancialBreakdownItem(label?: string | null) {
             </div>
           </section>
 
-          <aside className="space-y-6">
+          <aside className="space-y-6 2xl:sticky 2xl:top-6 2xl:self-start">
             <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 Dane klienta

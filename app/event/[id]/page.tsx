@@ -14,6 +14,10 @@ type CalendarEvent = {
   event_at: string;
   status: string | null;
   created_by: string | null;
+  microsoft_event_id: string | null;
+  microsoft_event_url: string | null;
+  microsoft_sync_status: string | null;
+  microsoft_sync_error: string | null;
 };
 
 type Client = {
@@ -23,6 +27,10 @@ type Client = {
   phone: string | null;
   email: string | null;
   city: string | null;
+  street: string | null;
+  building_number: string | null;
+  postal_code: string | null;
+  address: string | null;
 };
 
 type EventOwner = {
@@ -105,9 +113,128 @@ export default function EventPage() {
   const [savingMeetingEffect, setSavingMeetingEffect] = useState(false);
   const [rescheduledMeetingAt, setRescheduledMeetingAt] = useState("");
 
+  function getClientAddress() {
+    if (!client) return "Brak adresu";
+    if (client.address) return client.address;
+
+    const streetAddress = [client.street, client.building_number]
+  .filter(Boolean)
+  .join(" ");
+
+const cityAddress = [client.postal_code, client.city]
+  .filter(Boolean)
+  .join(" ");
+
+return [streetAddress, cityAddress]
+  .filter(Boolean)
+  .join(", ") || "Brak adresu";
+  }
+
   function localDateTimeToIso(value: string) {
     if (!value) return null;
     return new Date(value).toISOString();
+  }
+
+  function addMinutesToIsoDateTime(value: string, minutes: number) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    date.setMinutes(date.getMinutes() + minutes);
+    return date.toISOString();
+  }
+
+  async function updateOutlookEventAfterReschedule(params: {
+    calendarEventId: string;
+    microsoftEventId: string | null;
+    ownerId: string | null;
+    title: string;
+    description: string | null;
+    eventAt: string;
+    clientName: string;
+    clientPhone: string | null;
+    clientAddress: string;
+  }) {
+    if (!params.microsoftEventId || !params.ownerId) {
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error: !params.microsoftEventId
+            ? "Brak microsoft_event_id — nie można zaktualizować wydarzenia Outlook."
+            : "Brak właściciela wydarzenia — nie można ustalić kalendarza Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+      return;
+    }
+
+    const { data: ownerProfile } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", params.ownerId)
+      .maybeSingle();
+
+    if (!ownerProfile?.email) {
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error: "Brak adresu e-mail właściciela wydarzenia — nie można ustalić kalendarza Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/microsoft/outlook/events", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userEmail: ownerProfile.email,
+          microsoftEventId: params.microsoftEventId,
+          subject: params.title,
+          body: params.description || "",
+          clientName: params.clientName,
+          clientPhone: params.clientPhone || "",
+          clientAddress: params.clientAddress,
+          crmUrl: `${window.location.origin}/event/${params.calendarEventId}`,
+          location: params.clientAddress,
+          startDateTime: new Date(params.eventAt).toISOString(),
+          endDateTime: addMinutesToIsoDateTime(params.eventAt, 60),
+          timeZone: "Europe/Warsaw",
+          reminderMinutesBeforeStart: 10,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Nie udało się zaktualizować wydarzenia Outlook.");
+      }
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "synced",
+          microsoft_sync_error: null,
+        })
+        .eq("id", params.calendarEventId);
+    } catch (error) {
+      console.error("Nie udało się zaktualizować wydarzenia Outlook", error);
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error:
+            error instanceof Error ? error.message : "Nieznany błąd aktualizacji Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+    }
   }
 
   function canChooseMeetingOwner() {
@@ -316,7 +443,7 @@ export default function EventPage() {
       .from("calendar_events")
       .update({ status: completedStatus })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by")
+      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
       .single();
 
     if (completeEventError || !completedEvent) {
@@ -428,7 +555,7 @@ export default function EventPage() {
         .from("calendar_events")
         .update({ status: "Zakończone - Sprzedaż" })
         .eq("id", event.id)
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by")
+        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
         .single();
 
       if (completeEventError || !completedEvent) {
@@ -493,7 +620,7 @@ export default function EventPage() {
             `Spotkanie przełożone z terminu ${new Date(event.event_at).toLocaleString("pl-PL")}.`,
         })
         .eq("id", event.id)
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by")
+        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
         .single();
 
       if (rescheduleError || !rescheduledEvent) {
@@ -506,6 +633,18 @@ export default function EventPage() {
         setSavingMeetingEffect(false);
         return;
       }
+
+      await updateOutlookEventAfterReschedule({
+        calendarEventId: rescheduledEvent.id,
+        microsoftEventId: rescheduledEvent.microsoft_event_id || event.microsoft_event_id,
+        ownerId: rescheduledEvent.created_by || event.created_by,
+        title: rescheduledEvent.title,
+        description: rescheduledEvent.description,
+        eventAt: rescheduledEvent.event_at,
+        clientName,
+        clientPhone: client?.phone || null,
+        clientAddress: getClientAddress(),
+      });
 
       setEvent(rescheduledEvent as CalendarEvent);
       setMeetingEffectStatus("");
@@ -557,7 +696,7 @@ export default function EventPage() {
       .from("calendar_events")
       .update({ status: completedStatus })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by")
+      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
       .single();
 
     if (completeEventError || !completedEvent) {
@@ -648,7 +787,7 @@ export default function EventPage() {
     const { data: eventData, error: eventError } = await supabase
       .from("calendar_events")
       .select(
-        "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by"
+        "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
       )
       .eq("id", eventId)
       .single();
@@ -703,7 +842,7 @@ export default function EventPage() {
     if (eventData.client_id) {
       const { data: clientData, error: clientError } = await supabase
         .from("clients")
-        .select("id, full_name, company_name, phone, email, city")
+        .select("id, full_name, company_name, phone, email, city, street, building_number, postal_code, address")
         .eq("id", eventData.client_id)
         .maybeSingle();
 
@@ -746,7 +885,7 @@ export default function EventPage() {
 
           <button
             type="button"
-            onClick={() => router.push("/kalendarz")}
+            onClick={() => router.push("/calendar")}
             className="inline-flex px-4 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold"
           >
             Wróć do kalendarza
@@ -798,6 +937,9 @@ export default function EventPage() {
 
   const meetingEffectNeedsNextContact = meetingEffectStatus === "Zainteresowany";
 
+  
+
+
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
@@ -807,12 +949,43 @@ export default function EventPage() {
 
           <h1 className="text-3xl font-bold text-slate-900">{taskTitle}</h1>
           {eventOwner?.display_name && (
-            <p className="mt-2 text-sm font-semibold text-slate-500">
-              Opiekun: {eventOwner.display_name}
-            </p>
+            <div className="mt-2 text-sm text-slate-500">
+              <p className="font-semibold">
+                Opiekun: {eventOwner.display_name}
+              </p>
+              {eventOwner.role && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Rola: {eventOwner.role}
+                </p>
+              )}
+            </div>
           )}
 
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Adres klienta</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{getClientAddress()}</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Telefon</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{client?.phone || "Brak telefonu"}</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-1">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">E-mail</p>
+              <p className="mt-1 break-all text-sm font-semibold text-slate-900">{client?.email || "Brak e-maila"}</p>
+            </div>
+          </div>
+
+          {event.description && (
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Notatka z wydarzenia</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{event.description}</p>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 mt-5 flex-wrap">
             <span
               className={`px-3 py-1 rounded-full text-sm font-semibold ${
                 event.event_type === "meeting"
@@ -1125,33 +1298,57 @@ export default function EventPage() {
               </div>
             )}
             {meetingEffectStatus === "Przełożenie" && (
-              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <label className="block text-xs uppercase font-semibold text-blue-700 mb-2">
+              <div className="mt-4 block">
+                <span className="text-sm font-semibold text-slate-700">
                   Nowy termin spotkania
-                </label>
-                <input
-                  type="datetime-local"
-                  value={rescheduledMeetingAt}
-                  min={minimumReminderDateTime}
-                  onChange={(input) => setRescheduledMeetingAt(input.target.value)}
-                  className="w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-400"
-                />
-                <p className="text-xs text-blue-700 mt-2">
-                  Ten efekt zmieni termin obecnego spotkania w kalendarzu CRM.
+                </span>
+                <div className="relative mt-2">
+                  <input
+                    type="datetime-local"
+                    id="rescheduled-meeting-at"
+                    value={rescheduledMeetingAt}
+                    min={minimumReminderDateTime}
+                    onChange={(input) => setRescheduledMeetingAt(input.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 pr-14 text-slate-900 outline-none transition focus:border-pink-400 focus:ring-4 focus:ring-pink-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.getElementById("rescheduled-meeting-at") as HTMLInputElement | null;
+                      input?.showPicker?.();
+                      input?.focus();
+                    }}
+                    className="absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-pink-200 bg-pink-50 text-pink-700 transition hover:bg-pink-100"
+                    aria-label="Wybierz datę i godzinę"
+                    title="Wybierz datę i godzinę"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="4" width="18" height="18" rx="2" />
+                      <path d="M16 2v4" />
+                      <path d="M8 2v4" />
+                      <path d="M3 10h18" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Ten efekt zaktualizuje termin spotkania w CRM oraz, jeśli wydarzenie jest zsynchronizowane, w Outlooku.
                 </p>
-              </div>
-            )}
-
-            {meetingEffectStatus === "Sprzedaż" && (
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                Ten efekt zamknie spotkanie jako sprzedaż i przeniesie Cię do wyboru istniejącej oferty klienta.
               </div>
             )}
 
             <textarea
               value={meetingEffectDescription}
               onChange={(input) => setMeetingEffectDescription(input.target.value)}
-              placeholder="Notatka z efektu spotkania..."
+              placeholder="Opis efektu spotkania..."
               className="w-full min-h-[120px] rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-pink-400 mt-4"
             />
 
@@ -1171,138 +1368,20 @@ export default function EventPage() {
                   savingMeetingEffect ||
                   !meetingEffectStatus ||
                   !meetingEffectDescription.trim() ||
+                  (meetingEffectNeedsNextContact && !nextContactAt) ||
+                  (meetingEffectStatus === "Przełożenie" && !rescheduledMeetingAt) ||
                   (meetingEffectNeedsNextContact &&
-                    (!nextContactAt ||
-                      (nextContactType === "meeting" &&
-                        canChooseMeetingOwner() &&
-                        !selectedMeetingOwnerId))) ||
-                  (meetingEffectStatus === "Przełożenie" && !rescheduledMeetingAt)
+                    nextContactType === "meeting" &&
+                    canChooseMeetingOwner() &&
+                    !selectedMeetingOwnerId)
                 }
-                className={`px-5 py-2.5 rounded-xl disabled:opacity-50 text-white font-bold text-sm transition ${
-                  meetingEffectStatus === "Niezainteresowany"
-                    ? "bg-[#6B6464] hover:opacity-90"
-                    : meetingEffectStatus === "Rezygnacja"
-                      ? "bg-[#780707] hover:opacity-90"
-                      : meetingEffectStatus === "Przełożenie"
-                        ? "bg-blue-600 hover:bg-blue-500"
-                        : meetingEffectStatus === "Sprzedaż"
-                          ? "bg-[#138525] hover:opacity-90"
-                          : "bg-[#FF4AC1] hover:opacity-90"
-                }`}
+                className="px-5 py-2.5 rounded-xl bg-[#FF4AC1] hover:opacity-90 disabled:opacity-50 text-white font-bold text-sm"
               >
-                {savingMeetingEffect || creatingSale ? "Zapisywanie..." : "Zapisz efekt spotkania"}
+                {savingMeetingEffect ? "Zapisywanie..." : "Zapisz efekt spotkania"}
               </button>
             </div>
           </section>
         )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <section className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-4">
-              Szczegóły wydarzenia
-            </h2>
-
-            <div className="space-y-4 text-sm">
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Termin
-                </p>
-                <p className="font-bold text-slate-900">
-                  {new Date(event.event_at).toLocaleString("pl-PL")}
-                </p>
-              </div>
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Opiekun wydarzenia
-                </p>
-                <p className="font-bold text-slate-900">
-                  {eventOwner?.display_name || "Brak opiekuna"}
-                </p>
-                {eventOwner?.role && (
-                  <p className="text-xs text-slate-500 mt-1">
-                    Rola: {eventOwner.role}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Opis
-                </p>
-                <div className="space-y-3">
-                  <p className="text-slate-800 whitespace-pre-wrap">
-                    {event.description || "Brak opisu"}
-                  </p>
-
-                  {isReminderEvent && (
-                    <div className={`rounded-xl border p-4 ${previousContactStatusClass}`}>
-                      <p className="text-xs uppercase font-semibold opacity-80 mb-1">
-                        Zadanie
-                      </p>
-
-                      <p className="font-bold">
-                        Ponowny kontakt z klientem
-                      </p>
-
-                      <div className="mt-3 rounded-lg bg-white/60 border border-white/70 px-3 py-2">
-                        <p className="text-xs uppercase font-semibold opacity-70 mb-1">
-                          Powód utworzenia zadania
-                        </p>
-
-                        <p className="font-semibold">
-                          {taskReason}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Source Activity ID
-                </p>
-                <p className="text-slate-800">
-                  {event.source_activity_id || "Brak"}
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <aside className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-4">Klient</h2>
-
-            <div className="space-y-4 text-sm">
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Nazwa
-                </p>
-                <p className="font-bold text-slate-900">{clientName}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Telefon
-                </p>
-                <p className="text-slate-800">{client?.phone || "Brak"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Email
-                </p>
-                <p className="text-slate-800">{client?.email || "Brak"}</p>
-              </div>
-
-              <div>
-                <p className="text-slate-400 uppercase font-semibold text-xs mb-1">
-                  Miasto
-                </p>
-                <p className="text-slate-800">{client?.city || "Brak"}</p>
-              </div>
-            </div>
-          </aside>
-        </div>
       </div>
     </main>
   );

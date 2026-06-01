@@ -40,6 +40,39 @@ type Result = {
     hasRequiredStorageToPvRatio?: boolean;
   };
 
+  contractBreakdown?: {
+    pv: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    storage: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    ems: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    backup: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    additionalServices: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    total: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+  };
+
   basePriceNet: number;
   sellerMarkupNet: number;
   finalNet: number;
@@ -56,6 +89,7 @@ type Result = {
 type CatalogPanel = {
   code: string;
   name: string;
+  display_name: string | null;
   power_wp: number;
   price_net: number;
 };
@@ -63,6 +97,7 @@ type CatalogPanel = {
 type CatalogStorage = {
   code: string;
   name: string;
+  display_name: string | null;
   capacity_kwh: number;
   price_net: number;
   installation_net: number;
@@ -70,9 +105,19 @@ type CatalogStorage = {
 
 type CatalogInverter = {
   name: string;
+  display_name: string | null;
   type: string;
   max_pv_kw: number;
   price_net: number;
+};
+
+type SelectedAdditionalService = {
+  id: number;
+  name: string;
+  unit_label?: string;
+  price_net: number;
+  allows_quantity: boolean;
+  quantity: number;
 };
 
 type UserProfile = {
@@ -154,6 +199,7 @@ export default function Home() {
   const [includeSubsidy, setIncludeSubsidy] = useState(false);
   const [isUpsell, setIsUpsell] = useState(false);
   const [existingPvPowerKw, setExistingPvPowerKw] = useState("0");
+  const [selectedAdditionalServices, setSelectedAdditionalServices] = useState<SelectedAdditionalService[]>([]);
 
   const [billingSystem, setBillingSystem] = useState<
     "net_billing" | "net_metering"
@@ -188,6 +234,12 @@ export default function Home() {
 
     if (model === "HORAY_435_BIFACIAL") return 435;
     return 450;
+  }
+
+  function getPanelDisplayName(model: string) {
+    const selectedPanel = panels.find((panel) => panel.code === model);
+
+    return selectedPanel?.display_name || selectedPanel?.name || model;
   }
 
   function calculateNearestPanelCount(powerKwText: string, model: string) {
@@ -306,20 +358,20 @@ export default function Home() {
       const [panelsResponse, storagesResponse, invertersResponse] = await Promise.all([
         supabase
           .from("panels")
-          .select("code, name, power_wp, price_net")
+          .select("code, name, display_name, power_wp, price_net")
           .eq("active", true)
           .order("power_wp", { ascending: false }),
 
         supabase
           .from("storages")
-          .select("code, name, capacity_kwh, price_net, installation_net")
+          .select("code, name, display_name, capacity_kwh, price_net, installation_net")
           .eq("active", true)
           .neq("code", "none")
           .order("capacity_kwh", { ascending: true }),
 
         supabase
           .from("inverters")
-          .select("name, type, max_pv_kw, price_net")
+          .select("name, display_name, type, max_pv_kw, price_net")
           .eq("active", true)
           .order("max_pv_kw", { ascending: true }),
       ]);
@@ -445,6 +497,8 @@ export default function Home() {
         sellerMarkup,
         vatRate,
         pricingOverrides,
+        additionalServices: selectedAdditionalServices,
+        additional_services: selectedAdditionalServices,
         advisor: {
           id: userProfile?.id || null,
           name: advisorName,
@@ -482,6 +536,7 @@ export default function Home() {
     setExistingPvPowerKw("0");
     setBillingSystem("net_billing");
     setSelectedInverterName("auto");
+    setSelectedAdditionalServices([]);
     const defaultMargin = userProfile?.default_seller_markup;
 
     if (defaultMargin !== null && defaultMargin !== undefined) {
@@ -550,6 +605,9 @@ export default function Home() {
       roof_type: roofType,
       offer_data: {
         result,
+        contractBreakdown: result.contractBreakdown || null,
+        additionalServices: selectedAdditionalServices,
+        additional_services: selectedAdditionalServices,
         form: {
           offerType,
           panelModel,
@@ -566,6 +624,9 @@ export default function Home() {
           sellerMarkup,
           vatRate,
           defaultCalculatorMargin: userProfile?.default_seller_markup ?? null,
+          contractBreakdown: result.contractBreakdown || null,
+          additionalServices: selectedAdditionalServices,
+          additional_services: selectedAdditionalServices,
         },
         pricingOverrides,
         advisor: {
@@ -679,7 +740,7 @@ IdeaSol`;
           advisorEmail,
           offerType: result.offerType,
           pvPowerKw: result.pvPowerKw,
-          panelName: panels.find((panel) => panel.code === panelModel)?.name || panelModel,
+          panelName: getPanelDisplayName(panelModel),
           panelModel,
           panelCount,
           panelPowerWp: getPanelPowerWp(panelModel),
@@ -781,6 +842,8 @@ IdeaSol`;
               setShowSettings={setShowSettings}
               sellerMarkup={sellerMarkup}
               setSellerMarkup={setSellerMarkup}
+              selectedAdditionalServices={selectedAdditionalServices}
+              setSelectedAdditionalServices={setSelectedAdditionalServices}
             />
 
             {result && (
@@ -792,7 +855,7 @@ IdeaSol`;
                   result={result}
                   panelCount={panelCount}
                   panelPowerWp={getPanelPowerWp(panelModel)}
-                  panelName={panels.find((panel) => panel.code === panelModel)?.name || panelModel}
+                  panelName={getPanelDisplayName(panelModel)}
                   copied={copied}
                   copyOffer={copyOffer}
                   resetForm={resetForm}

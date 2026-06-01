@@ -985,6 +985,78 @@ export default function Home() {
     );
   }
 
+  function addMinutesToIsoDateTime(value: string, minutes: number) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    date.setMinutes(date.getMinutes() + minutes);
+    return date.toISOString();
+  }
+
+  async function syncMeetingToOutlook(params: {
+    calendarEventId: string;
+    title: string;
+    description: string | null;
+    eventAt: string;
+    clientName: string;
+  }) {
+    if (!currentUser?.email) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/microsoft/outlook/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userEmail: currentUser.email,
+          subject: params.title,
+          body: [
+            `<strong>Klient:</strong> ${params.clientName}`,
+            params.description ? `<br/><br/>${params.description}` : "",
+            `<br/><br/><a href="${window.location.origin}/event/${params.calendarEventId}">Otwórz spotkanie w CRM</a>`,
+          ].join(""),
+          startDateTime: new Date(params.eventAt).toISOString(),
+          endDateTime: addMinutesToIsoDateTime(params.eventAt, 60),
+          timeZone: "Europe/Warsaw",
+          reminderMinutesBeforeStart: 10,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Nie udało się utworzyć wydarzenia Outlook.");
+      }
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_event_id: result.microsoftEventId || null,
+          microsoft_event_url: result.microsoftEventUrl || null,
+          microsoft_sync_status: "synced",
+          microsoft_sync_error: null,
+        })
+        .eq("id", params.calendarEventId);
+    } catch (error) {
+      console.error("Nie udało się zsynchronizować spotkania z Outlook", error);
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error:
+            error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+    }
+  }
+
   async function resolveFollowUp() {
     if (!resolvingFollowUp || !currentUser) return;
 
@@ -1075,21 +1147,39 @@ export default function Home() {
     }
 
     if (needsMeeting(resolutionStatus)) {
-      const { error: meetingError } = await supabase.from("calendar_events").insert({
-        client_id: resolvingFollowUp.client_id,
-        title: `Spotkanie: ${resolvingFollowUp.client_name}`,
-        description: resolutionDescription || null,
-        event_type: "meeting",
-        event_at: resolutionMeetingAt,
-        status: "planned",
-        created_by: currentUser.id,
-      });
+      const meetingTitle = `Spotkanie: ${resolvingFollowUp.client_name}`;
+      const meetingDescription = resolutionDescription || null;
+
+      const { data: meetingData, error: meetingError } = await supabase
+        .from("calendar_events")
+        .insert({
+          client_id: resolvingFollowUp.client_id,
+          title: meetingTitle,
+          description: meetingDescription,
+          event_type: "meeting",
+          event_at: resolutionMeetingAt,
+          status: "planned",
+          created_by: currentUser.id,
+          microsoft_sync_status: "pending",
+        })
+        .select("id")
+        .single();
 
       if (meetingError) {
         console.error("Nie udało się utworzyć spotkania", meetingError);
         setResolutionError("Rezultat zapisany, ale nie udało się utworzyć spotkania");
         setSavingResolution(false);
         return;
+      }
+
+      if (meetingData?.id) {
+        await syncMeetingToOutlook({
+          calendarEventId: meetingData.id,
+          title: meetingTitle,
+          description: meetingDescription,
+          eventAt: resolutionMeetingAt,
+          clientName: resolvingFollowUp.client_name,
+        });
       }
     }
 

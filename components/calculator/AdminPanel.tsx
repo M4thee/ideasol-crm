@@ -7,6 +7,9 @@ import { useEffect, useState } from "react";
 type PanelItem = {
   id: number;
   code: string;
+  manufacturer: string;
+  model: string;
+  display_name: string;
   name: string;
   power_wp: number;
   price_net: number;
@@ -15,6 +18,9 @@ type PanelItem = {
 
 type InverterItem = {
   id: number;
+  manufacturer: string;
+  model: string;
+  display_name: string;
   name: string;
   type: string;
   max_pv_kw: number;
@@ -25,10 +31,22 @@ type InverterItem = {
 type StorageItem = {
   id: number;
   code: string;
+  manufacturer: string;
+  model: string;
+  display_name: string;
   name: string;
   capacity_kwh: number;
   price_net: number;
   installation_net: number;
+  active: boolean;
+};
+
+type AdditionalServiceItem = {
+  id: number;
+  name: string;
+  price_net: number;
+  unit_label: string;
+  allows_quantity: boolean;
   active: boolean;
 };
 
@@ -42,12 +60,18 @@ type AdminPanelProps = {
 
 const EMPTY_PANEL_FORM = {
   code: "",
+  manufacturer: "",
+  model: "",
+  display_name: "",
   name: "",
   power_wp: "450",
   price_net: "0",
 };
 
 const EMPTY_INVERTER_FORM = {
+  manufacturer: "",
+  model: "",
+  display_name: "",
   name: "",
   type: "ongrid",
   max_pv_kw: "10",
@@ -56,10 +80,20 @@ const EMPTY_INVERTER_FORM = {
 
 const EMPTY_STORAGE_FORM = {
   code: "",
+  manufacturer: "",
+  model: "",
+  display_name: "",
   name: "",
   capacity_kwh: "10",
   price_net: "0",
   installation_net: "1500",
+};
+
+const EMPTY_ADDITIONAL_SERVICE_FORM = {
+  name: "",
+  price_net: "0",
+  unit_label: "szt.",
+  allows_quantity: false,
 };
 
 function parseDecimal(value: string | number) {
@@ -86,11 +120,16 @@ export default function AdminPanel({
   const [storages, setStorages] = useState<StorageItem[]>([]);
   const [storagesStatus, setStoragesStatus] = useState("");
   const [storageForm, setStorageForm] = useState(EMPTY_STORAGE_FORM);
+  const [additionalServices, setAdditionalServices] = useState<AdditionalServiceItem[]>([]);
+  const [additionalServicesStatus, setAdditionalServicesStatus] = useState("");
+  const [additionalServiceForm, setAdditionalServiceForm] = useState(
+    EMPTY_ADDITIONAL_SERVICE_FORM
+  );
 
   async function loadPanels() {
     const { data, error } = await supabase
       .from("panels")
-      .select("id, code, name, power_wp, price_net, active")
+      .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, active")
       .order("active", { ascending: false })
       .order("power_wp", { ascending: false });
 
@@ -105,7 +144,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, name, type, max_pv_kw, price_net, active")
+      .select("id, manufacturer, model, display_name, name, type, max_pv_kw, price_net, active")
       .order("active", { ascending: false })
       .order("max_pv_kw", { ascending: true });
 
@@ -121,7 +160,7 @@ export default function AdminPanel({
   async function loadStorages() {
     const { data, error } = await supabase
       .from("storages")
-      .select("id, code, name, capacity_kwh, price_net, installation_net, active")
+      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, price_net, installation_net, active")
       .order("active", { ascending: false })
       .order("capacity_kwh", { ascending: true });
 
@@ -134,11 +173,116 @@ export default function AdminPanel({
     setStorages((data || []) as StorageItem[]);
   }
 
+  async function loadAdditionalServices() {
+    const { data, error } = await supabase
+      .from("additional_services")
+      .select("id, name, price_net, unit_label, allows_quantity, active")
+      .order("active", { ascending: false })
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Błąd ładowania usług dodatkowych", error);
+      setAdditionalServicesStatus(`Błąd ładowania usług dodatkowych: ${error.message}`);
+      return;
+    }
+
+    setAdditionalServices((data || []) as AdditionalServiceItem[]);
+  }
+
   useEffect(() => {
     loadPanels();
     loadInverters();
     loadStorages();
+    loadAdditionalServices();
   }, []);
+  async function updateAdditionalService(
+    serviceId: number,
+    field: keyof AdditionalServiceItem,
+    value: string | number | boolean
+  ) {
+    setAdditionalServices((current) =>
+      current.map((service) =>
+        service.id === serviceId
+          ? {
+              ...service,
+              [field]: value,
+            }
+          : service
+      )
+    );
+
+    setAdditionalServicesStatus("Masz niezapisane zmiany w usługach dodatkowych");
+  }
+
+  async function saveAdditionalServices() {
+    setAdditionalServicesStatus("Zapisywanie usług dodatkowych...");
+
+    for (const service of additionalServices) {
+      const { error } = await supabase
+        .from("additional_services")
+        .update({
+          name: service.name,
+          price_net: parseDecimal(service.price_net),
+          unit_label: service.unit_label?.trim() || "szt.",
+          allows_quantity: Boolean(service.allows_quantity),
+          active: Boolean(service.active),
+        })
+        .eq("id", service.id);
+
+      if (error) {
+        console.error("Błąd zapisu usług dodatkowych", error);
+        setAdditionalServicesStatus(`Błąd zapisu usług dodatkowych: ${error.message}`);
+        return;
+      }
+    }
+
+    setAdditionalServicesStatus("Usługi dodatkowe zapisane do Supabase");
+    loadAdditionalServices();
+  }
+
+  async function addAdditionalService() {
+    setAdditionalServicesStatus("");
+
+    if (!additionalServiceForm.name.trim()) {
+      setAdditionalServicesStatus("Uzupełnij nazwę usługi dodatkowej");
+      return;
+    }
+
+    const { error } = await supabase.from("additional_services").insert({
+      name: additionalServiceForm.name.trim(),
+      price_net: parseDecimal(additionalServiceForm.price_net),
+      unit_label: additionalServiceForm.unit_label.trim() || "szt.",
+      allows_quantity: Boolean(additionalServiceForm.allows_quantity),
+      active: true,
+    });
+
+    if (error) {
+      console.error("Błąd dodawania usługi dodatkowej", error);
+      setAdditionalServicesStatus(`Błąd dodawania usługi dodatkowej: ${error.message}`);
+      return;
+    }
+
+    setAdditionalServiceForm(EMPTY_ADDITIONAL_SERVICE_FORM);
+    setAdditionalServicesStatus("Dodano usługę dodatkową");
+    loadAdditionalServices();
+  }
+
+  async function deleteAdditionalService(serviceId: number) {
+    if (!confirm("Na pewno trwale usunąć tę usługę dodatkową z bazy?")) return;
+
+    const { error } = await supabase
+      .from("additional_services")
+      .delete()
+      .eq("id", serviceId);
+
+    if (error) {
+      setAdditionalServicesStatus(`Błąd usuwania usługi dodatkowej: ${error.message}`);
+      return;
+    }
+
+    setAdditionalServicesStatus("Usunięto usługę dodatkową");
+    loadAdditionalServices();
+  }
 
   async function updatePanel(panelId: number, field: keyof PanelItem, value: string | number | boolean) {
     setPanels((current) =>
@@ -163,7 +307,10 @@ export default function AdminPanel({
         .from("panels")
         .update({
           code: panel.code,
-          name: panel.name,
+          manufacturer: panel.manufacturer,
+          model: panel.model,
+          display_name: panel.display_name,
+          name: panel.display_name || panel.model || panel.code,
           power_wp: Number(panel.power_wp),
           price_net: Number(panel.price_net),
           active: Boolean(panel.active),
@@ -184,14 +331,17 @@ export default function AdminPanel({
   async function addPanel() {
     setPanelsStatus("");
 
-    if (!panelForm.code || !panelForm.name) {
-      setPanelsStatus("Uzupełnij kod i nazwę panelu");
+    if (!panelForm.code || !panelForm.display_name) {
+      setPanelsStatus("Uzupełnij kod i nazwę wyświetlaną panelu");
       return;
     }
 
     const { error } = await supabase.from("panels").insert({
       code: panelForm.code.trim().toUpperCase().replaceAll(" ", "_"),
-      name: panelForm.name.trim(),
+      manufacturer: panelForm.manufacturer.trim(),
+      model: panelForm.model.trim(),
+      display_name: panelForm.display_name.trim(),
+      name: panelForm.display_name.trim() || panelForm.model.trim() || panelForm.code.trim(),
       power_wp: Number(panelForm.power_wp),
       price_net: Number(panelForm.price_net),
       active: true,
@@ -205,6 +355,20 @@ export default function AdminPanel({
 
     setPanelForm(EMPTY_PANEL_FORM);
     setPanelsStatus("Dodano panel");
+    loadPanels();
+  }
+
+  async function deletePanel(panelId: number) {
+    if (!confirm("Na pewno trwale usunąć ten panel z bazy?")) return;
+
+    const { error } = await supabase.from("panels").delete().eq("id", panelId);
+
+    if (error) {
+      setPanelsStatus(`Błąd usuwania panelu: ${error.message}`);
+      return;
+    }
+
+    setPanelsStatus("Usunięto panel");
     loadPanels();
   }
 
@@ -234,7 +398,10 @@ export default function AdminPanel({
       const { error } = await supabase
         .from("inverters")
         .update({
-          name: inverter.name,
+          manufacturer: inverter.manufacturer,
+          model: inverter.model,
+          display_name: inverter.display_name,
+          name: inverter.display_name || inverter.model || inverter.manufacturer,
           type: inverter.type,
           max_pv_kw: Number(inverter.max_pv_kw),
           price_net: Number(inverter.price_net),
@@ -256,13 +423,16 @@ export default function AdminPanel({
   async function addInverter() {
     setInvertersStatus("");
 
-    if (!inverterForm.name) {
-      setInvertersStatus("Uzupełnij nazwę falownika");
+    if (!inverterForm.display_name) {
+      setInvertersStatus("Uzupełnij nazwę wyświetlaną falownika");
       return;
     }
 
     const { error } = await supabase.from("inverters").insert({
-      name: inverterForm.name.trim(),
+      manufacturer: inverterForm.manufacturer.trim(),
+      model: inverterForm.model.trim(),
+      display_name: inverterForm.display_name.trim(),
+      name: inverterForm.display_name.trim() || inverterForm.model.trim() || inverterForm.manufacturer.trim(),
       type: inverterForm.type,
       max_pv_kw: Number(inverterForm.max_pv_kw),
       price_net: Number(inverterForm.price_net),
@@ -277,6 +447,20 @@ export default function AdminPanel({
 
     setInverterForm(EMPTY_INVERTER_FORM);
     setInvertersStatus("Dodano falownik");
+    loadInverters();
+  }
+
+  async function deleteInverter(inverterId: number) {
+    if (!confirm("Na pewno trwale usunąć ten falownik z bazy?")) return;
+
+    const { error } = await supabase.from("inverters").delete().eq("id", inverterId);
+
+    if (error) {
+      setInvertersStatus(`Błąd usuwania falownika: ${error.message}`);
+      return;
+    }
+
+    setInvertersStatus("Usunięto falownik");
     loadInverters();
   }
 
@@ -307,7 +491,10 @@ export default function AdminPanel({
         .from("storages")
         .update({
           code: storage.code,
-          name: storage.name,
+          manufacturer: storage.manufacturer,
+          model: storage.model,
+          display_name: storage.display_name,
+          name: storage.display_name || storage.model || storage.code,
           capacity_kwh: parseDecimal(storage.capacity_kwh),
           price_net: parseDecimal(storage.price_net),
           installation_net: parseDecimal(storage.installation_net),
@@ -329,14 +516,17 @@ export default function AdminPanel({
   async function addStorage() {
     setStoragesStatus("");
 
-    if (!storageForm.code || !storageForm.name) {
-      setStoragesStatus("Uzupełnij kod i nazwę magazynu");
+    if (!storageForm.code || !storageForm.display_name) {
+      setStoragesStatus("Uzupełnij kod i nazwę wyświetlaną magazynu");
       return;
     }
 
     const { error } = await supabase.from("storages").insert({
       code: storageForm.code.trim().toUpperCase().replaceAll(" ", "_"),
-      name: storageForm.name.trim(),
+      manufacturer: storageForm.manufacturer.trim(),
+      model: storageForm.model.trim(),
+      display_name: storageForm.display_name.trim(),
+      name: storageForm.display_name.trim() || storageForm.model.trim() || storageForm.code.trim(),
       capacity_kwh: parseDecimal(storageForm.capacity_kwh),
       price_net: parseDecimal(storageForm.price_net),
       installation_net: parseDecimal(storageForm.installation_net),
@@ -351,6 +541,20 @@ export default function AdminPanel({
 
     setStorageForm(EMPTY_STORAGE_FORM);
     setStoragesStatus("Dodano magazyn");
+    loadStorages();
+  }
+
+  async function deleteStorage(storageId: number) {
+    if (!confirm("Na pewno trwale usunąć ten magazyn energii z bazy?")) return;
+
+    const { error } = await supabase.from("storages").delete().eq("id", storageId);
+
+    if (error) {
+      setStoragesStatus(`Błąd usuwania magazynu: ${error.message}`);
+      return;
+    }
+
+    setStoragesStatus("Usunięto magazyn energii");
     loadStorages();
   }
 
@@ -408,6 +612,16 @@ export default function AdminPanel({
               className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
             >
               Zapisz magazyny
+            </button>
+          )}
+
+          {activeTab === "additionalServices" && (
+            <button
+              type="button"
+              onClick={saveAdditionalServices}
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+            >
+              Zapisz usługi dodatkowe
             </button>
           )}
 
@@ -470,6 +684,18 @@ export default function AdminPanel({
           }`}
         >
           Magazyny energii
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("additionalServices")}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
+            activeTab === "additionalServices"
+              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          }`}
+        >
+          Usługi dodatkowe
         </button>
       </div>
 
@@ -704,7 +930,7 @@ export default function AdminPanel({
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj panel</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 placeholder="Kod, np. JA_SOLAR_455"
@@ -714,10 +940,25 @@ export default function AdminPanel({
 
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                placeholder="Nazwa panelu"
-                value={panelForm.name}
-                onChange={(e) => setPanelForm({ ...panelForm, name: e.target.value })}
+                placeholder="Producent"
+                value={panelForm.manufacturer}
+                onChange={(e) => setPanelForm({ ...panelForm, manufacturer: e.target.value })}
               />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Model"
+                value={panelForm.model}
+                onChange={(e) => setPanelForm({ ...panelForm, model: e.target.value })}
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Nazwa wyświetlana"
+                value={panelForm.display_name}
+                onChange={(e) => setPanelForm({ ...panelForm, display_name: e.target.value })}
+              />
+
 
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -755,7 +996,7 @@ export default function AdminPanel({
               {panels.map((panel) => (
                 <div
                   key={panel.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-6"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-9"
                 >
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -764,10 +1005,24 @@ export default function AdminPanel({
                   />
 
                   <input
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
-                    value={panel.name}
-                    onChange={(e) => updatePanel(panel.id, "name", e.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={panel.manufacturer || ""}
+                    onChange={(e) => updatePanel(panel.id, "manufacturer", e.target.value)}
                   />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={panel.model || ""}
+                    onChange={(e) => updatePanel(panel.id, "model", e.target.value)}
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={panel.display_name || ""}
+                    onChange={(e) => updatePanel(panel.id, "display_name", e.target.value)}
+                  />
+
+                  
 
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -794,6 +1049,13 @@ export default function AdminPanel({
                   >
                     {panel.active ? "Aktywny" : "Nieaktywny"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => deletePanel(panel.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-100 hover:bg-red-100"
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>
@@ -804,13 +1066,31 @@ export default function AdminPanel({
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj falownik</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                placeholder="Nazwa falownika"
-                value={inverterForm.name}
+                placeholder="Producent"
+                value={inverterForm.manufacturer}
                 onChange={(e) =>
-                  setInverterForm({ ...inverterForm, name: e.target.value })
+                  setInverterForm({ ...inverterForm, manufacturer: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Model"
+                value={inverterForm.model}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, model: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Nazwa wyświetlana"
+                value={inverterForm.display_name}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, display_name: e.target.value })
                 }
               />
 
@@ -865,13 +1145,29 @@ export default function AdminPanel({
               {inverters.map((inverter) => (
                 <div
                   key={inverter.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-6"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-8"
                 >
                   <input
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
-                    value={inverter.name}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={inverter.manufacturer || ""}
                     onChange={(e) =>
-                      updateInverter(inverter.id, "name", e.target.value)
+                      updateInverter(inverter.id, "manufacturer", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={inverter.model || ""}
+                    onChange={(e) =>
+                      updateInverter(inverter.id, "model", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={inverter.display_name || ""}
+                    onChange={(e) =>
+                      updateInverter(inverter.id, "display_name", e.target.value)
                     }
                   />
 
@@ -925,17 +1221,24 @@ export default function AdminPanel({
                   >
                     {inverter.active ? "Aktywny" : "Nieaktywny"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteInverter(inverter.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-100 hover:bg-red-100"
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === "storages" ? (
         <div className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj magazyn energii</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 placeholder="Kod, np. ZBPOWER_10"
@@ -947,12 +1250,31 @@ export default function AdminPanel({
 
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                placeholder="Nazwa magazynu"
-                value={storageForm.name}
+                placeholder="Producent"
+                value={storageForm.manufacturer}
                 onChange={(e) =>
-                  setStorageForm({ ...storageForm, name: e.target.value })
+                  setStorageForm({ ...storageForm, manufacturer: e.target.value })
                 }
               />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Model"
+                value={storageForm.model}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, model: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Nazwa wyświetlana"
+                value={storageForm.display_name}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, display_name: e.target.value })
+                }
+              />
+
 
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -1010,7 +1332,7 @@ export default function AdminPanel({
               {storages.map((storage) => (
                 <div
                   key={storage.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-7"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-9"
                 >
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1021,12 +1343,30 @@ export default function AdminPanel({
                   />
 
                   <input
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
-                    value={storage.name}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={storage.manufacturer || ""}
                     onChange={(e) =>
-                      updateStorage(storage.id, "name", e.target.value)
+                      updateStorage(storage.id, "manufacturer", e.target.value)
                     }
                   />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={storage.model || ""}
+                    onChange={(e) =>
+                      updateStorage(storage.id, "model", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={storage.display_name || ""}
+                    onChange={(e) =>
+                      updateStorage(storage.id, "display_name", e.target.value)
+                    }
+                  />
+
+                  
 
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1086,6 +1426,175 @@ export default function AdminPanel({
                   >
                     {storage.active ? "Aktywny" : "Nieaktywny"}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteStorage(storage.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-100 hover:bg-red-100"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
+            <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj usługę dodatkową</h3>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-2"
+                placeholder="Nazwa, np. Optymalizator mocy"
+                value={additionalServiceForm.name}
+                onChange={(e) =>
+                  setAdditionalServiceForm({
+                    ...additionalServiceForm,
+                    name: e.target.value,
+                  })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="Cena netto"
+                value={additionalServiceForm.price_net}
+                onChange={(e) =>
+                  setAdditionalServiceForm({
+                    ...additionalServiceForm,
+                    price_net: e.target.value,
+                  })
+                }
+              />
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                placeholder="Jednostka, np. szt., mb, m²"
+                value={additionalServiceForm.unit_label}
+                onChange={(e) =>
+                  setAdditionalServiceForm({
+                    ...additionalServiceForm,
+                    unit_label: e.target.value,
+                  })
+                }
+              />
+
+              <button
+                type="button"
+                onClick={() =>
+                  setAdditionalServiceForm({
+                    ...additionalServiceForm,
+                    allows_quantity: !additionalServiceForm.allows_quantity,
+                  })
+                }
+                className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                  additionalServiceForm.allows_quantity
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-100"
+                    : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {additionalServiceForm.allows_quantity
+                  ? `Ilość ${additionalServiceForm.unit_label || "szt."}: tak`
+                  : "Ilość: nie"}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={addAdditionalService}
+              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+            >
+              Dodaj usługę
+            </button>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h3 className="text-xl font-bold text-slate-950">Usługi dodatkowe w bazie</h3>
+              <span className="text-sm text-slate-500">{additionalServicesStatus}</span>
+            </div>
+
+            <div className="space-y-3">
+              {additionalServices.map((service) => (
+                <div
+                  key={service.id}
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-7"
+                >
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    value={service.name}
+                    onChange={(e) =>
+                      updateAdditionalService(service.id, "name", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={service.price_net}
+                    onChange={(e) =>
+                      updateAdditionalService(
+                        service.id,
+                        "price_net",
+                        parseDecimal(e.target.value)
+                      )
+                    }
+                  />
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={service.unit_label || "szt."}
+                    onChange={(e) =>
+                      updateAdditionalService(service.id, "unit_label", e.target.value)
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateAdditionalService(
+                        service.id,
+                        "allows_quantity",
+                        !service.allows_quantity
+                      )
+                    }
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
+                      service.allows_quantity
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 text-slate-500 border border-slate-200"
+                    }`}
+                  >
+                    {service.allows_quantity ? `Ilość ${service.unit_label || "szt."}` : "Bez ilości"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateAdditionalService(service.id, "active", !service.active)
+                    }
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
+                      service.active
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-100 text-slate-500 border border-slate-200"
+                    }`}
+                  >
+                    {service.active ? "Aktywna" : "Nieaktywna"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteAdditionalService(service.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-lg text-xs font-bold bg-red-50 text-red-700 border border-red-100 hover:bg-red-100"
+                  >
+                    ×
+                  </button>
+
+                  <div className="text-xs font-medium text-slate-400">
+                    ID: {service.id}
+                  </div>
                 </div>
               ))}
             </div>

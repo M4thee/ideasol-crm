@@ -31,7 +31,22 @@ type SaleFromOfferForm = {
   installationSameAsContract: boolean;
   installationAddress: string;
   paymentMethod: string;
+  ownContributionAmount: string;
   depositAmount: string;
+  secondClientName: string;
+  secondClientPesel: string;
+  contractSequence: string;
+  contractPlace: string;
+  contractDate: string;
+  depositDueDate: string;
+  visitPreviouslyScheduled: boolean | null;
+  realizationVariant: "1A" | "1B" | "";
+  client1MarketingEmail: boolean;
+  client1MarketingPhone: boolean;
+  client1PhotoConsent: boolean;
+  client2MarketingEmail: boolean;
+  client2MarketingPhone: boolean;
+  client2PhotoConsent: boolean;
 };
 
 type ClientOffer = {
@@ -86,6 +101,7 @@ type UserProfile = {
   role?: UserRole;
   name?: string | null;
   username?: string | null;
+  user_number?: number | string | null;
 };
 
 function money(value: number | null | undefined) {
@@ -266,6 +282,48 @@ function getSavedBreakdownRows(result: Record<string, any> | null) {
     }));
 }
 
+function getOfferAdditionalServices(offer: ClientOffer | null) {
+  if (!offer) return [];
+
+  const offerData = (offer.offer_data || {}) as Record<string, any>;
+  const resultData = (offerData.result || {}) as Record<string, any>;
+  const formData = (offerData.form || {}) as Record<string, any>;
+
+  const source = Array.isArray(offerData.additionalServices)
+    ? offerData.additionalServices
+    : Array.isArray(offerData.additional_services)
+      ? offerData.additional_services
+      : Array.isArray(formData.additionalServices)
+        ? formData.additionalServices
+        : Array.isArray(formData.additional_services)
+          ? formData.additional_services
+          : Array.isArray(resultData.additionalServices)
+            ? resultData.additionalServices
+            : Array.isArray(resultData.additional_services)
+              ? resultData.additional_services
+              : [];
+
+  return source
+    .map((service: Record<string, any>) => {
+      const priceNet = Number(service.price_net ?? service.priceNet ?? service.price_netto ?? 0);
+      const quantity = Math.max(1, Math.round(Number(service.quantity || 1)));
+      const totalNet = Number(service.totalNet ?? service.total_net ?? priceNet * quantity);
+
+      return {
+        id: service.id ?? null,
+        name: String(service.name || service.label || service.title || "Usługa dodatkowa"),
+        price_net: Number.isFinite(priceNet) ? priceNet : 0,
+        priceNet: Number.isFinite(priceNet) ? priceNet : 0,
+        allows_quantity: Boolean(service.allows_quantity ?? service.allowsQuantity),
+        allowsQuantity: Boolean(service.allows_quantity ?? service.allowsQuantity),
+        quantity,
+        total_net: Number.isFinite(totalNet) ? totalNet : 0,
+        totalNet: Number.isFinite(totalNet) ? totalNet : 0,
+      };
+    })
+    .filter((service: Record<string, any>) => service.name.trim().length > 0);
+}
+
 function getOfferTypeLabel(offerType: string | null) {
   if (offerType === "pv") return "Fotowoltaika";
   if (offerType === "storage") return "Magazyn energii";
@@ -369,6 +427,279 @@ function buildFullAddress(
     .join(", ");
 }
 
+function todayLocalDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysLocalDate(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  date.setDate(date.getDate() + days);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function calculateDefaultDepositAmount(grossValue: number | null | undefined) {
+  const depositPercent = 25;
+  const parsedGrossValue = Number(grossValue || 0);
+
+  if (!Number.isFinite(parsedGrossValue) || parsedGrossValue <= 0) {
+    return "";
+  }
+
+  const roundedDeposit = Math.round((parsedGrossValue * (depositPercent / 100)) / 100) * 100;
+
+  return String(roundedDeposit);
+}
+
+function parseMoneyValue(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.replace(/\s/g, "").replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function findNestedValue(source: Record<string, any>, keys: string[]) {
+  for (const key of keys) {
+    const value = key.split(".").reduce<any>((current, part) => current?.[part], source);
+
+    if (value !== null && value !== undefined && String(value).trim() !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function findFirstMoneyValue(source: Record<string, any>, keys: string[]) {
+  return parseMoneyValue(findNestedValue(source, keys));
+}
+
+function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
+  const offerData = (offer.offer_data || {}) as Record<string, any>;
+  const resultData = (offerData.result || {}) as Record<string, any>;
+  const contractBreakdown =
+    (offerData.contractBreakdown ||
+      offerData.contract_breakdown ||
+      resultData.contractBreakdown ||
+      resultData.contract_breakdown ||
+      offerData.form?.contractBreakdown ||
+      {}) as Record<string, any>;
+
+  const getLineValue = (lineKey: string, valueKey: string) => {
+    const snakeValueKey = valueKey.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    const line =
+      contractBreakdown?.[lineKey] ||
+      contractBreakdown?.[lineKey.toLowerCase()] ||
+      contractBreakdown?.[lineKey.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)];
+
+    return parseMoneyValue(
+      line?.[valueKey] ??
+        line?.[snakeValueKey] ??
+        line?.[valueKey.toLowerCase()]
+    );
+  };
+
+  const getResultValue = (keys: string[]) => {
+    for (const key of keys) {
+      const value = findNestedValue(
+        {
+          offerData,
+          resultData,
+          formData: offerData.form || {},
+          contractBreakdown,
+        },
+        key.includes(".") ? [key] : [key, `offerData.${key}`, `resultData.${key}`, `formData.${key}`]
+      );
+
+      if (value !== null && value !== undefined && String(value).trim() !== "") {
+        return parseMoneyValue(value);
+      }
+    }
+
+    return 0;
+  };
+
+  const totalGrossAfterDiscount =
+    getLineValue("total", "grossAfterDiscount") ||
+    parseMoneyValue(offer.sale_price_gross) ||
+    parseMoneyValue(resultData.finalGross) ||
+    0;
+
+  const totalGrossBeforeDiscount =
+    getLineValue("total", "grossBeforeDiscount") ||
+    Math.round(totalGrossAfterDiscount * 1.1111 * 100) / 100;
+
+  const pvGrossAfterDiscount =
+    getLineValue("pv", "grossAfterDiscount") ||
+    getResultValue(["contract_pv_gross_after_discount", "contractPvGrossAfterDiscount"]);
+  const storageGrossAfterDiscount =
+    getLineValue("storage", "grossAfterDiscount") ||
+    getResultValue(["contract_storage_gross_after_discount", "contractStorageGrossAfterDiscount"]);
+  const emsGrossAfterDiscount =
+    getLineValue("ems", "grossAfterDiscount") ||
+    getResultValue(["contract_ems_gross_after_discount", "contractEmsGrossAfterDiscount"]);
+  const backupGrossAfterDiscount =
+    getLineValue("backup", "grossAfterDiscount") ||
+    getResultValue(["contract_backup_gross_after_discount", "contractBackupGrossAfterDiscount"]);
+  const additionalServicesGrossAfterDiscount =
+    getLineValue("additionalServices", "grossAfterDiscount") ||
+    getLineValue("additional_services", "grossAfterDiscount") ||
+    getResultValue(["contract_additional_services_gross_after_discount", "contractAdditionalServicesGrossAfterDiscount"]);
+
+  const pvGrossBeforeDiscount =
+    getLineValue("pv", "grossBeforeDiscount") ||
+    getResultValue(["contract_pv_gross_before_discount", "contractPvGrossBeforeDiscount"]);
+  const storageGrossBeforeDiscount =
+    getLineValue("storage", "grossBeforeDiscount") ||
+    getResultValue(["contract_storage_gross_before_discount", "contractStorageGrossBeforeDiscount"]);
+  const emsGrossBeforeDiscount =
+    getLineValue("ems", "grossBeforeDiscount") ||
+    getResultValue(["contract_ems_gross_before_discount", "contractEmsGrossBeforeDiscount"]);
+  const backupGrossBeforeDiscount =
+    getLineValue("backup", "grossBeforeDiscount") ||
+    getResultValue(["contract_backup_gross_before_discount", "contractBackupGrossBeforeDiscount"]) ||
+    3000;
+  const additionalServicesGrossBeforeDiscount =
+    getLineValue("additionalServices", "grossBeforeDiscount") ||
+    getLineValue("additional_services", "grossBeforeDiscount") ||
+    getResultValue(["contract_additional_services_gross_before_discount", "contractAdditionalServicesGrossBeforeDiscount"]);
+
+  const knownGrossAfterDiscount =
+    pvGrossAfterDiscount +
+    storageGrossAfterDiscount +
+    emsGrossAfterDiscount +
+    backupGrossAfterDiscount +
+    additionalServicesGrossAfterDiscount;
+
+  const missingGrossAfterDiscount = Math.max(totalGrossAfterDiscount - knownGrossAfterDiscount, 0);
+
+  const knownGrossBeforeDiscount =
+    pvGrossBeforeDiscount +
+    storageGrossBeforeDiscount +
+    emsGrossBeforeDiscount +
+    backupGrossBeforeDiscount +
+    additionalServicesGrossBeforeDiscount;
+
+  const missingGrossBeforeDiscount = Math.max(totalGrossBeforeDiscount - knownGrossBeforeDiscount, 0);
+
+  const offerHasPv =
+    offer.offer_type === "pv" ||
+    offer.offer_type === "pv_storage" ||
+    Number(offer.pv_power_kw || 0) > 0;
+
+  let finalPvGrossAfterDiscount = pvGrossAfterDiscount + missingGrossAfterDiscount;
+  let finalStorageGrossAfterDiscount = storageGrossAfterDiscount;
+  let finalEmsGrossAfterDiscount = emsGrossAfterDiscount;
+
+  if (offerHasPv && finalPvGrossAfterDiscount <= 0) {
+    finalPvGrossAfterDiscount = 1;
+
+    if (finalStorageGrossAfterDiscount >= 1) {
+      finalStorageGrossAfterDiscount -= 1;
+    } else if (finalEmsGrossAfterDiscount >= 1) {
+      finalEmsGrossAfterDiscount -= 1;
+    }
+  }
+
+  const contractVatRate = Number(offer.vat_rate || resultData.vatRate || resultData.vat_rate || 8);
+  const contractVatMultiplier = 1 + contractVatRate / 100;
+
+  const finalPvGrossBeforeDiscount =
+    finalPvGrossAfterDiscount > 0
+      ? Math.round(finalPvGrossAfterDiscount * 1.1111 * 100) / 100
+      : 0;
+
+  const finalPvNetAfterDiscount =
+    finalPvGrossAfterDiscount > 0
+      ? Math.round((finalPvGrossAfterDiscount / contractVatMultiplier) * 100) / 100
+      : 0;
+
+  return {
+    contract_total_gross_after_discount: totalGrossAfterDiscount,
+    contract_total_gross_before_discount: totalGrossBeforeDiscount,
+    contract_total_net_after_discount: getLineValue("total", "netAfterDiscount"),
+
+    contract_pv_gross_after_discount: finalPvGrossAfterDiscount,
+    contract_pv_gross_before_discount: finalPvGrossBeforeDiscount,
+    contract_pv_net_after_discount: finalPvNetAfterDiscount,
+
+    contract_storage_gross_after_discount: finalStorageGrossAfterDiscount,
+    contract_storage_gross_before_discount: storageGrossBeforeDiscount,
+    contract_storage_net_after_discount:
+      getLineValue("storage", "netAfterDiscount") ||
+      getResultValue(["contract_storage_net_after_discount", "contractStorageNetAfterDiscount"]),
+
+    contract_ems_gross_after_discount: finalEmsGrossAfterDiscount,
+    contract_ems_gross_before_discount: emsGrossBeforeDiscount,
+    contract_ems_net_after_discount:
+      getLineValue("ems", "netAfterDiscount") ||
+      getResultValue(["contract_ems_net_after_discount", "contractEmsNetAfterDiscount"]),
+
+    contract_backup_gross_after_discount: backupGrossAfterDiscount,
+    contract_backup_gross_before_discount: backupGrossBeforeDiscount,
+    contract_backup_net_after_discount: getLineValue("backup", "netAfterDiscount"),
+
+    contract_additional_services_gross_after_discount: additionalServicesGrossAfterDiscount,
+    contract_additional_services_gross_before_discount: additionalServicesGrossBeforeDiscount,
+    contract_additional_services_net_after_discount: getLineValue("additionalServices", "netAfterDiscount"),
+
+    contract_total_gross: totalGrossAfterDiscount,
+    contract_pv_gross: finalPvGrossAfterDiscount,
+    contract_storage_gross: finalStorageGrossAfterDiscount,
+    contract_ems_gross: finalEmsGrossAfterDiscount,
+    contract_backup_gross: backupGrossAfterDiscount,
+    contract_additional_services_gross: additionalServicesGrossAfterDiscount,
+  };
+}
+
+function formatTwoDigits(value: string | number | null | undefined) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+
+  if (!digits) {
+    return "00";
+  }
+
+  return digits.padStart(2, "0").slice(-2);
+}
+
+function buildContractNumberPreview(
+  userNumber: string | number | null | undefined,
+  sequence: string,
+  contractDate: string
+) {
+  const year = contractDate?.slice(0, 4) || "RRRR";
+  const month = contractDate?.slice(5, 7) || "MM";
+
+  return `${formatTwoDigits(userNumber)}/${formatTwoDigits(sequence)}/${year}/${month}/IS`;
+}
+
+function getContractNumberParts(contractNumber: string) {
+  const match = contractNumber.match(/^(\d{2})\/(\d{2})\/(\d{4})\/(\d{2})\/IS$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    userNumber: match[1],
+    sequence: Number(match[2]),
+    year: match[3],
+    month: match[4],
+  };
+}
+
 async function findDuplicateClient(
   pesel: string,
   email: string,
@@ -414,6 +745,7 @@ async function findDuplicateClient(
 }
 
 function emptySaleForm(): SaleFromOfferForm {
+  const contractDate = todayLocalDate();
   return {
     customerType: "b2c",
     fullName: "",
@@ -433,7 +765,22 @@ function emptySaleForm(): SaleFromOfferForm {
     installationSameAsContract: true,
     installationAddress: "",
     paymentMethod: "gotówka",
+    ownContributionAmount: "",
     depositAmount: "",
+    secondClientName: "",
+    secondClientPesel: "",
+    contractSequence: "01",
+    contractPlace: "",
+    contractDate,
+    depositDueDate: addDaysLocalDate(contractDate, 14),
+    visitPreviouslyScheduled: null,
+    realizationVariant: "",
+    client1MarketingEmail: false,
+    client1MarketingPhone: false,
+    client1PhotoConsent: false,
+    client2MarketingEmail: false,
+    client2MarketingPhone: false,
+    client2PhotoConsent: false,
   };
 }
 
@@ -506,10 +853,6 @@ async function addSystemTagToClient(clientId: string, tagName: string, color: st
     return;
   }
 
-  console.log("SYSTEM TAG RPC INSERTED", {
-    clientId,
-    tagName,
-  });
 }
 
 export default function OfferDetailsPage() {
@@ -738,6 +1081,45 @@ export default function OfferDetailsPage() {
 
     setLoading(false);
   }
+  async function getNextContractSequenceForUser(
+    userNumber: string | number | null | undefined,
+    contractDate: string
+  ) {
+    const formattedUserNumber = formatTwoDigits(userNumber);
+    const year = contractDate.slice(0, 4);
+    const month = contractDate.slice(5, 7);
+
+    if (!year || !month || formattedUserNumber === "00") {
+      return "01";
+    }
+
+    const { data, error } = await supabase
+      .from("sales")
+      .select("contract_number")
+      .like("contract_number", `${formattedUserNumber}/%/${year}/${month}/IS`);
+
+    if (error) {
+      console.error("Błąd pobierania ostatniego numeru umowy:", error);
+      return "01";
+    }
+
+    const maxSequence = (data || []).reduce((max, item) => {
+      const parts = getContractNumberParts(String(item.contract_number || ""));
+
+      if (!parts) {
+        return max;
+      }
+
+      if (parts.userNumber !== formattedUserNumber || parts.year !== year || parts.month !== month) {
+        return max;
+      }
+
+      return Math.max(max, parts.sequence);
+    }, 0);
+
+    return formatTwoDigits(maxSequence + 1);
+  }
+
   function updateSaleForm<K extends keyof SaleFromOfferForm>(
     key: K,
     value: SaleFromOfferForm[K]
@@ -750,7 +1132,7 @@ export default function OfferDetailsPage() {
     setInvalidFields((current) => current.filter((field) => field !== key));
   }
 
-  function openSaleFormFromOffer(clientOverride?: ClientData | null) {
+  async function openSaleFormFromOffer(clientOverride?: ClientData | null) {
     if (!offer) return;
 
     const sourceClient = clientOverride ?? client;
@@ -777,6 +1159,17 @@ export default function OfferDetailsPage() {
     const email = getClientField(sourceClient, ["email", "contact_email", "mail"]);
     const correspondenceAddress = getClientField(sourceClient, ["correspondence_address", "adres_korespondencyjny"]);
     const installationAddress = getClientField(sourceClient, ["installation_address", "adres_montazu", "mounting_address"]);
+    const defaultDepositAmount = calculateDefaultDepositAmount(offer.sale_price_gross);
+    const contractDate = todayLocalDate();
+    const defaultContractPlace = address.city || "";
+
+    const userNumberRaw =
+      creator?.user_number ||
+      (creator as any)?.uid ||
+      (creator as any)?.userNumber ||
+      "00";
+
+    const nextContractSequence = await getNextContractSequenceForUser(userNumberRaw, contractDate);
 
     setSaleForm({
       ...emptySaleForm(),
@@ -798,7 +1191,22 @@ export default function OfferDetailsPage() {
       installationSameAsContract: !installationAddress,
       installationAddress: installationAddress || contractAddress,
       paymentMethod: "gotówka",
-      depositAmount: "",
+      ownContributionAmount: "",
+      depositAmount: defaultDepositAmount,
+      secondClientName: "",
+      secondClientPesel: "",
+      contractSequence: nextContractSequence,
+      contractPlace: defaultContractPlace,
+      contractDate,
+      depositDueDate: addDaysLocalDate(contractDate, 14),
+      visitPreviouslyScheduled: null,
+      realizationVariant: "",
+      client1MarketingEmail: false,
+      client1MarketingPhone: false,
+      client1PhotoConsent: false,
+      client2MarketingEmail: false,
+      client2MarketingPhone: false,
+      client2PhotoConsent: false,
     });
 
     setCreateSaleStatus("");
@@ -813,6 +1221,12 @@ export default function OfferDetailsPage() {
       saleForm.contractBuildingNumber.trim() &&
       saleForm.contractPostalCode.trim() &&
       saleForm.contractCity.trim();
+
+    if (!saleForm.contractSequence.trim()) {
+      errors.push("contractSequence");
+      setInvalidFields(errors);
+      return "Uzupełnij numer kolejny umowy.";
+    }
 
     if (saleForm.customerType === "b2c" && !saleForm.fullName.trim()) {
       errors.push("fullName");
@@ -868,6 +1282,53 @@ export default function OfferDetailsPage() {
       return "Podany numer PESEL jest nieprawidłowy.";
     }
 
+    const hasSecondClientName = saleForm.secondClientName.trim().length > 0;
+    const hasSecondClientPesel = saleForm.secondClientPesel.trim().length > 0;
+
+    if (hasSecondClientName || hasSecondClientPesel) {
+      if (!hasSecondClientName) {
+        errors.push("secondClientName");
+        setInvalidFields(errors);
+        return "Uzupełnij imię i nazwisko drugiego klienta albo usuń PESEL drugiego klienta.";
+      }
+
+      if (!hasSecondClientPesel) {
+        errors.push("secondClientPesel");
+        setInvalidFields(errors);
+        return "Uzupełnij PESEL drugiego klienta albo usuń imię i nazwisko drugiego klienta.";
+      }
+
+      if (!isValidPesel(saleForm.secondClientPesel)) {
+        errors.push("secondClientPesel");
+        setInvalidFields(errors);
+        return "PESEL drugiego klienta jest nieprawidłowy.";
+      }
+    }
+
+    if (!saleForm.contractPlace.trim()) {
+      errors.push("contractPlace");
+      setInvalidFields(errors);
+      return "Uzupełnij miejscowość podpisania umowy.";
+    }
+
+    if (!saleForm.contractDate.trim()) {
+      errors.push("contractDate");
+      setInvalidFields(errors);
+      return "Uzupełnij datę podpisania umowy.";
+    }
+
+    if (saleForm.visitPreviouslyScheduled === null) {
+      errors.push("visitPreviouslyScheduled");
+      setInvalidFields(errors);
+      return "Wybierz, czy wizyta była wcześniej umówiona.";
+    }
+
+    if (saleForm.visitPreviouslyScheduled && !saleForm.realizationVariant) {
+      errors.push("realizationVariant");
+      setInvalidFields(errors);
+      return "Wybierz wariant realizacji umowy 1A albo 1B.";
+    }
+
     if (!saleForm.phone.trim()) {
       errors.push("phone");
       setInvalidFields(errors);
@@ -886,18 +1347,52 @@ export default function OfferDetailsPage() {
       return "Wybierz formę płatności.";
     }
 
-    if (!saleForm.depositAmount.trim()) {
+    const parsedOwnContribution = Number(
+      String(saleForm.ownContributionAmount || "0").replace(",", ".")
+    );
+
+    if (saleForm.paymentMethod === "kredyt") {
+      if (!Number.isFinite(parsedOwnContribution) || parsedOwnContribution < 0) {
+        errors.push("ownContributionAmount");
+        setInvalidFields(errors);
+        return "Wkład własny musi być liczbą większą lub równą 0.";
+      }
+    }
+
+    const shouldRequireDeposit =
+      saleForm.paymentMethod === "gotówka" ||
+      (saleForm.paymentMethod === "kredyt" && parsedOwnContribution > 0);
+
+    if (shouldRequireDeposit && !saleForm.depositAmount.trim()) {
       errors.push("depositAmount");
       setInvalidFields(errors);
       return "Uzupełnij wysokość zaliczki.";
     }
 
-    const parsedDeposit = Number(saleForm.depositAmount.replace(",", "."));
+    const parsedDeposit = Number(String(saleForm.depositAmount || "0").replace(",", "."));
 
-    if (!Number.isFinite(parsedDeposit)) {
+    if (shouldRequireDeposit && !Number.isFinite(parsedDeposit)) {
       errors.push("depositAmount");
       setInvalidFields(errors);
       return "Wysokość zaliczki musi być liczbą.";
+    }
+
+    if (shouldRequireDeposit && parsedDeposit < 0) {
+      errors.push("depositAmount");
+      setInvalidFields(errors);
+      return "Wysokość zaliczki nie może być ujemna.";
+    }
+
+    if (saleForm.paymentMethod === "kredyt" && parsedDeposit > parsedOwnContribution) {
+      errors.push("depositAmount");
+      setInvalidFields(errors);
+      return "Zaliczka nie może być większa niż wkład własny.";
+    }
+
+    if (shouldRequireDeposit && !saleForm.depositDueDate.trim()) {
+      errors.push("depositDueDate");
+      setInvalidFields(errors);
+      return "Uzupełnij termin płatności zaliczki.";
     }
 
     setInvalidFields([]);
@@ -918,10 +1413,10 @@ export default function OfferDetailsPage() {
   }
 
   async function createSaleFromOffer(workflowOverride?: {
-  decision: "existing" | "new" | null;
-  clientId: string | null;
-  conflictDetected: boolean;
-}) {
+    decision: "existing" | "new" | null;
+    clientId: string | null;
+    conflictDetected: boolean;
+  }) {
     if (!offer) return;
 
     const validationError = validateSaleForm();
@@ -989,7 +1484,41 @@ export default function OfferDetailsPage() {
           city: "",
         };
 
-    const depositAmount = Number(saleForm.depositAmount.replace(",", "."));
+    const ownContributionAmount = Number(String(saleForm.ownContributionAmount || "0").replace(",", "."));
+    const depositAmount = Number(String(saleForm.depositAmount || "0").replace(",", "."));
+    const contractFinancialBreakdown = getOfferFinancialBreakdownForContract(offer);
+
+    // --- Contract number generation ---
+    const userNumberRaw =
+      creator?.user_number ||
+      (creator as any)?.uid ||
+      (creator as any)?.userNumber ||
+      "00";
+
+    const contractNumber = buildContractNumberPreview(
+      userNumberRaw,
+      saleForm.contractSequence,
+      saleForm.contractDate
+    );
+
+    const { data: existingContracts, error: contractDuplicateError } = await supabase
+      .from("sales")
+      .select("id")
+      .eq("contract_number", contractNumber)
+      .limit(1);
+
+    if (contractDuplicateError) {
+      console.error("Błąd sprawdzania duplikatu numeru umowy:", contractDuplicateError);
+      setCreateSaleStatus("Nie udało się sprawdzić numeru umowy. Spróbuj ponownie.");
+      setCreatingSale(false);
+      return;
+    }
+
+    if (Array.isArray(existingContracts) && existingContracts.length > 0) {
+      setCreateSaleStatus("Umowa o wskazanym numerze istnieje w systemie.");
+      setCreatingSale(false);
+      return;
+    }
 
     setCreatingSale(true);
     setCreateSaleStatus("");
@@ -1024,9 +1553,6 @@ export default function OfferDetailsPage() {
         .select("id")
         .single();
 
-      console.log("NEW DUPLICATE CLIENT CREATED:", newClient);
-      console.log("NEW DUPLICATE CLIENT ERROR:", newClientError);
-
       if (newClientError || !newClient) {
         console.error("Błąd tworzenia nowego klienta mimo dubla:", newClientError);
         setCreateSaleStatus(newClientError?.message || "Nie udało się utworzyć nowego klienta.");
@@ -1037,16 +1563,11 @@ export default function OfferDetailsPage() {
       effectiveClientId = newClient.id;
     }
 
-    console.log("SALE TAG DEBUG", {
-      duplicateWorkflow,
-      effectiveClientId,
-      selectedExistingClientId,
-      offerClientId: offer.client_id,
-    });
     const salePayload = {
       client_id: effectiveClientId,
       seller_id: offer.created_by,
       source_offer_id: offer.id,
+      contract_number: contractNumber,
       sale_date: new Date().toISOString(),
       contract_value: offer.sale_price_gross || 0,
       margin_value: offer.seller_margin || 0,
@@ -1076,11 +1597,31 @@ export default function OfferDetailsPage() {
         installation_postal_code: installationSplit.postalCode,
         installation_city: installationSplit.city,
         installation_address: installationAddress,
+        second_client_name: saleForm.secondClientName,
+        second_client_pesel: saleForm.secondClientPesel,
+        contract_place: saleForm.contractPlace,
+        contract_date: saleForm.contractDate,
+        contract_number: contractNumber,
+        contract_sequence: saleForm.contractSequence,
+        deposit_due_date: saleForm.depositDueDate,
+        visit_previously_scheduled: saleForm.visitPreviouslyScheduled,
+        realization_variant: saleForm.realizationVariant,
+        deposit_amount: depositAmount,
+        own_contribution_amount: ownContributionAmount,
+        payment_method: saleForm.paymentMethod,
+        client1_marketing_email: saleForm.client1MarketingEmail,
+        client1_marketing_phone: saleForm.client1MarketingPhone,
+        client1_photo_consent: saleForm.client1PhotoConsent,
+        client2_marketing_email: saleForm.client2MarketingEmail,
+        client2_marketing_phone: saleForm.client2MarketingPhone,
+        client2_photo_consent: saleForm.client2PhotoConsent,
+        ...contractFinancialBreakdown,
       },
       offer_snapshot: offer,
       source_event_id: sourceEventId || null,
       payment_method: saleForm.paymentMethod,
       deposit_amount: depositAmount,
+      // own_contribution_amount: ownContributionAmount, // Removed as requested
     };
 
     const { data: createdSale, error: saleError } = await supabase
@@ -1088,8 +1629,6 @@ export default function OfferDetailsPage() {
       .insert(salePayload)
       .select("id")
       .single();
-      console.log("CREATED SALE:", createdSale);
-console.log("SALE ERROR:", saleError);
     if (saleError || !createdSale) {
       console.error("Błąd tworzenia sprzedaży z oferty:", saleError);
       setCreateSaleStatus(saleError?.message || "Nie udało się utworzyć sprzedaży.");
@@ -1167,10 +1706,6 @@ if (updateClientStatusError) {
       duplicateWorkflow.decision === "new" &&
       effectiveClientId
     ) {
-      console.log("DUPLICATE TAG BLOCK ENTERED", {
-        effectiveClientId,
-        duplicateWorkflow,
-      });
       await addSystemTagToClient(
         effectiveClientId,
         "Możliwy dubel",
@@ -1267,6 +1802,11 @@ if (updateClientStatusError) {
   const technicalRows = getTechnicalRows(result);
   const savedBreakdownRows = getSavedBreakdownRows(result);
   const formData = (offer.offer_data?.form || {}) as Record<string, any>;
+  const contractNumberPreview = buildContractNumberPreview(
+    creator?.user_number || (creator as any)?.uid || (creator as any)?.userNumber || "00",
+    saleForm.contractSequence,
+    saleForm.contractDate
+  );
   const inputClass = (fieldName: string) =>
     `mt-2 w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:ring-4 ${
       invalidFields.includes(fieldName)
@@ -1408,6 +1948,35 @@ if (updateClientStatusError) {
                 />
               </label>
 
+              {saleForm.customerType === "b2c" && (
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-black text-slate-900">Drugi klient na umowie</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Uzupełnij tylko wtedy, gdy umowa ma być zawarta z dwiema osobami.
+                  </p>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Imię i nazwisko klienta 2</span>
+                      <input
+                        value={saleForm.secondClientName}
+                        onChange={(event) => updateSaleForm("secondClientName", event.target.value)}
+                        className={inputClass("secondClientName")}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">PESEL klienta 2</span>
+                      <input
+                        value={saleForm.secondClientPesel}
+                        onChange={(event) => updateSaleForm("secondClientPesel", event.target.value)}
+                        className={inputClass("secondClientPesel")}
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Telefon</span>
                 <input
@@ -1508,7 +2077,22 @@ if (updateClientStatusError) {
                 <span className="text-sm font-semibold text-slate-700">Forma płatności</span>
                 <select
                   value={saleForm.paymentMethod}
-                  onChange={(event) => updateSaleForm("paymentMethod", event.target.value)}
+                  onChange={(event) => {
+                    const paymentMethod = event.target.value;
+                    updateSaleForm("paymentMethod", paymentMethod);
+
+                    if (paymentMethod === "kredyt") {
+                      updateSaleForm("ownContributionAmount", "0");
+                      updateSaleForm("depositAmount", "");
+                      updateSaleForm("depositDueDate", "");
+                    }
+
+                    if (paymentMethod === "gotówka") {
+                      updateSaleForm("ownContributionAmount", "");
+                      updateSaleForm("depositAmount", calculateDefaultDepositAmount(offer.sale_price_gross));
+                      updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
+                    }
+                  }}
                   className={inputClass("paymentMethod")}
                 >
                   <option value="gotówka">Gotówka</option>
@@ -1517,8 +2101,35 @@ if (updateClientStatusError) {
                 </select>
               </label>
 
+              {saleForm.paymentMethod === "kredyt" && (
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">Wkład własny</span>
+                  <span className="mt-1 block text-xs font-medium text-slate-400">
+                    Wpisz 0, jeżeli całość finansowana jest kredytem.
+                  </span>
+                  <input
+                    value={saleForm.ownContributionAmount}
+                    onChange={(event) => {
+                      updateSaleForm("ownContributionAmount", event.target.value);
+
+                      const ownContribution = Number(String(event.target.value || "0").replace(",", "."));
+
+                      if (Number.isFinite(ownContribution) && ownContribution <= 0) {
+                        updateSaleForm("depositAmount", "");
+                        updateSaleForm("depositDueDate", "");
+                      }
+                    }}
+                    placeholder="np. 0 albo 30000"
+                    className={inputClass("ownContributionAmount")}
+                  />
+                </label>
+              )}
+
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Wysokość zaliczki</span>
+                <span className="mt-1 block text-xs font-medium text-slate-400">
+                  Przy gotówce domyślnie 25% wartości brutto. Przy kredycie zaliczka jest częścią wkładu własnego.
+                </span>
                 <input
                   value={saleForm.depositAmount}
                   onChange={(event) => updateSaleForm("depositAmount", event.target.value)}
@@ -1526,6 +2137,174 @@ if (updateClientStatusError) {
                   className={inputClass("depositAmount")}
                 />
               </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">Termin płatności zaliczki</span>
+                <input
+                  type="date"
+                  value={saleForm.depositDueDate}
+                  onChange={(event) => updateSaleForm("depositDueDate", event.target.value)}
+                  className={inputClass("depositDueDate")}
+                />
+              </label>
+
+              <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-black text-slate-900">Dane umowy</p>
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
+                    Pełny numer umowy
+                  </p>
+                  <p className="mt-1 font-mono text-lg font-black text-emerald-950">
+                    {contractNumberPreview}
+                  </p>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Numer kolejny umowy (XX)</span>
+                    <input
+                      value={saleForm.contractSequence}
+                      onChange={(event) => {
+                        const digits = event.target.value.replace(/\D/g, "");
+                        updateSaleForm(
+                          "contractSequence",
+                          digits ? digits.padStart(2, "0").slice(-2) : ""
+                        );
+                      }}
+                      placeholder="01"
+                      className={inputClass("contractSequence")}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Miejscowość podpisania umowy</span>
+                    <input
+                      value={saleForm.contractPlace}
+                      onChange={(event) => updateSaleForm("contractPlace", event.target.value)}
+                      className={inputClass("contractPlace")}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Data podpisania umowy</span>
+                    <input
+                      type="date"
+                      value={saleForm.contractDate}
+                      onChange={(event) => updateSaleForm("contractDate", event.target.value)}
+                      className={inputClass("contractDate")}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={saleForm.visitPreviouslyScheduled === true}
+                      onChange={() => updateSaleForm("visitPreviouslyScheduled", true)}
+                    />
+                    Wizyta wcześniej umówiona
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={saleForm.visitPreviouslyScheduled === false}
+                      onChange={() => {
+                        updateSaleForm("visitPreviouslyScheduled", false);
+                        updateSaleForm("realizationVariant", "");
+                      }}
+                    />
+                    Wizyta nieumówiona
+                  </label>
+                </div>
+
+                {saleForm.visitPreviouslyScheduled === true && (
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <input
+                        type="radio"
+                        checked={saleForm.realizationVariant === "1A"}
+                        onChange={() => updateSaleForm("realizationVariant", "1A")}
+                      />
+                      Wariant 1A — start przed upływem 14 dni
+                    </label>
+
+                    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <input
+                        type="radio"
+                        checked={saleForm.realizationVariant === "1B"}
+                        onChange={() => updateSaleForm("realizationVariant", "1B")}
+                      />
+                      Wariant 1B — start po upływie 14 dni
+                    </label>
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2">
+                  <p className="text-sm font-black text-slate-900">Zgody marketingowe i wizerunkowe</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Zgody zostaną przeniesione do Załącznika nr 3 umowy.
+                  </p>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={saleForm.client1MarketingEmail}
+                        onChange={(event) => updateSaleForm("client1MarketingEmail", event.target.checked)}
+                      />
+                      Klient 1 — email marketingowy
+                    </label>
+
+                    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={saleForm.client1MarketingPhone}
+                        onChange={(event) => updateSaleForm("client1MarketingPhone", event.target.checked)}
+                      />
+                      Klient 1 — kontakt telefoniczny
+                    </label>
+
+                    <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={saleForm.client1PhotoConsent}
+                        onChange={(event) => updateSaleForm("client1PhotoConsent", event.target.checked)}
+                      />
+                      Klient 1 — zdjęcia realizacji
+                    </label>
+                  </div>
+
+                  {saleForm.secondClientName.trim() && (
+                    <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={saleForm.client2MarketingEmail}
+                          onChange={(event) => updateSaleForm("client2MarketingEmail", event.target.checked)}
+                        />
+                        Klient 2 — email marketingowy
+                      </label>
+
+                      <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={saleForm.client2MarketingPhone}
+                          onChange={(event) => updateSaleForm("client2MarketingPhone", event.target.checked)}
+                        />
+                        Klient 2 — kontakt telefoniczny
+                      </label>
+
+                      <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={saleForm.client2PhotoConsent}
+                          onChange={(event) => updateSaleForm("client2PhotoConsent", event.target.checked)}
+                        />
+                        Klient 2 — zdjęcia realizacji
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {duplicateClientModal.open && duplicateClientModal.client && (

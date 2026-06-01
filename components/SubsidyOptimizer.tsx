@@ -35,6 +35,9 @@ export default function SubsidyOptimizer({
 }: SubsidyOptimizerProps) {
   const [showDetails, setShowDetails] = useState(false);
 
+  const isStorageBelowProgramMinimum =
+    storageCapacity > 0 && storageCapacity < 10;
+
   const calculations = useMemo(() => {
     const totalNetPrice = Math.max(storageGrossPrice, 0);
 
@@ -167,7 +170,7 @@ export default function SubsidyOptimizer({
     withEms,
   ]);
 
-  const statusLabel = !calculations.hasStorage
+  const statusLabel = isStorageBelowProgramMinimum
     ? "Magazyn < 10 kWh"
     : calculations.totalSubsidy <= 0
       ? "Brak dotacji"
@@ -187,24 +190,16 @@ export default function SubsidyOptimizer({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
-              Dotacja PME
+              Dotacja Przydomowe Magazyny Energii
             </p>
             <h2 className="mt-1 text-lg font-black text-slate-950">
-              Optymalna rozpiska ceny
+              Optymalizator Dotacji
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Moduł rozpisuje cenę sprzedażową netto całej oferty tak, aby w pierwszej
-              kolejności maksymalizować możliwą dotację klienta.
+          
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowDetails((prev) => !prev)}
-            className="w-fit rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-          >
-            {showDetails ? "Ukryj" : "Szczegóły"}
-          </button>
         </div>
 
         {!subsidyEnabled && (
@@ -285,8 +280,11 @@ export default function SubsidyOptimizer({
                   <p className="text-sm font-bold text-slate-900">Magazyn energii</p>
                   <p className="mt-1 text-xs text-slate-500">
                     {storageCapacity > 0
-                      ? `${storageCapacity} kWh • ${formatMoney(calculations.storageNetPerKwh)} zł/kWh`
+                      ? `${storageCapacity} kWh • ${formatMoney(calculations.storageNetPerKwh)} zł/kWh` 
                       : "Brak pojemności"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                    Limit programu: maks. 3 000 zł netto / kWh
                   </p>
                 </div>
                 <div className="text-right">
@@ -340,10 +338,21 @@ export default function SubsidyOptimizer({
             <p>
               Optymalizator najpierw rezerwuje wartość EMS dla bonusu, potem ustawia wartość magazynu energii na poziomie potrzebnym do maksymalnej możliwej dotacji, a resztę zostawia jako PV, montaż i pozostałe elementy.
             </p>
+            <p className="mt-3 font-semibold text-slate-700">
+              Wartość magazynu energii w rozpisce nie przekracza limitu programu: 3 000 zł netto za 1 kWh pojemności nominalnej.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setShowDetails((prev) => !prev)}
+              className="mt-4 w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+            >
+              {showDetails ? "Mniej" : "Więcej"}
+            </button>
           </div>
         </div>
 
-        {!calculations.hasStorage && (
+        {isStorageBelowProgramMinimum && (
           <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Program wymaga magazynu energii o pojemności minimum 10 kWh.
           </div>
@@ -389,6 +398,18 @@ export default function SubsidyOptimizer({
                     <span className="text-slate-500">Cena ME dla maks. dotacji</span>
                     <strong className="text-slate-950">
                       {formatMoney(calculations.idealStorageNet)} zł
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Maks. wartość ME wg 3 000 zł/kWh</span>
+                    <strong className="text-slate-950">
+                      {formatMoney(calculations.maxStorageNetByProgramLimit)} zł
+                    </strong>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Limit 3 000 zł/kWh</span>
+                    <strong className={calculations.storageLimitValid ? "text-emerald-700" : "text-red-700"}>
+                      {calculations.storageLimitValid ? "Spełniony" : "Przekroczony"}
                     </strong>
                   </div>
                 </div>

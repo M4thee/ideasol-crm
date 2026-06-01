@@ -23,9 +23,9 @@ type AppHeaderProps = {
 
 const navItems = [
   { href: "/", label: "Dashboard" },
-  { href: "/kalendarz", label: "Kalendarz" },
+  { href: "/calendar", label: "Kalendarz" },
   { href: "/clients", label: "Kontakty" },
-  { href: "/zadania", label: "Zadania" },
+  { href: "/tasks", label: "Zadania" },
   { href: "/sales", label: "Sprzedaże" },
   { href: "/calculator", label: "Kalkulator" },
 ];
