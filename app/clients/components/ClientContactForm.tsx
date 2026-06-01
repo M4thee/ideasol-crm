@@ -9,14 +9,23 @@ export type ContactFormPayload = {
   description: string;
   reminderAt?: string;
   meetingAt?: string;
+  assignedUserId?: string;
+};
+
+type AdvisorOption = {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  role: string | null;
 };
 
 type Props = {
   onSubmit: (payload: ContactFormPayload) => Promise<void> | void;
   isSubmitting?: boolean;
+  advisors?: AdvisorOption[];
 };
 
-export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
+export default function ClientContactForm({ onSubmit, isSubmitting, advisors = [] }: Props) {
   const [contactMethod, setContactMethod] =
     useState<ContactFormPayload["contactMethod"]>("phone");
 
@@ -27,6 +36,8 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
   const [description, setDescription] = useState("");
   const [reminderAt, setReminderAt] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
+  const [advisorId, setAdvisorId] = useState("");
+  const [advisorSearch, setAdvisorSearch] = useState("");
 
   const statuses = useMemo(() => {
     if (phoneContactType === "marketing") {
@@ -59,6 +70,28 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
     (phoneContactType === "incoming" && phoneStatus === "zainteresowanie_oferta") ||
     contactMethod === "meeting";
 
+  const selectedAdvisor = advisors.find((advisor) => advisor.id === advisorId) || null;
+
+  const filteredAdvisors = advisors.filter((advisor) => {
+    const query = advisorSearch.trim().toLowerCase();
+
+    if (query.length < 2) return false;
+
+    return [advisor.display_name, advisor.email, advisor.role]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
+
+  function getRoleLabel(role: string | null) {
+    if (role === "seller") return "Doradca";
+    if (role === "manager") return "Manager";
+    if (role === "owner") return "Owner";
+
+    return role || "Użytkownik";
+  }
+
   function localDateTimeToIso(value: string) {
     if (!value) return undefined;
     return new Date(value).toISOString();
@@ -75,6 +108,110 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
   }
 
   const minimumDateTime = getMinimumLocalDateTime();
+
+  const hourOptions = Array.from({ length: 13 }, (_, index) =>
+    String(index + 8).padStart(2, "0")
+  );
+
+  const minuteOptions = ["00", "15", "30", "45"];
+
+  const meetingDescriptionTemplate = `Posiada PV? TAK / NIE
+Wysokość rachunków: - zł/mc
+Miejsce montażu: blacha / dachówka / grunt / płaski dach
+System rozliczeń: net-billing / net-metering`;
+
+  function getDateValue(value: string) {
+    return value ? value.slice(0, 10) : "";
+  }
+
+  function getTimeValue(value: string) {
+    return value ? value.slice(11, 16) : "";
+  }
+
+  function combineDateAndTime(date: string, time: string) {
+    if (!date || !time) return "";
+    return `${date}T${time}`;
+  }
+
+  function DateTimePicker({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+  }) {
+    const selectedDate = getDateValue(value);
+    const selectedTime = getTimeValue(value);
+    const selectedHour = selectedTime ? selectedTime.slice(0, 2) : "09";
+    const selectedMinute = selectedTime ? selectedTime.slice(3, 5) : "00";
+
+    return (
+      <div className="md:col-span-2">
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          {label}
+        </label>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="mt-1 flex items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Data
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                min={minimumDateTime.slice(0, 10)}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              />
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Godzina
+              </label>
+              <select
+                value={selectedHour}
+                onChange={(event) => {
+                  const nextDate = selectedDate || minimumDateTime.slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {hourOptions.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {hour}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Minuty
+              </label>
+              <select
+                value={selectedMinute}
+                onChange={(event) => {
+                  const nextDate = selectedDate || minimumDateTime.slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {minuteOptions.map((minute) => (
+                  <option key={minute} value={minute}>
+                    {minute}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const contactMethods = [
     {
@@ -141,6 +278,11 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
         alert("Data spotkania musi być w przyszłości.");
         return;
       }
+
+      if (requiresMeeting && !advisorId) {
+        alert("Wybierz doradcę do spotkania.");
+        return;
+      }
     }
 
     await onSubmit({
@@ -153,12 +295,15 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
       description: description.trim(),
       reminderAt: requiresReminder ? localDateTimeToIso(reminderAt) : undefined,
       meetingAt: requiresMeeting ? localDateTimeToIso(meetingAt) : undefined,
+      assignedUserId: requiresMeeting ? advisorId : undefined,
     });
 
     setDescription("");
     setReminderAt("");
     setMeetingAt("");
     setPhoneStatus("");
+    setAdvisorId("");
+    setAdvisorSearch("");
   }
 
   return (
@@ -187,6 +332,11 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
                     setPhoneStatus("");
                     setReminderAt("");
                     setMeetingAt("");
+                    setAdvisorId("");
+                    setAdvisorSearch("");
+                    setDescription(
+                      method.value === "meeting" ? meetingDescriptionTemplate : ""
+                    );
                   }}
                   className={`rounded-md border px-4 py-2 text-sm font-bold transition ${
                     isActive ? method.activeClass : method.inactiveClass
@@ -213,6 +363,8 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
                 setPhoneStatus("");
                 setReminderAt("");
                 setMeetingAt("");
+                setAdvisorId("");
+                setAdvisorSearch("");
               }}
               className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
             >
@@ -231,9 +383,21 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
             <select
               value={phoneStatus}
               onChange={(e) => {
-                setPhoneStatus(e.target.value);
                 setReminderAt("");
                 setMeetingAt("");
+                setAdvisorId("");
+                setAdvisorSearch("");
+                const nextStatus = e.target.value;
+
+                if (
+                  (phoneContactType === "marketing" && nextStatus === "umowione_spotkanie") ||
+                  (phoneContactType === "incoming" && nextStatus === "zainteresowanie_oferta")
+                ) {
+                  setDescription(meetingDescriptionTemplate);
+                } else {
+                  setDescription("");
+                }
+                setPhoneStatus(nextStatus);
               }}
               className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
             >
@@ -248,41 +412,91 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
         )}
 
         {requiresReminder && (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Data ponownego kontaktu
-            </label>
-            <div className="relative">
-              <input
-                type="datetime-local"
-                value={reminderAt}
-                min={minimumDateTime}
-                onChange={(e) => setReminderAt(e.target.value)}
-                className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 pr-10 text-sm font-medium text-slate-800 outline-none transition hover:border-[#119182]/60 focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                ⏱
-              </span>
-            </div>
-          </div>
+          <DateTimePicker
+            label="Data ponownego kontaktu"
+            value={reminderAt}
+            onChange={setReminderAt}
+          />
         )}
 
         {requiresMeeting && (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              Data spotkania
-            </label>
-            <div className="relative">
+          <DateTimePicker
+            label="Data i godzina spotkania"
+            value={meetingAt}
+            onChange={setMeetingAt}
+          />
+        )}
+
+        {requiresMeeting && (
+          <div className="md:col-span-2 rounded-2xl border border-[#E7D49A] bg-[#F7EAC1] p-4">
+            <span className="text-sm font-bold text-slate-900">Wybierz doradcę</span>
+            <p className="mt-1 text-xs text-slate-600">
+              Spotkanie zostanie zapisane w kalendarzu tego doradcy.
+            </p>
+
+            <div className="relative mt-3">
               <input
-                type="datetime-local"
-                value={meetingAt}
-                min={minimumDateTime}
-                onChange={(e) => setMeetingAt(e.target.value)}
-                className="h-12 w-full rounded-md border border-slate-300 bg-white px-4 pr-10 text-sm font-medium text-slate-800 outline-none transition hover:border-[#119182]/60 focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                type="text"
+                value={advisorSearch}
+                onChange={(event) => {
+                  setAdvisorSearch(event.target.value);
+                  setAdvisorId("");
+                }}
+                className="w-full rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                placeholder="Wyszukaj doradcę po imieniu, nazwisku, e-mailu lub roli..."
               />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-                📅
-              </span>
+
+              {selectedAdvisor && (
+                <div className="mt-2 rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900">
+                  <span className="font-bold">Wybrano:</span> {selectedAdvisor?.display_name || selectedAdvisor?.email || "Doradca"}
+                  <span className="ml-2 text-xs font-semibold text-slate-600">
+                    {getRoleLabel(selectedAdvisor?.role || null)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdvisorId("");
+                      setAdvisorSearch("");
+                    }}
+                    className="ml-3 font-bold text-slate-700 underline underline-offset-2"
+                  >
+                    zmień
+                  </button>
+                </div>
+              )}
+
+              {!selectedAdvisor && (
+                <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-[#E7D49A] bg-white shadow-sm">
+                  {advisorSearch.trim().length < 2 ? (
+                    <div className="px-4 py-3 text-sm text-slate-400">
+                      Wpisz minimum 2 znaki, aby wyszukać doradcę.
+                    </div>
+                  ) : filteredAdvisors.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-slate-400">
+                      Brak doradców pasujących do wyszukiwania.
+                    </div>
+                  ) : (
+                    filteredAdvisors.map((advisor) => (
+                      <button
+                        key={advisor.id}
+                        type="button"
+                        onClick={() => {
+                          setAdvisorId(advisor.id);
+                          setAdvisorSearch(advisor.display_name || advisor.email || "Doradca");
+                        }}
+                        className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-[#F7EAC1]/60"
+                      >
+                        <span className="block font-bold text-slate-900">
+                          {advisor.display_name || "Doradca bez nazwy"}
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          {[advisor.email, getRoleLabel(advisor.role)].filter(Boolean).join(" • ")}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -296,7 +510,7 @@ export default function ClientContactForm({ onSubmit, isSubmitting }: Props) {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={4}
-          placeholder="Opisz rozmowę, ustalenia, pytania klienta albo powód ponownego kontaktu..."
+          placeholder={requiresMeeting ? meetingDescriptionTemplate : "Opisz rozmowę, ustalenia, pytania klienta albo powód ponownego kontaktu..."}
           className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
         />
       </div>

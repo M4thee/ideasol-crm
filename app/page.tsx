@@ -985,6 +985,105 @@ export default function Home() {
     );
   }
 
+  const hourOptions = Array.from({ length: 13 }, (_, index) =>
+    String(index + 8).padStart(2, "0")
+  );
+
+  const minuteOptions = ["00", "15", "30", "45"];
+
+  function getDateValue(value: string) {
+    return value ? value.slice(0, 10) : "";
+  }
+
+  function getTimeValue(value: string) {
+    return value ? value.slice(11, 16) : "";
+  }
+
+  function combineDateAndTime(date: string, time: string) {
+    if (!date || !time) return "";
+    return `${date}T${time}`;
+  }
+
+  function DateTimePicker({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+  }) {
+    const selectedDate = getDateValue(value);
+    const selectedTime = getTimeValue(value);
+    const selectedHour = selectedTime ? selectedTime.slice(0, 2) : "09";
+    const selectedMinute = selectedTime ? selectedTime.slice(3, 5) : "00";
+
+    return (
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          {label}
+        </label>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="mt-1 flex items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Data
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              />
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Godzina
+              </label>
+              <select
+                value={selectedHour}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {hourOptions.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {hour}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Minuty
+              </label>
+              <select
+                value={selectedMinute}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {minuteOptions.map((minute) => (
+                  <option key={minute} value={minute}>
+                    {minute}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function addMinutesToIsoDateTime(value: string, minutes: number) {
     const date = new Date(value);
 
@@ -2114,22 +2213,18 @@ export default function Home() {
               </select>
 
               {needsNextFollowUp(resolutionStatus) && (
-                <input
-                  type="datetime-local"
+                <DateTimePicker
+                  label="Data ponownego kontaktu"
                   value={resolutionFollowUpAt}
-                  min={new Date().toISOString().slice(0, 16)}
-                  onChange={(event) => setResolutionFollowUpAt(event.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                  onChange={setResolutionFollowUpAt}
                 />
               )}
 
               {needsMeeting(resolutionStatus) && (
-                <input
-                  type="datetime-local"
+                <DateTimePicker
+                  label="Data i godzina spotkania"
                   value={resolutionMeetingAt}
-                  min={new Date().toISOString().slice(0, 16)}
-                  onChange={(event) => setResolutionMeetingAt(event.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                  onChange={setResolutionMeetingAt}
                 />
               )}
 

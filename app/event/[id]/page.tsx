@@ -146,6 +146,105 @@ return [streetAddress, cityAddress]
     return date.toISOString();
   }
 
+  const hourOptions = Array.from({ length: 13 }, (_, index) =>
+    String(index + 8).padStart(2, "0")
+  );
+
+  const minuteOptions = ["00", "15", "30", "45"];
+
+  function getDateValue(value: string) {
+    return value ? value.slice(0, 10) : "";
+  }
+
+  function getTimeValue(value: string) {
+    return value ? value.slice(11, 16) : "";
+  }
+
+  function combineDateAndTime(date: string, time: string) {
+    if (!date || !time) return "";
+    return `${date}T${time}`;
+  }
+
+  function DateTimePicker({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+  }) {
+    const selectedDate = getDateValue(value);
+    const selectedTime = getTimeValue(value);
+    const selectedHour = selectedTime ? selectedTime.slice(0, 2) : "09";
+    const selectedMinute = selectedTime ? selectedTime.slice(3, 5) : "00";
+
+    return (
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          {label}
+        </label>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="mt-1 flex items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Data
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              />
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Godzina
+              </label>
+              <select
+                value={selectedHour}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {hourOptions.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {hour}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Minuty
+              </label>
+              <select
+                value={selectedMinute}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {minuteOptions.map((minute) => (
+                  <option key={minute} value={minute}>
+                    {minute}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   async function updateOutlookEventAfterReschedule(params: {
     calendarEventId: string;
     microsoftEventId: string | null;
@@ -784,21 +883,35 @@ return [streetAddress, cityAddress]
       }
     }
 
-    const { data: eventData, error: eventError } = await supabase
+    let { data: eventData, error: eventError } = await supabase
       .from("calendar_events")
       .select(
         "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
       )
       .eq("id", eventId)
-      .single();
+      .maybeSingle();
 
     if (eventError || !eventData) {
-      console.error("Błąd ładowania wydarzenia:", eventError);
-      setErrorMessage(
-        eventError?.message || "Nie znaleziono wydarzenia w tabeli calendar_events."
-      );
-      setLoading(false);
-      return;
+      const { data: fallbackEventData, error: fallbackEventError } = await supabase
+        .from("calendar_events")
+        .select(
+          "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
+        )
+        .eq("source_activity_id", eventId)
+        .maybeSingle();
+
+      if (fallbackEventError || !fallbackEventData) {
+        console.error("Błąd ładowania wydarzenia:", eventError || fallbackEventError);
+        setErrorMessage(
+          eventError?.message ||
+            fallbackEventError?.message ||
+            "Nie znaleziono wydarzenia w tabeli calendar_events."
+        );
+        setLoading(false);
+        return;
+      }
+
+      eventData = fallbackEventData;
     }
 
     // Permissions check: if user has visibleUserIds, restrict access
@@ -1096,37 +1209,21 @@ return [streetAddress, cityAddress]
 
             {taskEffectNeedsReminder && (
               <div className="mt-4">
-                <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                  Termin kolejnego ponownego kontaktu
-                </label>
-                <input
-                  type="datetime-local"
+                <DateTimePicker
+                  label="Termin kolejnego ponownego kontaktu"
                   value={taskReminderAt}
-                  min={minimumReminderDateTime}
-                  onChange={(input) => setTaskReminderAt(input.target.value)}
-                  className="w-full rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-amber-400"
+                  onChange={setTaskReminderAt}
                 />
-                <p className="text-xs text-amber-700 mt-2">
-                  Ten efekt utworzy kolejne zadanie w kalendarzu CRM.
-                </p>
               </div>
             )}
 
             {taskPhoneStatus === "umówione spotkanie" && (
               <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <label className="block text-xs uppercase font-semibold text-blue-700 mb-2">
-                  Termin spotkania
-                </label>
-                <input
-                  type="datetime-local"
+                <DateTimePicker
+                  label="Termin spotkania"
                   value={taskMeetingAt}
-                  min={minimumReminderDateTime}
-                  onChange={(input) => setTaskMeetingAt(input.target.value)}
-                  className="w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-400"
+                  onChange={setTaskMeetingAt}
                 />
-                <p className="text-xs text-blue-700 mt-2">
-                  Ten efekt utworzy spotkanie w kalendarzu CRM.
-                </p>
 
                 {canChooseMeetingOwner() && (
                   <div className="mt-4">
@@ -1260,19 +1357,11 @@ return [streetAddress, cityAddress]
 
             {meetingEffectNeedsNextContact && (
               <div className="mt-4">
-                <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                  Data kolejnego kontaktu
-                </label>
-                <input
-                  type="datetime-local"
+                <DateTimePicker
+                  label="Data kolejnego kontaktu"
                   value={nextContactAt}
-                  min={minimumReminderDateTime}
-                  onChange={(input) => setNextContactAt(input.target.value)}
-                  className="w-full rounded-xl border border-pink-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-pink-400"
+                  onChange={setNextContactAt}
                 />
-                <p className="text-xs text-pink-700 mt-2">
-                  Ten efekt utworzy kolejny kontakt w kalendarzu CRM.
-                </p>
 
                 {nextContactType === "meeting" && canChooseMeetingOwner() && (
                   <div className="mt-4">
@@ -1299,49 +1388,11 @@ return [streetAddress, cityAddress]
             )}
             {meetingEffectStatus === "Przełożenie" && (
               <div className="mt-4 block">
-                <span className="text-sm font-semibold text-slate-700">
-                  Nowy termin spotkania
-                </span>
-                <div className="relative mt-2">
-                  <input
-                    type="datetime-local"
-                    id="rescheduled-meeting-at"
-                    value={rescheduledMeetingAt}
-                    min={minimumReminderDateTime}
-                    onChange={(input) => setRescheduledMeetingAt(input.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 pr-14 text-slate-900 outline-none transition focus:border-pink-400 focus:ring-4 focus:ring-pink-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const input = document.getElementById("rescheduled-meeting-at") as HTMLInputElement | null;
-                      input?.showPicker?.();
-                      input?.focus();
-                    }}
-                    className="absolute right-2 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-pink-200 bg-pink-50 text-pink-700 transition hover:bg-pink-100"
-                    aria-label="Wybierz datę i godzinę"
-                    title="Wybierz datę i godzinę"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className="h-4 w-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="3" y="4" width="18" height="18" rx="2" />
-                      <path d="M16 2v4" />
-                      <path d="M8 2v4" />
-                      <path d="M3 10h18" />
-                    </svg>
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  Ten efekt zaktualizuje termin spotkania w CRM oraz, jeśli wydarzenie jest zsynchronizowane, w Outlooku.
-                </p>
+                <DateTimePicker
+                  label="Nowy termin spotkania"
+                  value={rescheduledMeetingAt}
+                  onChange={setRescheduledMeetingAt}
+                />
               </div>
             )}
 

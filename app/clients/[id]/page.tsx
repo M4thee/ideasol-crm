@@ -247,6 +247,7 @@ export default function ClientPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
   const [assignableUsers, setAssignableUsers] = useState<Profile[]>([]);
+  const [meetingAdvisors, setMeetingAdvisors] = useState<Profile[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
@@ -272,6 +273,7 @@ export default function ClientPage() {
   useEffect(() => {
     loadClientCard();
     loadAssignmentData();
+    loadMeetingAdvisors();
   }, [clientId]);
 
   async function loadClientCard() {
@@ -634,6 +636,23 @@ export default function ClientPage() {
     );
   }
 
+  async function loadMeetingAdvisors() {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name, email, role")
+      .neq("role", "admin")
+      .eq("hidden_from_assignment", false)
+      .order("display_name", { ascending: true });
+
+    if (error) {
+      console.error("Błąd ładowania doradców do formularza kontaktu:", error);
+      setMeetingAdvisors([]);
+      return;
+    }
+
+    setMeetingAdvisors((data || []) as Profile[]);
+  }
+
   function canAssignClient() {
     return ["owner", "admin"].includes(currentUserRole || "");
   }
@@ -666,6 +685,94 @@ export default function ClientPage() {
     if (role === "seller") return "Doradca Techniczny";
 
     return role || "Użytkownik";
+  }
+
+  function addMinutesToIsoDateTime(value: string, minutes: number) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    date.setMinutes(date.getMinutes() + minutes);
+    return date.toISOString();
+  }
+
+  async function syncClientMeetingToOutlook(params: {
+    calendarEventId: string;
+    title: string;
+    description: string | null;
+    eventAt: string;
+    clientName: string;
+    location: string;
+    phone: string;
+    advisorEmail: string | null;
+  }) {
+    const syncUserEmail = params.advisorEmail;
+
+    if (!syncUserEmail) {
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "sync_failed",
+          microsoft_sync_error: "Brak adresu e-mail przypisanego doradcy.",
+        })
+        .eq("id", params.calendarEventId);
+      return;
+    }
+
+    try {
+      const appUrl = window.location.origin;
+      const response = await fetch("/api/microsoft/outlook/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userEmail: syncUserEmail,
+          assignedUserEmail: syncUserEmail,
+          subject: params.title,
+          body: "",
+          meetingNote: params.description || "",
+          clientName: params.clientName,
+          clientPhone: params.phone,
+          clientAddress: params.location,
+          crmUrl: `${appUrl}/event/${params.calendarEventId}`,
+          location: params.location,
+          startDateTime: new Date(params.eventAt).toISOString(),
+          endDateTime: addMinutesToIsoDateTime(params.eventAt, 60),
+          timeZone: "Europe/Warsaw",
+          reminderMinutesBeforeStart: 10,
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "Nie udało się utworzyć wydarzenia Outlook.");
+      }
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_event_id: result.microsoftEventId || result.eventId || null,
+          microsoft_sync_status: "synced",
+          microsoft_sync_error: null,
+          microsoft_synced_at: new Date().toISOString(),
+        })
+        .eq("id", params.calendarEventId);
+    } catch (error) {
+      console.error("Nie udało się zsynchronizować spotkania klienta z Outlook:", error);
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "sync_failed",
+          microsoft_sync_error:
+            error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+    }
   }
 
   function canSeeFullOfferFinancials() {
@@ -995,6 +1102,7 @@ export default function ClientPage() {
           event_at: payload.reminderAt,
           status: "planned",
           created_by: user.id,
+          assigned_user_id: client?.assigned_user_id || user.id,
         })
         .select("id, public_id, title, description, event_type, event_at, status")
         .single();
@@ -1029,6 +1137,8 @@ export default function ClientPage() {
           event_at: payload.meetingAt,
           status: "planned",
           created_by: user.id,
+          assigned_user_id: payload.assignedUserId || client?.assigned_user_id || user.id,
+          microsoft_sync_status: "pending",
         })
         .select("id, public_id, title, description, event_type, event_at, status")
         .single();
@@ -1049,6 +1159,23 @@ export default function ClientPage() {
         meetingData as CalendarEvent,
         ...currentEvents,
       ]);
+
+      const assignedAdvisor =
+        meetingAdvisors.find((advisor) => advisor.id === payload.assignedUserId) ||
+        meetingAdvisors.find((advisor) => advisor.id === client?.assigned_user_id) ||
+        client?.assigned_user ||
+        null;
+
+      await syncClientMeetingToOutlook({
+        calendarEventId: (meetingData as CalendarEvent).id,
+        title: `Spotkanie: ${client?.full_name || client?.company_name || "Klient"}`,
+        description: payload.description || null,
+        eventAt: payload.meetingAt,
+        clientName: client?.full_name || client?.company_name || "Klient",
+        location: fullAddress,
+        phone: client?.phone || "",
+        advisorEmail: assignedAdvisor?.email || null,
+      });
     }
 
     setSavingActivity(false);
@@ -1373,9 +1500,10 @@ export default function ClientPage() {
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 <div className="space-y-8">
                   <ClientContactForm
-                    onSubmit={addContactActivity}
-                    isSubmitting={savingActivity}
-                  />
+  onSubmit={addContactActivity}
+  isSubmitting={savingActivity}
+  advisors={meetingAdvisors}
+/>
 
                   <div>
                     <h3 className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-slate-500">

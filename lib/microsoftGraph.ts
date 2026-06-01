@@ -1,5 +1,6 @@
 type MicrosoftGraphTokenResponse = {
   access_token?: string;
+  refresh_token?: string;
   expires_in?: number;
   token_type?: string;
   error?: string;
@@ -57,6 +58,26 @@ function getMicrosoftGraphEnv() {
   };
 }
 
+function getMicrosoftOAuthEnv() {
+  const tenantId = process.env.MICROSOFT_TENANT_ID;
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
+
+  if (!tenantId || !clientId || !clientSecret || !redirectUri) {
+    throw new Error(
+      "Brakuje konfiguracji Microsoft OAuth: MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET lub MICROSOFT_REDIRECT_URI."
+    );
+  }
+
+  return {
+    tenantId,
+    clientId,
+    clientSecret,
+    redirectUri,
+  };
+}
+
 export async function getMicrosoftGraphAccessToken() {
   const { tenantId, clientId, clientSecret } = getMicrosoftGraphEnv();
 
@@ -87,6 +108,74 @@ export async function getMicrosoftGraphAccessToken() {
   }
 
   return tokenData.access_token;
+}
+
+export async function exchangeMicrosoftAuthorizationCode(code: string) {
+  const { tenantId, clientId, clientSecret, redirectUri } = getMicrosoftOAuthEnv();
+
+  const tokenResponse = await fetch(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+        scope: "offline_access User.Read User.ReadBasic.All Chat.ReadWrite ChatMessage.Send",
+      }),
+    }
+  );
+
+  const tokenData = (await tokenResponse.json()) as MicrosoftGraphTokenResponse;
+
+  if (!tokenResponse.ok || !tokenData.access_token) {
+    throw new Error(
+      tokenData.error_description ||
+        tokenData.error ||
+        "Nie udało się wymienić kodu Microsoft OAuth na token."
+    );
+  }
+
+  return tokenData;
+}
+
+export async function refreshMicrosoftDelegatedAccessToken(refreshToken: string) {
+  const { tenantId, clientId, clientSecret, redirectUri } = getMicrosoftOAuthEnv();
+
+  const tokenResponse = await fetch(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        redirect_uri: redirectUri,
+        grant_type: "refresh_token",
+        scope: "offline_access User.Read User.ReadBasic.All Chat.ReadWrite ChatMessage.Send",
+      }),
+    }
+  );
+
+  const tokenData = (await tokenResponse.json()) as MicrosoftGraphTokenResponse;
+
+  if (!tokenResponse.ok || !tokenData.access_token) {
+    throw new Error(
+      tokenData.error_description ||
+        tokenData.error ||
+        "Nie udało się odświeżyć delegowanego tokena Microsoft Graph."
+    );
+  }
+
+  return tokenData;
 }
 
 export async function createOutlookCalendarEvent(input: CreateOutlookCalendarEventInput) {
@@ -244,6 +333,32 @@ export async function graphApiRequest<T = unknown>(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Microsoft Graph error ${response.status}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+export async function graphApiRequestWithAccessToken<T = unknown>(
+  url: string,
+  accessToken: string,
+  init?: RequestInit
+): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Microsoft Graph error ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return {} as T;
   }
 
   return (await response.json()) as T;

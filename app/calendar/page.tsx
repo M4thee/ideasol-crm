@@ -18,6 +18,8 @@ type CalendarItem = {
   client_name: string;
   owner_id: string | null;
   owner_name: string | null;
+  assigned_user_id: string | null;
+  assigned_user_name: string | null;
 };
 
 type CalendarView = "month" | "week" | "day";
@@ -196,15 +198,15 @@ export default function CalendarPage() {
     let query = supabase
       .from("calendar_events")
       .select(
-        "id, client_id, source_activity_id, event_type, title, description, event_at, status, created_by"
+        "id, client_id, source_activity_id, event_type, title, description, event_at, status, created_by, assigned_user_id"
       )
       .not("event_at", "is", null)
       .order("event_at", { ascending: true });
 
     if (selectedOwnerIds.length > 0) {
-      query = query.in("created_by", selectedOwnerIds);
+      query = query.in("assigned_user_id", selectedOwnerIds);
     } else if (visibleUserIds && visibleUserIds.length > 0) {
-      query = query.in("created_by", visibleUserIds);
+      query = query.in("assigned_user_id", visibleUserIds);
     }
 
     const { data, error } = await query;
@@ -244,7 +246,10 @@ export default function CalendarPage() {
     );
 
     const ownerIds = [
-      ...new Set(data.map((item) => item.created_by).filter(Boolean)),
+      ...new Set([
+        ...data.map((item) => item.created_by).filter(Boolean),
+        ...data.map((item) => item.assigned_user_id).filter(Boolean),
+      ]),
     ];
 
     const { data: ownersData, error: ownersError } = ownerIds.length > 0
@@ -283,6 +288,8 @@ export default function CalendarPage() {
       client_name: clientsById.get(item.client_id) || "Klient",
       owner_id: item.created_by || null,
       owner_name: item.created_by ? ownersById.get(item.created_by) || "Użytkownik" : null,
+      assigned_user_id: item.assigned_user_id || null,
+      assigned_user_name: item.assigned_user_id ? ownersById.get(item.assigned_user_id) || "Doradca" : null,
     }));
 
     setCalendarItems(parsedItems);
@@ -331,6 +338,109 @@ export default function CalendarPage() {
     return date.toISOString();
   }
 
+  const hourOptions = Array.from({ length: 13 }, (_, index) =>
+    String(index + 8).padStart(2, "0")
+  );
+
+  const minuteOptions = ["00", "15", "30", "45"];
+
+  const meetingDescriptionTemplate = `Posiada PV? TAK / NIE
+Wysokość rachunków: - zł/mc
+Miejsce montażu: blacha / dachówka / grunt / płaski dach
+System rozliczeń: net-billing / net-metering`;
+
+  function getDateValue(value: string) {
+    return value ? value.slice(0, 10) : "";
+  }
+
+  function getTimeValue(value: string) {
+    return value ? value.slice(11, 16) : "";
+  }
+
+  function combineDateAndTime(date: string, time: string) {
+    if (!date || !time) return "";
+    return `${date}T${time}`;
+  }
+
+  function DateTimePicker({
+    label,
+    value,
+    onChange,
+  }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+  }) {
+    const selectedDate = getDateValue(value);
+    const selectedTime = getTimeValue(value);
+    const selectedHour = selectedTime ? selectedTime.slice(0, 2) : "09";
+    const selectedMinute = selectedTime ? selectedTime.slice(3, 5) : "00";
+
+    return (
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          {label}
+        </label>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="mt-1 flex items-end gap-3">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Data
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              />
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Godzina
+              </label>
+              <select
+                value={selectedHour}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {hourOptions.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {hour}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-24">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                Minuty
+              </label>
+              <select
+                value={selectedMinute}
+                onChange={(event) => {
+                  const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
+                  onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
+                }}
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+              >
+                {minuteOptions.map((minute) => (
+                  <option key={minute} value={minute}>
+                    {minute}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function getClientDisplayName(client: ClientForCalendarEvent) {
     return client.full_name || client.company_name || client.contact_person || "Klient bez nazwy";
   }
@@ -376,8 +486,8 @@ async function loadAdvisorsForEventModal() {
   const { data, error } = await supabase
     .from("profiles")
     .select("id, display_name, email, role")
+    .neq("role", "admin")
     .eq("hidden_from_assignment", false)
-    .in("role", ["seller", "manager", "owner", "admin"])
     .order("display_name", { ascending: true });
 
   if (error) {
@@ -397,15 +507,13 @@ async function openCreateEventModal() {
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
-  setNewEventDescription("");
+  setNewEventDescription(meetingDescriptionTemplate);
 
   if (clientsForEvent.length === 0) {
     await loadClientsForEventModal();
   }
 
-  if (advisorsForEvent.length === 0) {
-    await loadAdvisorsForEventModal();
-  }
+  await loadAdvisorsForEventModal();
 
   setShowCreateEventModal(true);
 }
@@ -424,16 +532,12 @@ async function syncCreatedMeetingToOutlook(params: {
   clientName: string;
   location: string;
   phone: string;
+  advisorEmail: string | null;
 }) {
   if (!currentUserId) return;
+  const syncUserEmail = params.advisorEmail;
 
-  const { data: profileData } = await supabase
-    .from("profiles")
-    .select("email")
-    .eq("id", currentUserId)
-    .maybeSingle();
-
-  if (!profileData?.email) return;
+  if (!syncUserEmail) return;
 
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
@@ -443,7 +547,8 @@ async function syncCreatedMeetingToOutlook(params: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        userEmail: profileData.email,
+        userEmail: syncUserEmail,
+        assignedUserEmail: syncUserEmail,
         subject: params.title,
         body: "",
         meetingNote: params.meetingNote || "",
@@ -460,7 +565,9 @@ async function syncCreatedMeetingToOutlook(params: {
     });
 
     const result = await response.json();
+    console.log("Outlook/Teams sync result:", result);
 
+    console.log("Outlook response status:", response.status);
     if (!response.ok || !result.ok) {
       throw new Error(result.error || "Nie udało się utworzyć wydarzenia Outlook.");
     }
@@ -501,16 +608,22 @@ async function createCalendarEventFromModal() {
     return;
   }
 
+  if (!newEventAdvisorId) {
+    setCreateEventError("Wybierz doradcę.");
+    return;
+  }
+
   if (!newEventAt) {
     setCreateEventError("Wybierz datę i godzinę wydarzenia.");
     return;
   }
 
   const selectedClient = clientsForEvent.find((client) => client.id === newEventClientId);
+  const selectedAdvisor = advisorsForEvent.find((advisor) => advisor.id === newEventAdvisorId) || null;
   const clientName = selectedClient ? getClientDisplayName(selectedClient) : "Klient";
   const eventTitle = `${newEventType === "meeting" ? "Spotkanie" : "Kontakt telefoniczny"}: ${clientName}`;
   const eventLocation = selectedClient ? getClientLocation(selectedClient) : "";
-const eventPhone = selectedClient?.phone || "";
+  const eventPhone = selectedClient?.phone || "";
   setCreatingEvent(true);
 
   const { data: createdEvent, error } = await supabase
@@ -523,6 +636,7 @@ const eventPhone = selectedClient?.phone || "";
       event_at: newEventAt,
       status: "planned",
       created_by: currentUserId,
+      assigned_user_id: newEventAdvisorId,
       microsoft_sync_status: newEventType === "meeting" ? "pending" : "not_synced",
     })
     .select("id")
@@ -545,6 +659,7 @@ const eventPhone = selectedClient?.phone || "";
       clientName,
       location: eventLocation,
       phone: eventPhone,
+      advisorEmail: selectedAdvisor?.email || null,
     });
   }
 
@@ -552,6 +667,8 @@ const eventPhone = selectedClient?.phone || "";
   setShowCreateEventModal(false);
   setNewEventClientId("");
   setNewEventClientSearch("");
+  setNewEventAdvisorId("");
+  setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
   setNewEventDescription("");
@@ -1132,9 +1249,9 @@ const eventPhone = selectedClient?.phone || "";
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="font-bold">{item.client_name}</p>
-                          {!["seller", "cc"].includes(currentUserRole) && item.owner_name && (
+                          {!["seller", "cc"].includes(currentUserRole) && (item.assigned_user_name || item.owner_name) && (
                             <p className="mt-1 text-xs font-semibold text-slate-500">
-                              Opiekun: {item.owner_name}
+                              Doradca: {item.assigned_user_name || item.owner_name}
                             </p>
                           )}
                           <p className="text-sm text-slate-600 mt-1">{getDisplayTitle(item.title)}</p>
@@ -1178,7 +1295,7 @@ const eventPhone = selectedClient?.phone || "";
                       Dodaj wydarzenie
                     </h2>
                     <p className="mt-2 text-sm text-slate-500">
-                      Wybierz klienta, typ kontaktu i termin wydarzenia.
+                      Wybierz klienta, doradcę, typ kontaktu i termin wydarzenia.
                     </p>
                   </div>
 
@@ -1257,12 +1374,87 @@ const eventPhone = selectedClient?.phone || "";
                     </div>
                   </div>
 
+                  <div className="rounded-2xl border border-[#E7D49A] bg-[#F7EAC1] p-4">
+                    <span className="text-sm font-bold text-slate-900">Wybierz doradcę</span>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Ten doradca zostanie przypisany do wydarzenia i użyty przy synchronizacji Outlook / Teams.
+                    </p>
+
+                    <div className="relative mt-3">
+                      <input
+                        type="text"
+                        value={newEventAdvisorSearch}
+                        onChange={(event) => {
+                          setNewEventAdvisorSearch(event.target.value);
+                          setNewEventAdvisorId("");
+                        }}
+                        className="w-full rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                        placeholder="Wyszukaj doradcę po imieniu, nazwisku, e-mailu lub roli..."
+                      />
+
+                      {selectedEventAdvisor && (
+                        <div className="mt-2 rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900">
+                          <span className="font-bold">Wybrano:</span> {selectedEventAdvisor.display_name || selectedEventAdvisor.email || "Doradca"}
+                          <span className="ml-2 text-xs font-semibold text-slate-600">
+                            {getRoleLabel(selectedEventAdvisor.role)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewEventAdvisorId("");
+                              setNewEventAdvisorSearch("");
+                            }}
+                            className="ml-3 font-bold text-slate-700 underline underline-offset-2"
+                          >
+                            zmień
+                          </button>
+                        </div>
+                      )}
+
+                      {!selectedEventAdvisor && (
+                        <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-[#E7D49A] bg-white shadow-sm">
+                          {newEventAdvisorSearch.trim().length < 2 ? (
+                            <div className="px-4 py-3 text-sm text-slate-400">
+                              Wpisz minimum 2 znaki, aby wyszukać doradcę.
+                            </div>
+                          ) : filteredAdvisorsForEvent.length === 0 ? (
+                            <div className="px-4 py-3 text-sm text-slate-400">
+                              Brak doradców pasujących do wyszukiwania.
+                            </div>
+                          ) : (
+                            filteredAdvisorsForEvent.map((advisor) => (
+                              <button
+                                key={advisor.id}
+                                type="button"
+                                onClick={() => {
+                                  setNewEventAdvisorId(advisor.id);
+                                  setNewEventAdvisorSearch(advisor.display_name || advisor.email || "Doradca");
+                                }}
+                                className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-[#F7EAC1]/60"
+                              >
+                                <span className="block font-bold text-slate-900">
+                                  {advisor.display_name || "Doradca bez nazwy"}
+                                </span>
+                                <span className="mt-1 block text-xs text-slate-500">
+                                  {[advisor.email, getRoleLabel(advisor.role)].filter(Boolean).join(" • ")}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   <div>
                     <span className="text-sm font-semibold text-slate-700">Typ wydarzenia</span>
                     <div className="mt-2 grid gap-3 sm:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => setNewEventType("meeting")}
+                        onClick={() => {
+                          setNewEventType("meeting");
+                          setNewEventDescription(meetingDescriptionTemplate);
+                        }}
                         className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
                           newEventType === "meeting"
                             ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100"
@@ -1274,7 +1466,10 @@ const eventPhone = selectedClient?.phone || "";
 
                       <button
                         type="button"
-                        onClick={() => setNewEventType("phone_call")}
+                        onClick={() => {
+                          setNewEventType("phone_call");
+                          setNewEventDescription("");
+                        }}
                         className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
                           newEventType === "phone_call"
                             ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100"
@@ -1286,15 +1481,11 @@ const eventPhone = selectedClient?.phone || "";
                     </div>
                   </div>
 
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">Data i godzina</span>
-                    <input
-                      type="datetime-local"
-                      value={newEventAt}
-                      onChange={(event) => setNewEventAt(event.target.value)}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                    />
-                  </label>
+                  <DateTimePicker
+                    label="Data i godzina"
+                    value={newEventAt}
+                    onChange={setNewEventAt}
+                  />
 
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">Opis / notatka</span>
@@ -1302,8 +1493,8 @@ const eventPhone = selectedClient?.phone || "";
                       value={newEventDescription}
                       onChange={(event) => setNewEventDescription(event.target.value)}
                       rows={4}
-                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                      placeholder="Opis wydarzenia"
+                      className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                      placeholder={newEventType === "meeting" ? meetingDescriptionTemplate : "Opis wydarzenia"}
                     />
                   </label>
 
@@ -1370,11 +1561,11 @@ const eventPhone = selectedClient?.phone || "";
                         {selectedItem.client_name}
                       </p>
                     </div>
-                    {!["seller", "cc"].includes(currentUserRole) && selectedItem.owner_name && (
+                    {!["seller", "cc"].includes(currentUserRole) && (selectedItem.assigned_user_name || selectedItem.owner_name) && (
                       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                        <p className="text-xs text-slate-400 uppercase font-semibold">Opiekun</p>
+                        <p className="text-xs text-slate-400 uppercase font-semibold">Doradca</p>
                         <p className="text-slate-800 font-bold mt-1">
-                          {selectedItem.owner_name}
+                          {selectedItem.assigned_user_name || selectedItem.owner_name}
                         </p>
                       </div>
                     )}
@@ -1574,9 +1765,9 @@ function CalendarEventCard({ item, onClick, showOwner = false }: CalendarEventCa
       <p className="font-medium text-slate-800 mt-1 line-clamp-2">
         {item.client_name}
       </p>
-      {showOwner && item.owner_name && (
+      {showOwner && (item.assigned_user_name || item.owner_name) && (
         <p className="mt-1 text-[11px] font-semibold text-slate-500 line-clamp-1">
-          {item.owner_name}
+          {item.assigned_user_name || item.owner_name}
         </p>
       )}
 
