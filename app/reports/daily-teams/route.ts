@@ -325,7 +325,10 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const providedSecret = url.searchParams.get("secret");
     const expectedSecret = process.env.REPORTS_CRON_SECRET;
-    const isVercelCron = request.headers.get("x-vercel-cron") === "1";
+    const userAgent = request.headers.get("user-agent") || "";
+    const isVercelCron =
+      request.headers.get("x-vercel-cron") === "1" ||
+      userAgent.includes("vercel-cron");
     const hasValidSecret = Boolean(expectedSecret && providedSecret === expectedSecret);
 
     if (!isVercelCron && !hasValidSecret) {
