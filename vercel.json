@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/reports/daily-teams",
-      "schedule": "5 2 * * *"
+      "schedule": "16 2 * * *"
     }
   ]
 }
