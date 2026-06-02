@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 type SubsidyOptimizerProps = {
   storageCapacity: number;
-  storageGrossPrice: number;
+  totalOfferNetPrice: number;
   inverterGrossPrice?: number;
   isNetBilling: boolean;
   isEuStorage: boolean;
@@ -23,7 +23,7 @@ function formatMoney(value: number) {
 
 export default function SubsidyOptimizer({
   storageCapacity,
-  storageGrossPrice,
+  totalOfferNetPrice,
   inverterGrossPrice,
   isNetBilling,
   isEuStorage,
@@ -39,7 +39,7 @@ export default function SubsidyOptimizer({
     storageCapacity > 0 && storageCapacity < 10;
 
   const calculations = useMemo(() => {
-    const totalNetPrice = Math.max(storageGrossPrice, 0);
+    const totalNetPrice = Math.max(totalOfferNetPrice, 0);
 
     if (!subsidyEnabled) {
       return {
@@ -159,10 +159,9 @@ export default function SubsidyOptimizer({
       hasEnoughNetForFullStorageSubsidy,
       storageLimitValid,
     };
-  // storageGrossPrice is currently used as the total offer NET price from OfferResult.
   }, [
     storageCapacity,
-    storageGrossPrice,
+    totalOfferNetPrice,
     isNetBilling,
     isEuStorage,
     isEuHybridInverter,

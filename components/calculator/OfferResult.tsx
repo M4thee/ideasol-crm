@@ -9,6 +9,7 @@ type Result = {
   pvPowerKw: number;
   inverter: string;
   energyStorage: string;
+  storageCapacityKwh?: number;
   offerType: string;
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
@@ -201,9 +202,6 @@ export default function OfferResult({
   const inverterNetFromBreakdown = findBreakdownValue(["falownik", "inverter"]);
   const emsNetFromBreakdown = findBreakdownValue(["ems"]);
 
-  const storageGrossForSubsidy = Math.round(
-    storageNetFromBreakdown * (1 + result.vatRate / 100)
-  );
 
   const inverterGrossForSubsidy = Math.round(
     inverterNetFromBreakdown * (1 + result.vatRate / 100)
@@ -562,14 +560,8 @@ export default function OfferResult({
         {result.energyStorage !== "Brak" &&
           (result.includeSubsidy || result.subsidyAllocation?.requested) && (
           <SubsidyOptimizer
-            storageCapacity={(() => {
-              const match = result.energyStorage.match(/(\d+(?:[.,]\d+)?)\s*kWh/i);
-
-              return match
-                ? Number(match[1].replace(",", "."))
-                : 0;
-            })()}
-            storageGrossPrice={result.finalNet}
+            storageCapacity={result.storageCapacityKwh || result.subsidyAllocation?.storageCapacityKwh || 0}
+            totalOfferNetPrice={result.finalNet}
             inverterGrossPrice={result.withEms ? emsGrossForSubsidy : inverterGrossForSubsidy}
             isNetBilling={result.billingSystem !== "net_metering"}
             isEuStorage={true}

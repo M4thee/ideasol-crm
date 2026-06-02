@@ -921,6 +921,7 @@ const sellerCommissionNet = Math.max(
     pvPowerKw,
     inverter: "displayName" in inverter ? inverter.displayName : inverter.name,
     energyStorage: storage.displayName,
+    storageCapacityKwh: storage.capacityKwh,
     offerType,
     billingSystem,
     withEms: shouldAddEms,
