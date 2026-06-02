@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/reports/daily-teams",
+      "schedule": "5 2 * * *"
+    }
+  ]
+}
