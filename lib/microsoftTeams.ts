@@ -12,6 +12,21 @@ export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificatio
   accessToken: string;
 };
 
+export type TeamsMetaLeadNotificationPayload = {
+  assignedUserName: string;
+  clientName: string;
+  clientPhone: string;
+  crmUrl?: string | null;
+  isFallbackAssignment?: boolean;
+  answers: {
+    singleFamilyHouse?: string | null;
+    yearlyElectricityBills?: string | null;
+    hasPhotovoltaics?: string | null;
+    postalCode?: string | null;
+    preferredContactTime?: string | null;
+  };
+};
+
 type GraphChannelMessage = {
   id: string;
 };
@@ -34,6 +49,51 @@ function requireEnv(name: string) {
   }
 
   return value;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function displayValue(value?: string | null) {
+  const normalizedValue = value?.trim();
+  return normalizedValue ? escapeHtml(normalizedValue) : "brak danych";
+}
+
+export function buildTeamsMetaLeadMessage(payload: TeamsMetaLeadNotificationPayload) {
+  const title = payload.isFallbackAssignment
+    ? "⚠️ Nowy lead MetaADS wymaga ręcznej weryfikacji lokalizacji"
+    : "🔥 Przypisano nowy lead MetaADS";
+
+  const lines = [
+    `<strong>${title}</strong>`,
+    "",
+    `Przypisany użytkownik: <strong>${escapeHtml(payload.assignedUserName)}</strong>`,
+    `Klient: <strong>${displayValue(payload.clientName)}</strong>`,
+    `Telefon: <strong>${displayValue(payload.clientPhone)}</strong>`,
+    "",
+    `1. Czy mieszkasz w domu jednorodzinnym? ${displayValue(payload.answers.singleFamilyHouse)}`,
+    `2. Ile wynoszą Twoje rachunki? ${displayValue(payload.answers.yearlyElectricityBills)}`,
+    `3. Czy masz fotowoltaikę? ${displayValue(payload.answers.hasPhotovoltaics)}`,
+    `4. Kod pocztowy inwestycji: ${displayValue(payload.answers.postalCode)}`,
+  ];
+
+  if (payload.answers.preferredContactTime) {
+    lines.push(
+      `5. Preferowana pora kontaktu: ${displayValue(payload.answers.preferredContactTime)}`
+    );
+  }
+
+  if (payload.crmUrl) {
+    lines.push("", `<a href="${escapeHtml(payload.crmUrl)}">Otwórz klienta w CRM</a>`);
+  }
+
+  return lines.join("\n");
 }
 
 export async function sendTeamsCalendarNotification(
@@ -189,4 +249,8 @@ export async function sendTeamsDelegatedDirectCalendarNotification(
     chatId: chat.id,
     messageId: message.id,
   };
+}
+
+export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendarNotificationPayload) {
+  return sendTeamsDirectCalendarNotification(payload);
 }

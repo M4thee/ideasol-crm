@@ -67,6 +67,8 @@ type OfferFormProps = {
   panelCount: number;
   setPanelCount: (value: number) => void;
   manualPowerKw: string;
+  identicalSetCount?: number;
+  setIdenticalSetCount?: (value: number) => void;
   clientName: string;
   setClientName: (value: string) => void;
   setClientEmail?: (value: string) => void;
@@ -116,6 +118,8 @@ export default function OfferForm({
   panelCount,
   setPanelCount,
   manualPowerKw,
+  identicalSetCount = 1,
+  setIdenticalSetCount = () => {},
   clientName,
   setClientName,
   setClientEmail,
@@ -163,6 +167,7 @@ export default function OfferForm({
   const [additionalServices, setAdditionalServices] = useState<CatalogAdditionalService[]>([]);
   const [showAdditionalServices, setShowAdditionalServices] = useState(false);
   const [additionalServicesStatus, setAdditionalServicesStatus] = useState("");
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   useEffect(() => {
     async function loadAdditionalServices() {
       const { data, error } = await supabase
@@ -931,6 +936,50 @@ export default function OfferForm({
           </div>
         </div>
       </div>
+      {(hasPvSelected || hasStorageSelected) && (
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedOptions((current) => !current)}
+            className="flex w-full items-center justify-between gap-4 text-left"
+          >
+            <div>
+              <div className="font-semibold text-slate-900">Opcje zaawansowane</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Ilość identycznych zestawów: {identicalSetCount || 1}
+              </div>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+              {showAdvancedOptions ? "Ukryj" : "Pokaż"}
+            </span>
+          </button>
+
+          {showAdvancedOptions && (
+            <div className="mt-4 rounded-2xl border border-white bg-white p-4 shadow-sm">
+              <label className="block max-w-xs">
+                <span className="text-sm font-semibold text-slate-700">
+                  Ilość identycznych zestawów / instalacji
+                </span>
+                <input
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={identicalSetCount || 1}
+                  onChange={(e) => {
+                    const nextValue = Number(e.target.value);
+                    setIdenticalSetCount(Number.isFinite(nextValue) && nextValue > 0 ? nextValue : 1);
+                    setResult(null);
+                  }}
+                />
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  Użyj, gdy klient kupuje kilka identycznych zestawów. Docelowo ta ilość trafi do tabeli oferty PDF i przemnoży wartości zestawu.
+                </p>
+              </label>
+            </div>
+          )}
+        </div>
+      )}
       {(hasPvSelected || hasStorageSelected) && (
         <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <button

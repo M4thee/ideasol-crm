@@ -200,6 +200,7 @@ export default function Home() {
   const [isUpsell, setIsUpsell] = useState(false);
   const [existingPvPowerKw, setExistingPvPowerKw] = useState("0");
   const [selectedAdditionalServices, setSelectedAdditionalServices] = useState<SelectedAdditionalService[]>([]);
+  const [identicalSetCount, setIdenticalSetCount] = useState(1);
 
   const [billingSystem, setBillingSystem] = useState<
     "net_billing" | "net_metering"
@@ -537,6 +538,7 @@ export default function Home() {
     setBillingSystem("net_billing");
     setSelectedInverterName("auto");
     setSelectedAdditionalServices([]);
+    setIdenticalSetCount(1);
     const defaultMargin = userProfile?.default_seller_markup;
 
     if (defaultMargin !== null && defaultMargin !== undefined) {
@@ -807,6 +809,8 @@ IdeaSol`;
               panelCount={panelCount}
               setPanelCount={setPanelCount}
               manualPowerKw={manualPowerKw}
+              identicalSetCount={identicalSetCount}
+              setIdenticalSetCount={setIdenticalSetCount}
               clientName={clientName}
               setClientName={setClientName}
               setClientEmail={setClientEmail}
@@ -856,6 +860,7 @@ IdeaSol`;
                   panelCount={panelCount}
                   panelPowerWp={getPanelPowerWp(panelModel)}
                   panelName={getPanelDisplayName(panelModel)}
+                  identicalSetCount={identicalSetCount}
                   copied={copied}
                   copyOffer={copyOffer}
                   resetForm={resetForm}

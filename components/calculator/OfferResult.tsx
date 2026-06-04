@@ -64,6 +64,7 @@ type OfferResultProps = {
   panelCount: number;
   panelPowerWp: number;
   panelName: string;
+  identicalSetCount?: number;
   copied: boolean;
   copyOffer: () => void;
   resetForm: () => void;
@@ -149,6 +150,7 @@ export default function OfferResult({
   panelCount,
   panelPowerWp,
   panelName,
+  identicalSetCount = 1,
   copied,
   copyOffer,
   resetForm,
@@ -202,6 +204,40 @@ export default function OfferResult({
   const inverterNetFromBreakdown = findBreakdownValue(["falownik", "inverter"]);
   const emsNetFromBreakdown = findBreakdownValue(["ems"]);
 
+  const additionalServices = Array.isArray(result.additionalServices)
+    ? result.additionalServices
+    : [];
+  const additionalServicesNet =
+    result.additionalServicesNet ??
+    additionalServices.reduce((sum, service) => sum + Number(service.totalNet || 0), 0);
+
+  const hasSubsidyOptimization = Boolean(
+    result.includeSubsidy || result.subsidyAllocation?.requested || result.subsidyAllocation?.enabled
+  );
+
+  const pvNetForPdf = Math.max(
+    hasSubsidyOptimization
+      ? result.subsidyAllocation?.pvNet || 0
+      : result.finalNet -
+          storageNetFromBreakdown -
+          inverterNetFromBreakdown -
+          emsNetFromBreakdown -
+          additionalServicesNet,
+    0
+  );
+
+  const storageNetForPdf = Math.max(
+    hasSubsidyOptimization
+      ? result.subsidyAllocation?.storageNet || storageNetFromBreakdown
+      : storageNetFromBreakdown,
+    0
+  );
+
+  const pvGrossForPdf = pvNetForPdf * (1 + result.vatRate / 100);
+  const storageGrossForPdf = storageNetForPdf * (1 + result.vatRate / 100);
+  const subsidyTotalForPdf = hasSubsidyOptimization ? result.subsidyAllocation?.total || 0 : 0;
+  const pdfQuantity = Math.max(Number(identicalSetCount || 1), 1);
+
 
   const inverterGrossForSubsidy = Math.round(
     inverterNetFromBreakdown * (1 + result.vatRate / 100)
@@ -210,13 +246,34 @@ export default function OfferResult({
     emsNetFromBreakdown * (1 + result.vatRate / 100)
   );
 
-  const additionalServices = Array.isArray(result.additionalServices)
-    ? result.additionalServices
-    : [];
-  const additionalServicesNet = Math.round(
-    result.additionalServicesNet ??
-      additionalServices.reduce((sum, service) => sum + Number(service.totalNet || 0), 0)
-  );
+  const inverterGrossFromBreakdown = inverterNetFromBreakdown * (1 + result.vatRate / 100);
+  const emsGrossFromBreakdown = emsNetFromBreakdown * (1 + result.vatRate / 100);
+
+  function getInverterPdfParts() {
+    if (!result.inverter || result.inverter === "Brak") {
+      return {
+        inverterProducer: "",
+        inverterModel: "",
+        inverterPowerKw: "",
+      };
+    }
+
+    const inverterText = result.inverter.trim();
+    const powerMatch = inverterText.match(/(\d+(?:[,.]\d+)?)\s*kW/i);
+    const inverterPowerKw = powerMatch ? powerMatch[1].replace(",", ".") : "";
+    const inverterWithoutType = inverterText.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    const inverterProducer = inverterWithoutType.split(" ")[0] || "";
+    const inverterModel = inverterProducer
+      ? inverterWithoutType.replace(inverterProducer, "").replace(/\s*-\s*\d+(?:[,.]\d+)?\s*kW/i, "").trim()
+      : inverterWithoutType;
+
+    return {
+      inverterProducer,
+      inverterModel,
+      inverterPowerKw,
+    };
+  }
+
 
   const sellerCommissionNet = Math.round(
     result.sellerCommissionNet ??
@@ -249,12 +306,35 @@ export default function OfferResult({
         body: JSON.stringify({
           clientName: clientName || clientEmail || "Klient",
           offerType: result.offerType,
+          pdfQuantity,
           pvPowerKw: result.pvPowerKw,
           panelCount,
           panelPowerWp,
           panelName,
           inverter: result.inverter,
+          inverterProducer: getInverterPdfParts().inverterProducer,
+          inverterModel: getInverterPdfParts().inverterModel,
+          inverterPowerKw: getInverterPdfParts().inverterPowerKw,
+          inverterNet: inverterNetFromBreakdown,
+          inverterGross: inverterGrossFromBreakdown,
           energyStorage: result.energyStorage,
+          pvNet: pvNetForPdf,
+          pvGross: pvGrossForPdf,
+          storageNet: storageNetForPdf,
+          storageGross: storageGrossForPdf,
+          withEms: Boolean(result.withEms),
+          emsName: result.withEms
+            ? "ZERONEST Świetlik D300 - zaawansowany system zarządzania energią EMS i integratora. Urządzenie w całości projektowane, produkowane i testowane w Polsce."
+            : "",
+          emsNet: result.withEms
+            ? result.subsidyAllocation?.emsNet || emsNetFromBreakdown
+            : 0,
+          emsGross: result.withEms
+            ? (result.subsidyAllocation?.emsNet || emsNetFromBreakdown) * (1 + result.vatRate / 100)
+            : 0,
+          additionalServices,
+          subsidyTotal: result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0,
+          subsidyAllocation: result.subsidyAllocation?.enabled ? result.subsidyAllocation : undefined,
           finalNet: result.finalNet,
           finalGross: result.finalGross,
           vatRate: result.vatRate,

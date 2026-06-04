@@ -130,7 +130,7 @@ export default function AdminPanel({
     const { data, error } = await supabase
       .from("panels")
       .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, active")
-      .order("active", { ascending: false })
+      .eq("active", true)
       .order("power_wp", { ascending: false });
 
     if (error) {
@@ -145,7 +145,7 @@ export default function AdminPanel({
     const { data, error } = await supabase
       .from("inverters")
       .select("id, manufacturer, model, display_name, name, type, max_pv_kw, price_net, active")
-      .order("active", { ascending: false })
+      .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
     if (error) {
@@ -161,7 +161,7 @@ export default function AdminPanel({
     const { data, error } = await supabase
       .from("storages")
       .select("id, code, manufacturer, model, display_name, name, capacity_kwh, price_net, installation_net, active")
-      .order("active", { ascending: false })
+      .eq("active", true)
       .order("capacity_kwh", { ascending: true });
 
     if (error) {
@@ -177,7 +177,7 @@ export default function AdminPanel({
     const { data, error } = await supabase
       .from("additional_services")
       .select("id, name, price_net, unit_label, allows_quantity, active")
-      .order("active", { ascending: false })
+      .eq("active", true)
       .order("name", { ascending: true });
 
     if (error) {
@@ -268,19 +268,19 @@ export default function AdminPanel({
   }
 
   async function deleteAdditionalService(serviceId: number) {
-    if (!confirm("Na pewno trwale usunąć tę usługę dodatkową z bazy?")) return;
+    if (!confirm("Usunąć tę usługę dodatkową z panelu? Rekord zostanie ukryty, ale zostanie w bazie.")) return;
 
     const { error } = await supabase
       .from("additional_services")
-      .delete()
+      .update({ active: false })
       .eq("id", serviceId);
 
     if (error) {
-      setAdditionalServicesStatus(`Błąd usuwania usługi dodatkowej: ${error.message}`);
+      setAdditionalServicesStatus(`Błąd ukrywania usługi dodatkowej: ${error.message}`);
       return;
     }
 
-    setAdditionalServicesStatus("Usunięto usługę dodatkową");
+    setAdditionalServicesStatus("Usługa dodatkowa została ukryta w panelu");
     loadAdditionalServices();
   }
 
@@ -359,16 +359,19 @@ export default function AdminPanel({
   }
 
   async function deletePanel(panelId: number) {
-    if (!confirm("Na pewno trwale usunąć ten panel z bazy?")) return;
+    if (!confirm("Usunąć ten panel z panelu admina? Rekord zostanie ukryty, ale zostanie w bazie.")) return;
 
-    const { error } = await supabase.from("panels").delete().eq("id", panelId);
+    const { error } = await supabase
+      .from("panels")
+      .update({ active: false })
+      .eq("id", panelId);
 
     if (error) {
-      setPanelsStatus(`Błąd usuwania panelu: ${error.message}`);
+      setPanelsStatus(`Błąd ukrywania panelu: ${error.message}`);
       return;
     }
 
-    setPanelsStatus("Usunięto panel");
+    setPanelsStatus("Panel został ukryty w panelu admina");
     loadPanels();
   }
 
@@ -451,16 +454,19 @@ export default function AdminPanel({
   }
 
   async function deleteInverter(inverterId: number) {
-    if (!confirm("Na pewno trwale usunąć ten falownik z bazy?")) return;
+    if (!confirm("Usunąć ten falownik z panelu admina? Rekord zostanie ukryty, ale zostanie w bazie.")) return;
 
-    const { error } = await supabase.from("inverters").delete().eq("id", inverterId);
+    const { error } = await supabase
+      .from("inverters")
+      .update({ active: false })
+      .eq("id", inverterId);
 
     if (error) {
-      setInvertersStatus(`Błąd usuwania falownika: ${error.message}`);
+      setInvertersStatus(`Błąd ukrywania falownika: ${error.message}`);
       return;
     }
 
-    setInvertersStatus("Usunięto falownik");
+    setInvertersStatus("Falownik został ukryty w panelu admina");
     loadInverters();
   }
 
@@ -545,16 +551,19 @@ export default function AdminPanel({
   }
 
   async function deleteStorage(storageId: number) {
-    if (!confirm("Na pewno trwale usunąć ten magazyn energii z bazy?")) return;
+    if (!confirm("Usunąć ten magazyn energii z panelu admina? Rekord zostanie ukryty, ale zostanie w bazie.")) return;
 
-    const { error } = await supabase.from("storages").delete().eq("id", storageId);
+    const { error } = await supabase
+      .from("storages")
+      .update({ active: false })
+      .eq("id", storageId);
 
     if (error) {
-      setStoragesStatus(`Błąd usuwania magazynu: ${error.message}`);
+      setStoragesStatus(`Błąd ukrywania magazynu: ${error.message}`);
       return;
     }
 
-    setStoragesStatus("Usunięto magazyn energii");
+    setStoragesStatus("Magazyn energii został ukryty w panelu admina");
     loadStorages();
   }
 

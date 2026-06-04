@@ -33,7 +33,7 @@ export default function SignatureGeneratorPage() {
       <div style="font-size:14px; line-height:22px; color:#374151;">
         <strong style="color:#111827;">Tel: </strong> ${phone}<br>
         <strong style="color:#111827;">Mail: </strong> ${email}<br>
-        <strong style="color:#111827;">Adres: </strong> IdeaSol, ul. Złota 23/316, 25-015 Kielce
+        <strong style="color:#111827;">Adres: </strong> ul. Złota 23/316, 25-015 Kielce
       </div>
     </td>
   </tr>
