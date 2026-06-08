@@ -129,6 +129,27 @@ type UserProfile = {
   is_active?: boolean | null;
 };
 
+type CrmClientOption = {
+  id: string;
+  full_name?: string | null;
+  name?: string | null;
+  company_name?: string | null;
+  contact_person?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  contact_phone?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  street?: string | null;
+  building_number?: string | null;
+  lead_public_id?: string | null;
+  client_public_id?: string | null;
+  public_id?: string | null;
+  [key: string]: unknown;
+};
+
 
 const DEFAULT_PRICING_OVERRIDES = {
   panels: {
@@ -182,6 +203,7 @@ export default function Home() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminStatus, setAdminStatus] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [crmClients, setCrmClients] = useState<CrmClientOption[]>([]);
   const [savingOffer, setSavingOffer] = useState(false);
   const [saveOfferStatus, setSaveOfferStatus] = useState("");
   const [savedOfferId, setSavedOfferId] = useState<string | null>(null);
@@ -355,6 +377,22 @@ export default function Home() {
       }));
     }
 
+    async function loadCrmClients() {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        console.warn("Nie udało się załadować klientów CRM do kalkulatora", error);
+        setCrmClients([]);
+        return;
+      }
+
+      setCrmClients((data || []) as CrmClientOption[]);
+    }
+
     async function loadCatalog() {
       const [panelsResponse, storagesResponse, invertersResponse] = await Promise.all([
         supabase
@@ -406,6 +444,7 @@ export default function Home() {
     loadCurrentUserProfile();
     loadCatalog();
     loadPricingSettings();
+    loadCrmClients();
   }, []);
 
 
@@ -562,12 +601,14 @@ export default function Home() {
 
 
 
-  async function saveOfferToCrm() {
+  async function saveOfferToCrm(clientIdOverride?: string) {
     if (!result) return;
 
-    if (!selectedClientId) {
+    const clientIdForSave = clientIdOverride || selectedClientId;
+
+    if (!clientIdForSave) {
       setSaveOfferStatus("Wybierz klienta z CRM przed zapisem oferty.");
-      return;
+      return null;
     }
 
     if (!userProfile?.id) {
@@ -579,7 +620,7 @@ export default function Home() {
     setSaveOfferStatus("Zapisywanie oferty w CRM...");
 
     const offerPayload = {
-      client_id: selectedClientId,
+      client_id: clientIdForSave,
       created_by: userProfile.id,
       offer_type: result.offerType,
       status: "draft",
@@ -661,7 +702,7 @@ export default function Home() {
       );
 
       setSavingOffer(false);
-      return;
+      return null;
     }
 
     setSavedOfferId(data.id);
@@ -672,6 +713,7 @@ export default function Home() {
         : "Oferta zapisana w CRM."
     );
     setSavingOffer(false);
+    return data.id;
   }
 
 
@@ -878,6 +920,8 @@ IdeaSol`;
                   saveOfferStatus={saveOfferStatus}
                   savedOfferId={savedOfferId}
                   selectedClientId={selectedClientId}
+                  crmClients={crmClients}
+                  setSelectedClientId={setSelectedClientId}
                   canSeeTechnicalView={canSeeTechnicalView}
                   currentUserRole={currentUserRole}
                   advisorName={advisorName}

@@ -25,6 +25,10 @@ type OfferPdfData = {
   storageNet?: number;
   storageGross?: number;
   withEms?: boolean;
+  withBackup?: boolean;
+  backupName?: string;
+  backupNet?: number;
+  backupGross?: number;
   emsName?: string;
   emsNet?: number;
   emsGross?: number;
@@ -209,10 +213,17 @@ function getEmsDescription(data: OfferPdfData) {
   return "Moduł EMS Zeronest Świetlik D300 wraz z montażem";
 }
 
+function getBackupDescription(data: OfferPdfData) {
+  if (!data.withBackup) return "";
+
+  return data.backupName || "Backup zasilania awaryjnego";
+}
+
 function getOfferRows(data: OfferPdfData) {
   const pvDescription = getPvDescription(data);
   const inverterDescription = getInverterDescription(data);
   const emsDescription = getEmsDescription(data);
+  const backupDescription = getBackupDescription(data);
   const storageDescription = getStorageDescription(data);
   const pdfQuantity = Math.max(Number(data.pdfQuantity || 1), 1);
   const vatPercent = Number(data.vatRate || 0);
@@ -228,26 +239,43 @@ function getOfferRows(data: OfferPdfData) {
   const rawInverterNet = Number(data.inverterNet || 0);
   const rawStorageNet = Number(data.storageNet || 0);
   const rawEmsNet = data.withEms ? Number(data.emsNet || 0) : 0;
+  const symbolicGross = 1;
+  const symbolicNet = symbolicGross / (1 + vatPercent / 100);
+  const backupUnitGross = data.withBackup ? symbolicGross : 0;
+  const backupUnitNet = data.withBackup ? symbolicNet : 0;
+  const pvMinimumGross = pvDescription ? symbolicGross : 0;
+  const pvMinimumNet = pvDescription ? symbolicNet : 0;
+  const inverterSubsidyNet = hasSubsidyMode && inverterDescription ? symbolicNet : rawInverterNet;
 
   let pvUnitNet = 0;
-  let inverterUnitNet = rawInverterNet;
+  let inverterUnitNet = inverterSubsidyNet;
   let storageUnitNet = 0;
   let emsUnitNet = 0;
+  let backupNet = backupUnitNet;
 
   if (hasSubsidyMode) {
-    emsUnitNet = data.withEms ? Number(data.subsidyAllocation?.emsNet || rawEmsNet || 0) : 0;
-    storageUnitNet = storageDescription ? Number(data.subsidyAllocation?.storageNet || rawStorageNet || 0) : 0;
-    const reservedNet = inverterUnitNet + storageUnitNet + emsUnitNet + additionalUnitNetTotal;
-    pvUnitNet = pvDescription ? Math.max(finalNetPerInstallation - reservedNet, 0) : 0;
+    const fixedNet = inverterUnitNet + backupNet + additionalUnitNetTotal;
+    const availableForSubsidyItems = Math.max(finalNetPerInstallation - fixedNet - pvMinimumNet, 0);
+    const requestedEmsNet = data.withEms ? Number(data.subsidyAllocation?.emsNet || rawEmsNet || 0) : 0;
+    const requestedStorageNet = storageDescription ? Number(data.subsidyAllocation?.storageNet || rawStorageNet || 0) : 0;
+
+    emsUnitNet = Math.min(requestedEmsNet, availableForSubsidyItems);
+    const availableAfterEms = Math.max(availableForSubsidyItems - emsUnitNet, 0);
+    storageUnitNet = Math.min(requestedStorageNet, availableAfterEms);
+
+    const reservedNet = inverterUnitNet + storageUnitNet + emsUnitNet + backupNet + additionalUnitNetTotal;
+    pvUnitNet = pvDescription ? Math.max(finalNetPerInstallation - reservedNet, pvMinimumNet) : 0;
   } else {
     emsUnitNet = rawEmsNet;
     storageUnitNet = rawStorageNet;
 
-    const baseEquipmentNet = rawPvNet + rawInverterNet + rawStorageNet + rawEmsNet + additionalUnitNetTotal;
-    const remainingNet = Math.max(finalNetPerInstallation - baseEquipmentNet, 0);
+    const fixedNet = rawInverterNet + rawEmsNet + backupNet + additionalUnitNetTotal;
+    const basePvAndStorageNet = (pvDescription ? rawPvNet : 0) + (storageDescription ? rawStorageNet : 0);
+    const remainingNet = Math.max(finalNetPerInstallation - fixedNet - basePvAndStorageNet, 0);
     const splitTargets = [pvDescription ? "pv" : null, storageDescription ? "storage" : null].filter(Boolean);
-    const pvExtraNet = splitTargets.includes("pv") ? remainingNet / splitTargets.length : 0;
-    const storageExtraNet = splitTargets.includes("storage") ? remainingNet / splitTargets.length : 0;
+    const splitCount = Math.max(splitTargets.length, 1);
+    const pvExtraNet = splitTargets.includes("pv") ? remainingNet / splitCount : 0;
+    const storageExtraNet = splitTargets.includes("storage") ? remainingNet / splitCount : 0;
 
     pvUnitNet = pvDescription ? rawPvNet + pvExtraNet : 0;
     storageUnitNet = storageDescription ? rawStorageNet + storageExtraNet : 0;
@@ -294,6 +322,10 @@ function getOfferRows(data: OfferPdfData) {
     pushRow(emsDescription, pdfQuantity, emsUnitNet);
   }
 
+  if (backupDescription && backupNet > 0) {
+    pushRow(backupDescription, pdfQuantity, backupNet);
+  }
+
   additionalServices.forEach((service) => {
     pushRow(
       service.name,
@@ -302,6 +334,48 @@ function getOfferRows(data: OfferPdfData) {
       true
     );
   });
+
+  const expectedTotalNet = finalNetPerInstallation * pdfQuantity;
+  const currentTotalNet = rows.reduce((sum, row) => sum + Number(row[4] || 0), 0);
+  const differenceNet = expectedTotalNet - currentTotalNet;
+
+  if (Math.abs(differenceNet) >= 0.005) {
+    const pvRowIndex = rows.findIndex((row) => row[1] === pvDescription);
+    const storageRowIndex = rows.findIndex((row) => row[1] === storageDescription);
+    const inverterRowIndex = rows.findIndex((row) => row[1] === inverterDescription);
+    const candidateIndexes = differenceNet < 0
+      ? [pvRowIndex, storageRowIndex, inverterRowIndex]
+      : [pvRowIndex, storageRowIndex];
+
+    const correctionTargetIndex = candidateIndexes.find((index) => {
+      if (index < 0) return false;
+      const row = rows[index];
+      const quantity = Number(row[2] || 1);
+      const correctedUnitNet = Number(row[3] || 0) + differenceNet / quantity;
+      return correctedUnitNet >= 0;
+    }) ?? -1;
+
+    if (correctionTargetIndex >= 0) {
+      const targetRow = rows[correctionTargetIndex];
+      const targetQuantity = Number(targetRow[2] || 1);
+      const correctedUnitNet = Number(targetRow[3] || 0) + differenceNet / targetQuantity;
+      const correctedValueNet = correctedUnitNet * targetQuantity;
+      const correctedVatValue = correctedValueNet * vatPercent / 100;
+      const correctedValueGross = correctedValueNet + correctedVatValue;
+
+      rows[correctionTargetIndex] = [
+        targetRow[0],
+        targetRow[1],
+        targetRow[2],
+        correctedUnitNet,
+        correctedValueNet,
+        targetRow[5],
+        correctedVatValue,
+        correctedValueGross,
+        targetRow[8],
+      ];
+    }
+  }
 
   return rows;
 }
@@ -758,18 +832,20 @@ async function createOfferPdf(data: OfferPdfData) {
   page.drawRectangle({ x: marginX, y: 52, width: cardWidth, height: 2, color: hexToRgb("#10B981") });
 
   drawWrappedText(
-  page,
-  "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu i zostały zoptymalizowane pod jak najkorzystniejszą dla klienta wysokość dotacji z programu PME.",
-  {
-    x: marginX,
-    y: 34,
-    size: 7.0,
-    lineHeight: 8.2,
-    font,
-    color: hexToRgb("#6B7380"),
-    maxWidth: cardWidth,
-  }
-);
+    page,
+    data.subsidyAllocation?.enabled
+      ? "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu i zostały zoptymalizowane pod jak najkorzystniejszą dla klienta wysokość dotacji z programu PME."
+      : "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu.",
+    {
+      x: marginX,
+      y: 34,
+      size: 7.0,
+      lineHeight: 8.2,
+      font,
+      color: hexToRgb("#6B7380"),
+      maxWidth: cardWidth,
+    }
+  );
   page.drawText("Dokument wygenerowany w systemie IdeaSol CRM", {
     x: marginX,
     y: 16,
@@ -805,6 +881,10 @@ export async function POST(request: Request) {
       storageNet: body.storageNet,
       storageGross: body.storageGross,
       withEms: body.withEms,
+      withBackup: body.withBackup,
+      backupName: body.backupName,
+      backupNet: body.backupNet,
+      backupGross: body.backupGross,
       emsName: body.emsName,
       emsNet: body.emsNet,
       emsGross: body.emsGross,

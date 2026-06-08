@@ -31,6 +31,8 @@ type Client = {
   contact_phone?: string | null;
   city: string | null;
   status: string | null;
+  last_contact_status?: string | null;
+  last_contact_at?: string | null;
   assigned_user_id: string | null;
   assigned_user?: {
     id: string;
@@ -69,6 +71,12 @@ type ClientTagLink = {
   tag_id: string;
 };
 
+type ClientActivitySummary = {
+  client_id: string;
+  status: string | null;
+  created_at: string;
+};
+
 
 type ClientRow = Omit<Client, "assigned_user"> & {
   assigned_user?: Client["assigned_user"] | Client["assigned_user"][] | null;
@@ -79,6 +87,13 @@ function isHiddenAssignmentUser(profile: {
   hidden_from_assignment?: boolean | null;
 }) {
   return profile.hidden_from_assignment === true;
+}
+
+function isNotInterestedStatus(status?: string | null) {
+  return String(status || "")
+    .trim()
+    .toLowerCase()
+    .includes("niezainteres");
 }
 
 const provinces = [
@@ -221,32 +236,6 @@ function ClientsPageContent() {
     selectedCities,
     selectedTagIds,
   ]);
-
-  useEffect(() => {
-    function handleWindowScroll() {
-      const scrollPosition = window.innerHeight + window.scrollY;
-      const pageHeight = document.documentElement.scrollHeight;
-
-      if (scrollPosition < pageHeight - 120) return;
-      if (loadingMoreClientsRef.current) return;
-
-      loadingMoreClientsRef.current = true;
-
-      setVisibleClientsLimit((currentLimit) =>
-        Math.min(currentLimit + 15, clients.length)
-      );
-
-      window.setTimeout(() => {
-        loadingMoreClientsRef.current = false;
-      }, 350);
-    }
-
-    window.addEventListener("scroll", handleWindowScroll, { passive: true });
-
-    return () => {
-      window.removeEventListener("scroll", handleWindowScroll);
-    };
-  }, [clients.length]);
 
   async function initializePage() {
     const {
@@ -450,6 +439,31 @@ function ClientsPageContent() {
     const clientIds = clientsWithoutAssignedUsers.map((client) => client.id);
     let tagsByClientId: Record<string, ClientTag[]> = {};
 
+    let lastActivityByClientId: Record<string, ClientActivitySummary> = {};
+
+    if (clientIds.length > 0) {
+      const { data: activitiesData, error: activitiesError } = await supabase
+        .from("client_activities")
+        .select("client_id, status, created_at")
+        .in("client_id", clientIds)
+        .order("created_at", { ascending: false });
+
+      if (activitiesError) {
+        console.error("Błąd ładowania ostatnich aktywności klientów:", activitiesError);
+      }
+
+      lastActivityByClientId = ((activitiesData || []) as ClientActivitySummary[]).reduce(
+        (accumulator, activity) => {
+          if (!activity.client_id) return accumulator;
+          if (accumulator[activity.client_id]) return accumulator;
+
+          accumulator[activity.client_id] = activity;
+          return accumulator;
+        },
+        {} as Record<string, ClientActivitySummary>
+      );
+    }
+
     if (clientIds.length > 0) {
       const { data: clientTagLinksData, error: clientTagLinksError } = await supabase
         .from("client_tag_links")
@@ -524,15 +538,32 @@ function ClientsPageContent() {
       );
     }
 
-    const normalizedClients = clientsWithoutAssignedUsers.map((client) => ({
-      ...client,
-      assigned_user: client.assigned_user_id
-        ? assignedUsersById[client.assigned_user_id] || null
-        : null,
-      tags: tagsByClientId[client.id] || [],
-    }));
+    const normalizedClients = clientsWithoutAssignedUsers.map((client) => {
+      const lastActivity = lastActivityByClientId[client.id] || null;
+
+      return {
+        ...client,
+        assigned_user: client.assigned_user_id
+          ? assignedUsersById[client.assigned_user_id] || null
+          : null,
+        tags: tagsByClientId[client.id] || [],
+        last_contact_status: lastActivity?.status || null,
+        last_contact_at: lastActivity?.created_at || null,
+      };
+    });
 
     const sortedClients = normalizedClients.sort((firstClient, secondClient) => {
+      const firstIsNotInterested =
+        isNotInterestedStatus(firstClient.status) ||
+        isNotInterestedStatus(firstClient.last_contact_status);
+      const secondIsNotInterested =
+        isNotInterestedStatus(secondClient.status) ||
+        isNotInterestedStatus(secondClient.last_contact_status);
+
+      if (firstIsNotInterested !== secondIsNotInterested) {
+        return firstIsNotInterested ? 1 : -1;
+      }
+
       const firstIsLost = firstClient.status === "Utracony";
       const secondIsLost = secondClient.status === "Utracony";
 
@@ -1141,6 +1172,40 @@ function ClientsPageContent() {
   const visibleClients = filteredClients.slice(0, visibleClientsLimit);
   const hasMoreClients = visibleClients.length < filteredClients.length;
 
+  function shouldLoadMoreClients() {
+    const scrollPosition = window.innerHeight + window.scrollY;
+    const pageHeight = document.documentElement.scrollHeight;
+
+    return scrollPosition >= pageHeight - 240;
+  }
+
+  useEffect(() => {
+    function handleWindowScroll() {
+      if (!shouldLoadMoreClients()) return;
+      if (loadingMoreClientsRef.current) return;
+
+      loadingMoreClientsRef.current = true;
+
+      setVisibleClientsLimit((currentLimit) =>
+        Math.min(currentLimit + 15, filteredClients.length)
+      );
+
+      window.setTimeout(() => {
+        loadingMoreClientsRef.current = false;
+
+        if (shouldLoadMoreClients()) {
+          handleWindowScroll();
+        }
+      }, 120);
+    }
+
+    window.addEventListener("scroll", handleWindowScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleWindowScroll);
+    };
+  }, [filteredClients.length]);
+
   const stats = {
     all: clients.length,
     newLeads: clients.filter((client) => client.status === "Nowy lead").length,
@@ -1498,10 +1563,19 @@ function ClientsPageContent() {
                 </thead>
 
                 <tbody>
-                  {visibleClients.map((client) => (
+                  {visibleClients.map((client) => {
+                    const isNotInterested =
+                      isNotInterestedStatus(client.status) ||
+                      isNotInterestedStatus(client.last_contact_status);
+
+                    return (
                     <tr
                       key={client.id}
-                      className="border-b border-slate-100 transition hover:bg-slate-50"
+                      className={`border-b border-slate-100 transition ${
+                        isNotInterested
+                          ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
+                          : "hover:bg-slate-50"
+                      }`}
                     >
                       <td className="px-4 py-2.5">
                         <input
@@ -1520,7 +1594,11 @@ function ClientsPageContent() {
                           </span>
 
                           <div className="min-w-0">
-                            <div className="truncate font-semibold text-slate-900">
+                            <div
+                              className={`truncate font-semibold ${
+                                isNotInterested ? "text-slate-400" : "text-slate-900"
+                              }`}
+                            >
                               {client.full_name || client.company_name || "Brak nazwy"}
                             </div>
 
@@ -1543,11 +1621,15 @@ function ClientsPageContent() {
                       <td className="px-4 py-2.5">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                            statusStyles[client.status || ""] ||
-                            "bg-slate-100 text-slate-700"
+                            isNotInterested
+                              ? "bg-slate-200 text-slate-500"
+                              : statusStyles[client.status || ""] ||
+                                "bg-slate-100 text-slate-700"
                           }`}
                         >
-                          {client.status || "Brak statusu"}
+                          {isNotInterested
+                            ? "Niezainteresowany"
+                            : client.status || "Brak statusu"}
                         </span>
                       </td>
 
@@ -1594,7 +1676,8 @@ function ClientsPageContent() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
                 </tbody>
                 </table>
               </div>

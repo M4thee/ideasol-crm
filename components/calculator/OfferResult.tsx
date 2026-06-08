@@ -59,6 +59,27 @@ type Result = {
   }[];
 };
 
+type CrmClientOption = {
+  id: string;
+  full_name?: string | null;
+  name?: string | null;
+  company_name?: string | null;
+  contact_person?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  contact_phone?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  street?: string | null;
+  building_number?: string | null;
+  lead_public_id?: string | null;
+  client_public_id?: string | null;
+  public_id?: string | null;
+  [key: string]: unknown;
+};
+
 type OfferResultProps = {
   result: Result;
   panelCount: number;
@@ -77,17 +98,20 @@ type OfferResultProps = {
   sendOfferEmail: (mode?: "anonymous" | "public") => void;
   sendingEmail: boolean;
   emailStatus: string;
-  saveOfferToCrm?: () => void;
+  saveOfferToCrm?: (clientIdOverride?: string) => Promise<string | null | void> | string | null | void;
   savingOffer?: boolean;
   saveOfferStatus?: string;
   savedOfferId?: string | null;
   selectedClientId?: string;
+  crmClients?: CrmClientOption[];
+  setSelectedClientId?: (clientId: string) => void;
   canSeeTechnicalView: boolean;
   currentUserRole?: string;
   advisorName?: string;
   advisorPhone?: string;
   advisorEmail?: string;
 };
+
 
 function FileTextIcon() {
   return (
@@ -168,6 +192,8 @@ export default function OfferResult({
   saveOfferStatus = "",
   savedOfferId = null,
   selectedClientId = "",
+  crmClients = [],
+  setSelectedClientId,
   canSeeTechnicalView,
   currentUserRole,
   advisorName,
@@ -177,12 +203,53 @@ export default function OfferResult({
   const [showMarginSummary, setShowMarginSummary] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
+
   const [sendMode, setSendMode] = useState<"anonymous" | "public">("anonymous");
   const [showSendConfirm, setShowSendConfirm] = useState(false);
   const [isMailPanelOpen, setIsMailPanelOpen] = useState(false);
   const [showSaveAnimation, setShowSaveAnimation] = useState(false);
+  const [showClientRequiredModal, setShowClientRequiredModal] = useState(false);
+  const [clientSearchQuery, setClientSearchQuery] = useState("");
+  const [modalSelectedClientId, setModalSelectedClientId] = useState(selectedClientId || "");
 
   const canSeeMarginSummary = canSeeTechnicalView;
+
+  const normalizedClientSearchQuery = clientSearchQuery.trim().toLowerCase();
+
+  const filteredCrmClients = normalizedClientSearchQuery
+    ? crmClients
+        .filter((client) => {
+          const searchableText = Object.values(client)
+            .filter((value) => value !== null && value !== undefined)
+            .map((value) => String(value))
+            .join(" ")
+            .toLowerCase();
+
+          return searchableText.includes(normalizedClientSearchQuery);
+        })
+        .slice(0, 8)
+    : [];
+
+  function getClientDisplayName(client?: CrmClientOption) {
+    if (!client) return "";
+
+    const firstAndLastName = [client.first_name, client.last_name].filter(Boolean).join(" ").trim();
+
+    return client.full_name || client.company_name || client.name || client.contact_person || firstAndLastName || client.email || client.phone || client.contact_phone || "Klient CRM";
+  }
+
+  function getClientDisplayMeta(client?: CrmClientOption) {
+    if (!client) return "";
+
+    return [
+      client.lead_public_id || client.client_public_id || client.public_id,
+      client.phone || client.contact_phone,
+      client.email,
+      [client.street, client.building_number, client.postal_code, client.city].filter(Boolean).join(" ").trim(),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
 
   function findBreakdownValue(keywords: string[]) {
     const breakdown = Array.isArray(result?.breakdown)
@@ -203,6 +270,8 @@ export default function OfferResult({
   const storageNetFromBreakdown = findBreakdownValue(["magazyn", "storage"]);
   const inverterNetFromBreakdown = findBreakdownValue(["falownik", "inverter"]);
   const emsNetFromBreakdown = findBreakdownValue(["ems"]);
+  const backupNetFromBreakdown = findBreakdownValue(["backup", "zasilania awaryjnego"]);
+  const hasBackupForPdf = backupNetFromBreakdown > 0;
 
   const additionalServices = Array.isArray(result.additionalServices)
     ? result.additionalServices
@@ -235,7 +304,6 @@ export default function OfferResult({
 
   const pvGrossForPdf = pvNetForPdf * (1 + result.vatRate / 100);
   const storageGrossForPdf = storageNetForPdf * (1 + result.vatRate / 100);
-  const subsidyTotalForPdf = hasSubsidyOptimization ? result.subsidyAllocation?.total || 0 : 0;
   const pdfQuantity = Math.max(Number(identicalSetCount || 1), 1);
 
 
@@ -248,6 +316,14 @@ export default function OfferResult({
 
   const inverterGrossFromBreakdown = inverterNetFromBreakdown * (1 + result.vatRate / 100);
   const emsGrossFromBreakdown = emsNetFromBreakdown * (1 + result.vatRate / 100);
+  const backupGrossFromBreakdown = backupNetFromBreakdown * (1 + result.vatRate / 100);
+
+
+
+  const sellerCommissionNet = Math.round(
+    result.sellerCommissionNet ??
+      result.sellerMarkupNet * (1 - (result.operatorPercent ?? 15) / 100)
+  );
 
   function getInverterPdfParts() {
     if (!result.inverter || result.inverter === "Brak") {
@@ -274,30 +350,21 @@ export default function OfferResult({
     };
   }
 
-
-  const sellerCommissionNet = Math.round(
-    result.sellerCommissionNet ??
-      result.sellerMarkupNet * (1 - (result.operatorPercent ?? 15) / 100)
-  );
-
-  async function handleSaveOfferToCrm() {
-    if (!saveOfferToCrm) return;
-
-    setShowSaveAnimation(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    try {
-      await saveOfferToCrm();
-    } finally {
-      setShowSaveAnimation(false);
-    }
-  }
-
-  async function downloadOfferPdf() {
+  async function generatePdfAfterCrmSave(clientIdForSave: string) {
     setIsGeneratingPdf(true);
     setPdfStatus("");
 
     try {
+      if (saveOfferToCrm) {
+        const savedId = await saveOfferToCrm(clientIdForSave);
+        if (savedId === null) {
+          setPdfStatus("Nie udało się zapisać oferty w CRM, więc PDF nie został wygenerowany.");
+          return;
+        }
+      }
+
+      const inverterPdfParts = getInverterPdfParts();
+
       const response = await fetch("/api/generate-offer-pdf", {
         method: "POST",
         headers: {
@@ -312,9 +379,9 @@ export default function OfferResult({
           panelPowerWp,
           panelName,
           inverter: result.inverter,
-          inverterProducer: getInverterPdfParts().inverterProducer,
-          inverterModel: getInverterPdfParts().inverterModel,
-          inverterPowerKw: getInverterPdfParts().inverterPowerKw,
+          inverterProducer: inverterPdfParts.inverterProducer,
+          inverterModel: inverterPdfParts.inverterModel,
+          inverterPowerKw: inverterPdfParts.inverterPowerKw,
           inverterNet: inverterNetFromBreakdown,
           inverterGross: inverterGrossFromBreakdown,
           energyStorage: result.energyStorage,
@@ -332,6 +399,10 @@ export default function OfferResult({
           emsGross: result.withEms
             ? (result.subsidyAllocation?.emsNet || emsNetFromBreakdown) * (1 + result.vatRate / 100)
             : 0,
+          withBackup: hasBackupForPdf,
+          backupName: hasBackupForPdf ? "Backup zasilania awaryjnego" : "",
+          backupNet: backupNetFromBreakdown,
+          backupGross: backupGrossFromBreakdown,
           additionalServices,
           subsidyTotal: result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0,
           subsidyAllocation: result.subsidyAllocation?.enabled ? result.subsidyAllocation : undefined,
@@ -366,6 +437,32 @@ export default function OfferResult({
       setIsGeneratingPdf(false);
     }
   }
+
+  async function downloadOfferPdf() {
+    const clientIdForPdf = selectedClientId || modalSelectedClientId;
+
+    if (!clientIdForPdf) {
+      setModalSelectedClientId("");
+      setShowClientRequiredModal(true);
+      return;
+    }
+
+    await generatePdfAfterCrmSave(clientIdForPdf);
+  }
+
+  async function handleSaveOfferToCrm() {
+    if (!saveOfferToCrm) return;
+
+    setShowSaveAnimation(true);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    try {
+      await saveOfferToCrm(selectedClientId);
+    } finally {
+      setShowSaveAnimation(false);
+    }
+  }
+
 
   const confirmationText =
     sendMode === "anonymous"
@@ -585,6 +682,7 @@ export default function OfferResult({
           <p className="text-sm text-slate-600">{pdfStatus}</p>
         )}
 
+
         {isMailPanelOpen && (
           <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
           <label className="block">
@@ -695,6 +793,89 @@ export default function OfferResult({
           </div>
         )}
       </div>
+
+      {showClientRequiredModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-slate-950">
+              Najpierw wybierz klienta z CRM
+            </h3>
+
+            <p className="mb-5 text-sm leading-6 text-slate-600">
+              Żeby wygenerować PDF, oferta zostanie najpierw zapisana na karcie klienta w CRM. Wybierz klienta, a potem kliknij OK.
+            </p>
+
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Wyszukaj klienta</span>
+              <input
+                type="text"
+                value={clientSearchQuery}
+                onChange={(event) => setClientSearchQuery(event.target.value)}
+                placeholder="Wpisz imię, nazwisko, firmę, telefon, e-mail albo LeadID"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+              />
+            </label>
+
+            <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+              {!normalizedClientSearchQuery ? (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                  Zacznij wpisywać, żeby wyszukać klienta.
+                </p>
+              ) : filteredCrmClients.length > 0 ? (
+                filteredCrmClients.map((client) => {
+                  const isSelected = modalSelectedClientId === client.id;
+
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => setModalSelectedClientId(client.id)}
+                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                        isSelected
+                          ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100"
+                          : "border-slate-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40"
+                      }`}
+                    >
+                      <span className="block font-semibold text-slate-950">{getClientDisplayName(client)}</span>
+                      {getClientDisplayMeta(client) && (
+                        <span className="mt-1 block text-xs text-slate-500">{getClientDisplayMeta(client)}</span>
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                  Brak klientów pasujących do wyszukiwania.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClientRequiredModal(false)}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Anuluj
+              </button>
+
+              <button
+                type="button"
+                disabled={!modalSelectedClientId || isGeneratingPdf}
+                onClick={async () => {
+                  if (!modalSelectedClientId) return;
+                  setSelectedClientId?.(modalSelectedClientId);
+                  setShowClientRequiredModal(false);
+                  await generatePdfAfterCrmSave(modalSelectedClientId);
+                }}
+                className="rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {isGeneratingPdf ? "Zapisywanie..." : "OK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSendConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

@@ -487,6 +487,21 @@ export default function ClientPage() {
       });
 
       setActivities(activitiesWithAuthors as ClientActivity[]);
+      if (status === "Niezainteresowany" && client) {
+  const { error: clientStatusError } = await supabase
+    .from("clients")
+    .update({ status: "Niezainteresowany" })
+    .eq("id", client.id);
+
+  if (clientStatusError) {
+    console.error("Błąd aktualizacji statusu klienta na niezainteresowany:", clientStatusError);
+  } else {
+    setClient({
+      ...client,
+      status: "Niezainteresowany",
+    });
+  }
+}
     }
     setLoading(false);
   }
@@ -1235,6 +1250,7 @@ export default function ClientPage() {
   const meetings = events.filter((event) => event.event_type === "meeting");
   const reminders = events.filter((event) => event.event_type === "reminder");
   const visibleActivities = activities;
+const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
 
   function isReminderDone(status: string | null) {
     return status === "done" || status?.startsWith("Zakończone");
@@ -1299,9 +1315,14 @@ export default function ClientPage() {
 
               <h1 className="text-3xl font-bold text-slate-900">{clientName}</h1>
 
-              <p className="mt-1 text-xs font-medium text-slate-400">
-                Lead dodany przez: {getLeadCreatorName()} | Opiekun klienta: {getAdvisorName()}
-              </p>
+              <div className="mt-1 space-y-0.5 text-xs font-medium text-slate-400">
+  <p>
+    Lead dodany przez: {getLeadCreatorName()} | Opiekun klienta: {getAdvisorName()}
+  </p>
+  <p>
+    Data ostatniego kontaktu: {lastContactAt ? new Date(lastContactAt).toLocaleString("pl-PL") : "Brak kontaktu"}
+  </p>
+</div>
 
               <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm font-semibold">
