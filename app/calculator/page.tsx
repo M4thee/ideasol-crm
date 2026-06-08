@@ -280,13 +280,15 @@ export default function Home() {
   useEffect(() => {
     async function loadCurrentUserProfile() {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const user = session?.user;
 
       if (!user) {
         setUserProfile(null);
         setCurrentUserEmail("");
-        return;
+        return null;
       }
 
       setCurrentUserEmail(user.email || "");
@@ -298,13 +300,9 @@ export default function Home() {
         .maybeSingle();
 
       if (error) {
-  console.warn(
-    "Nie znaleziono profilu użytkownika kalkulatora",
-    error
-  );
-
-  return;
-}
+        console.warn("Nie znaleziono profilu użytkownika kalkulatora", error);
+        return user;
+      }
 
       if (data) {
         const profile = data as UserProfile;
@@ -320,6 +318,8 @@ export default function Home() {
           }
         }
       }
+
+      return user;
     }
 
 
@@ -419,6 +419,14 @@ export default function Home() {
       const loadedStorages = storagesResponse.data || [];
       const loadedInverters = invertersResponse.data || [];
 
+      if (panelsResponse.error || storagesResponse.error || invertersResponse.error) {
+        console.warn("Nie udało się załadować pełnego katalogu kalkulatora", {
+          panelsError: panelsResponse.error,
+          storagesError: storagesResponse.error,
+          invertersError: invertersResponse.error,
+        });
+      }
+
       setPanels(loadedPanels as CatalogPanel[]);
       setStorages(loadedStorages as CatalogStorage[]);
       setInverters(loadedInverters as CatalogInverter[]);
@@ -441,10 +449,17 @@ export default function Home() {
       }
     }
 
-    loadCurrentUserProfile();
-    loadCatalog();
-    loadPricingSettings();
-    loadCrmClients();
+    async function loadCalculatorData() {
+      const user = await loadCurrentUserProfile();
+
+      await Promise.all([
+        loadCatalog(),
+        loadPricingSettings(),
+        user ? loadCrmClients() : Promise.resolve(),
+      ]);
+    }
+
+    loadCalculatorData();
   }, []);
 
 
