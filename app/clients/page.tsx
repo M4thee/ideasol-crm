@@ -33,6 +33,7 @@ type Client = {
   status: string | null;
   last_contact_status?: string | null;
   last_contact_at?: string | null;
+  contact_followup_status?: "active" | "overdue" | null;
   assigned_user_id: string | null;
   assigned_user?: {
     id: string;
@@ -71,10 +72,19 @@ type ClientTagLink = {
   tag_id: string;
 };
 
+
 type ClientActivitySummary = {
   client_id: string;
   status: string | null;
   created_at: string;
+};
+
+type CalendarEventSummary = {
+  client_id: string;
+  title: string | null;
+  event_type: string | null;
+  event_at: string;
+  status: string | null;
 };
 
 
@@ -94,6 +104,26 @@ function isNotInterestedStatus(status?: string | null) {
     .trim()
     .toLowerCase()
     .includes("niezainteres");
+}
+
+function isClosedCalendarStatus(status?: string | null) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  return ["done", "completed", "cancelled", "canceled", "closed", "zakończone", "zakończony", "anulowane", "anulowany"].includes(normalizedStatus);
+}
+
+function isContactFollowUpEvent(event: CalendarEventSummary) {
+  const combinedValue = `${event.event_type || ""} ${event.title || ""}`.toLowerCase();
+
+  return (
+    combinedValue.includes("meeting") ||
+    combinedValue.includes("spotkanie") ||
+    combinedValue.includes("reminder") ||
+    combinedValue.includes("follow") ||
+    combinedValue.includes("kontakt") ||
+    combinedValue.includes("ponown") ||
+    combinedValue.includes("telefon")
+  );
 }
 
 const provinces = [
@@ -157,6 +187,7 @@ function ClientsPageContent() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("Wszystkie");
+  const [subStatusFilter, setSubStatusFilter] = useState<string>("Wszystkie");
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [selectedAdvisorIds, setSelectedAdvisorIds] = useState<string[]>([]);
   const [selectedClientTypes, setSelectedClientTypes] = useState<string[]>([]);
@@ -230,6 +261,7 @@ function ClientsPageContent() {
     setVisibleClientsLimit(15);
   }, [
     statusFilter,
+    subStatusFilter,
     selectedAdvisorIds,
     selectedClientTypes,
     selectedProvinces,
@@ -374,6 +406,7 @@ function ClientsPageContent() {
     setSelectedProvinces([]);
     setSelectedCities([]);
     setSelectedTagIds([]);
+    setSubStatusFilter("Wszystkie");
   }
 
   function toggleSelectedClient(clientId: string) {
@@ -440,6 +473,7 @@ function ClientsPageContent() {
     let tagsByClientId: Record<string, ClientTag[]> = {};
 
     let lastActivityByClientId: Record<string, ClientActivitySummary> = {};
+    const contactFollowUpStatusByClientId: Record<string, "active" | "overdue"> = {};
 
     if (clientIds.length > 0) {
       const { data: activitiesData, error: activitiesError } = await supabase
@@ -462,6 +496,55 @@ function ClientsPageContent() {
         },
         {} as Record<string, ClientActivitySummary>
       );
+
+      const { data: calendarEventsData, error: calendarEventsError } = await supabase
+        .from("calendar_events")
+        .select("client_id, title, event_type, event_at, status")
+        .in("client_id", clientIds);
+
+      if (calendarEventsError) {
+        console.error("Błąd ładowania statusów kontaktu klientów:", calendarEventsError);
+      }
+
+      const nowTimestamp = Date.now();
+      const contactEventsByClientId = ((calendarEventsData || []) as CalendarEventSummary[]).reduce(
+        (accumulator, event) => {
+          if (!event.client_id) return accumulator;
+          if (!event.event_at) return accumulator;
+          if (isClosedCalendarStatus(event.status)) return accumulator;
+          if (!isContactFollowUpEvent(event)) return accumulator;
+
+          accumulator[event.client_id] = [
+            ...(accumulator[event.client_id] || []),
+            event,
+          ];
+
+          return accumulator;
+        },
+        {} as Record<string, CalendarEventSummary[]>
+      );
+
+      Object.entries(contactEventsByClientId).forEach(([clientId, events]) => {
+        const hasFutureContact = events.some(
+          (event) => new Date(event.event_at).getTime() >= nowTimestamp
+        );
+
+        const hasOverdueContact = events.some(
+          (event) => new Date(event.event_at).getTime() < nowTimestamp
+        );
+
+        // Jeżeli istnieje już zaplanowany przyszły kontakt/spotkanie,
+        // klient ma być oznaczony jako „W kontakcie”, nawet jeśli w historii
+        // wiszą stare niewykonane przypomnienia.
+        if (hasFutureContact) {
+          contactFollowUpStatusByClientId[clientId] = "active";
+          return;
+        }
+
+        if (hasOverdueContact) {
+          contactFollowUpStatusByClientId[clientId] = "overdue";
+        }
+      });
     }
 
     if (clientIds.length > 0) {
@@ -549,6 +632,7 @@ function ClientsPageContent() {
         tags: tagsByClientId[client.id] || [],
         last_contact_status: lastActivity?.status || null,
         last_contact_at: lastActivity?.created_at || null,
+        contact_followup_status: contactFollowUpStatusByClientId[client.id] || null,
       };
     });
 
@@ -1138,6 +1222,16 @@ function ClientsPageContent() {
     const matchesStatus =
       statusFilter === "Wszystkie" || client.status === statusFilter;
 
+    const clientIsNotInterested =
+      isNotInterestedStatus(client.status) ||
+      isNotInterestedStatus(client.last_contact_status);
+
+    const matchesSubStatus =
+      subStatusFilter === "Wszystkie" ||
+      (subStatusFilter === "Zaległe" && client.contact_followup_status === "overdue") ||
+      (subStatusFilter === "W kontakcie" && client.contact_followup_status === "active") ||
+      (subStatusFilter === "Niezainteresowani" && clientIsNotInterested);
+
     const matchesAdvisor =
       selectedAdvisorIds.length === 0 ||
       (selectedAdvisorIds.includes("Brak") && !client.assigned_user_id) ||
@@ -1161,6 +1255,7 @@ function ClientsPageContent() {
 
     return (
       matchesStatus &&
+      matchesSubStatus &&
       matchesAdvisor &&
       matchesClientType &&
       matchesProvince &&
@@ -1262,27 +1357,57 @@ function ClientsPageContent() {
               <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
                 Status klienta
               </p>
-              <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
-                {[
-                  "Wszystkie",
-                  "Nowy lead",
-                  "Przypisany",
-                  "Klient aktywny",
-                  "Utracony",
-                ].map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => setStatusFilter(status)}
-                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${
-                      statusFilter === status
-                        ? "bg-slate-900 text-white"
-                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    }`}
-                  >
-                    {status}
-                  </button>
-                ))}
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
+                  {[
+                    "Wszystkie",
+                    "Nowy lead",
+                    "Przypisany",
+                    "Klient aktywny",
+                    "Utracony",
+                  ].map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setStatusFilter(status)}
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${
+                        statusFilter === status
+                          ? "bg-slate-900 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                  {[
+                    "Wszystkie",
+                    "Zaległe",
+                    "W kontakcie",
+                    "Niezainteresowani",
+                  ].map((subStatus) => (
+                    <button
+                      key={subStatus}
+                      type="button"
+                      onClick={() => setSubStatusFilter(subStatus)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                        subStatusFilter === subStatus
+                          ? "bg-slate-800 text-white"
+                          : subStatus === "Zaległe"
+                          ? "bg-[#FBBCD0] text-[#700729] hover:bg-[#f7a8c0]"
+                          : subStatus === "W kontakcie"
+                          ? "bg-[#CCEBE6] text-slate-800 hover:bg-[#b8e0da]"
+                          : subStatus === "Niezainteresowani"
+                          ? "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {subStatus}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1567,15 +1692,19 @@ function ClientsPageContent() {
                     const isNotInterested =
                       isNotInterestedStatus(client.status) ||
                       isNotInterestedStatus(client.last_contact_status);
+                    const contactBadge = client.contact_followup_status;
+                    const rowBackgroundClass = isNotInterested
+                      ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
+                      : contactBadge === "overdue"
+                      ? "bg-[#FBBCD0] hover:bg-[#FBBCD0]"
+                      : contactBadge === "active"
+                      ? "bg-[#CCEBE6] hover:bg-[#CCEBE6]"
+                      : "hover:bg-slate-50";
 
                     return (
                     <tr
                       key={client.id}
-                      className={`border-b border-slate-100 transition ${
-                        isNotInterested
-                          ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
-                          : "hover:bg-slate-50"
-                      }`}
+                      className={`border-b border-slate-100 transition ${rowBackgroundClass}`}
                     >
                       <td className="px-4 py-2.5">
                         <input
@@ -1619,18 +1748,34 @@ function ClientsPageContent() {
                       </td>
 
                       <td className="px-4 py-2.5">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                            isNotInterested
-                              ? "bg-slate-200 text-slate-500"
-                              : statusStyles[client.status || ""] ||
-                                "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {isNotInterested
-                            ? "Niezainteresowany"
-                            : client.status || "Brak statusu"}
-                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                              statusStyles[client.status || ""] ||
+                              "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {client.status || "Brak statusu"}
+                          </span>
+
+                          {isNotInterested && (
+                            <span className="inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-500">
+                              Niezainteresowany
+                            </span>
+                          )}
+
+                          {!isNotInterested && contactBadge === "active" && (
+                            <span className="inline-flex rounded-full bg-[#73C7BA] px-2.5 py-0.5 text-[11px] font-bold text-slate-900">
+                              W kontakcie
+                            </span>
+                          )}
+
+                          {!isNotInterested && contactBadge === "overdue" && (
+                            <span className="inline-flex rounded-full bg-[#700729] px-2.5 py-0.5 text-[11px] font-bold text-white">
+                              Zaległy kontakt
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="truncate px-4 py-2.5 text-slate-700">
