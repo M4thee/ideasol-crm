@@ -41,6 +41,72 @@ type ProfileRow = {
   role: string | null;
 };
 
+type FinancialSaleRow = {
+  id: string;
+  sale_public_id?: string | null;
+  public_id?: string | null;
+  created_at?: string | null;
+  sale_date?: string | null;
+  date?: string | null;
+  status?: string | null;
+  seller_id?: string | null;
+  created_by?: string | null;
+  assigned_user_id?: string | null;
+  user_id?: string | null;
+  manager_id?: string | null;
+  contract_value?: number | null;
+  contract_value_gross?: number | null;
+  total_gross?: number | null;
+  final_gross?: number | null;
+  gross_value?: number | null;
+  total_net?: number | null;
+  final_net?: number | null;
+  equipment_cost?: number | null;
+  equipment_cost_net?: number | null;
+  installation_cost?: number | null;
+  installation_cost_net?: number | null;
+  seller_commission?: number | null;
+  seller_commission_net?: number | null;
+  seller_margin?: number | null;
+  seller_markup_net?: number | null;
+  manager_fee?: number | null;
+  manager_fee_net?: number | null;
+  warranty_fund?: number | null;
+  warranty_fund_net?: number | null;
+  guarantee_fund?: number | null;
+  guarantee_fund_net?: number | null;
+  marketing_cost?: number | null;
+  marketing_cost_net?: number | null;
+  marketing_fund?: number | null;
+  owner_margin?: number | null;
+  owner_margin_net?: number | null;
+  company_margin?: number | null;
+  company_margin_net?: number | null;
+  offer_snapshot?: Record<string, unknown> | null;
+  offer_data?: Record<string, unknown> | null;
+  financial_data?: Record<string, unknown> | null;
+  customer_data?: Record<string, unknown> | null;
+};
+
+type FinancialSummary = {
+  revenueGross: number;
+  guaranteeFund: number;
+  marketingFund: number;
+  equipmentCost: number;
+  installationCost: number;
+  sellerCommissions: number;
+  managerCommissions: number;
+  companyProfit: number;
+  ownerProfit: number;
+  advisorCommissionForecast: number;
+  advisorCommissionPayable: number;
+  managerFeeForecast: number;
+  managerFeePayable: number;
+  managerOwnSalesCommissionForecast: number;
+  managerOwnSalesCommissionPayable: number;
+  salesCount: number;
+};
+
 type CcUserSummary = {
   userId: string;
   name: string;
@@ -74,6 +140,38 @@ const emptyCcSummary: CcReportSummary = {
   conversionRate: 0,
   users: [],
 };
+
+const emptyFinancialSummary: FinancialSummary = {
+  revenueGross: 0,
+  guaranteeFund: 0,
+  marketingFund: 0,
+  equipmentCost: 0,
+  installationCost: 0,
+  sellerCommissions: 0,
+  managerCommissions: 0,
+  companyProfit: 0,
+  ownerProfit: 0,
+  advisorCommissionForecast: 0,
+  advisorCommissionPayable: 0,
+  managerFeeForecast: 0,
+  managerFeePayable: 0,
+  managerOwnSalesCommissionForecast: 0,
+  managerOwnSalesCommissionPayable: 0,
+  salesCount: 0,
+};
+
+const forecastCommissionStatuses = new Set([
+  "umowione do montazu",
+  "zamontowany",
+  "oczekiwanie na pelna wplate",
+]);
+
+const payableCommissionStatuses = new Set([
+  "zakonczony",
+  "zakonczona",
+  "zakończony",
+  "zakończona",
+]);
 
 function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -263,6 +361,201 @@ function formatNumberChange(current: number, previous: number) {
   return `${change > 0 ? "+" : ""}${change}`;
 }
 
+function formatCurrency(value: number) {
+  return `${Number(value || 0).toLocaleString("pl-PL", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} zł`;
+}
+
+function readNumberFromObject(source: unknown, keys: string[]) {
+  if (!source || typeof source !== "object") return 0;
+  const objectSource = source as Record<string, unknown>;
+
+  for (const key of keys) {
+    const value = objectSource[key];
+    const numericValue = Number(value || 0);
+    if (Number.isFinite(numericValue) && numericValue !== 0) return numericValue;
+  }
+
+  return 0;
+}
+
+function readSaleNumber(sale: FinancialSaleRow, keys: string[]) {
+  const directValue = readNumberFromObject(sale, keys);
+  if (directValue) return directValue;
+
+  return (
+    readNumberFromObject(sale.financial_data, keys) ||
+    readNumberFromObject(sale.offer_snapshot, keys) ||
+    readNumberFromObject(sale.offer_data, keys) ||
+    readNumberFromObject(sale.customer_data, keys)
+  );
+}
+
+function getSaleSellerId(sale: FinancialSaleRow) {
+  return sale.seller_id || sale.created_by || sale.assigned_user_id || sale.user_id || "";
+}
+
+function getSaleStatus(sale: FinancialSaleRow) {
+  return normalizeText(sale.status || "");
+}
+
+function isForecastCommissionSale(sale: FinancialSaleRow) {
+  return forecastCommissionStatuses.has(getSaleStatus(sale));
+}
+
+function isPayableCommissionSale(sale: FinancialSaleRow) {
+  return payableCommissionStatuses.has(getSaleStatus(sale));
+}
+
+function getSaleRevenueGross(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "contract_value_gross",
+    "contract_value",
+    "total_gross",
+    "final_gross",
+    "gross_value",
+    "finalGross",
+    "totalGross",
+  ]);
+}
+
+function getSaleEquipmentCost(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "equipment_cost_net",
+    "equipment_cost",
+    "equipmentCostNet",
+    "equipmentCost",
+    "totalEquipmentCostNet",
+  ]);
+}
+
+function getSaleInstallationCost(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "installation_cost_net",
+    "installation_cost",
+    "installationCostNet",
+    "installationCost",
+    "mountingCostNet",
+  ]);
+}
+
+function getSaleSellerCommission(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "seller_commission_net",
+    "seller_commission",
+    "seller_margin",
+    "seller_markup_net",
+    "sellerCommissionNet",
+    "sellerMarkupNet",
+    "sellerMargin",
+  ]);
+}
+
+function getSaleManagerFee(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "manager_fee_net",
+    "manager_fee",
+    "managerFeeNet",
+    "managerFee",
+  ]);
+}
+
+function getSaleGuaranteeFund(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "guarantee_fund_net",
+    "guarantee_fund",
+    "warranty_fund_net",
+    "warranty_fund",
+    "guaranteeFundNet",
+    "guaranteeFund",
+    "warrantyFundNet",
+    "warrantyFund",
+  ]);
+}
+
+function getSaleMarketingFund(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "marketing_fund",
+    "marketing_cost_net",
+    "marketing_cost",
+    "marketingFund",
+    "marketingCostNet",
+    "marketingCost",
+  ]);
+}
+
+function getSaleOwnerMargin(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "owner_margin_net",
+    "owner_margin",
+    "company_margin_net",
+    "company_margin",
+    "ownerMarginNet",
+    "ownerMargin",
+    "companyMarginNet",
+    "companyMargin",
+  ]);
+}
+
+function summarizeFinancialSales(
+  sales: FinancialSaleRow[],
+  currentUserId: string,
+  currentUserRole: string,
+  ownerIds: Set<string>,
+  managerUserIds: Set<string>
+) {
+  const summary = { ...emptyFinancialSummary };
+
+  sales.forEach((sale) => {
+    const sellerId = getSaleSellerId(sale);
+    const revenueGross = getSaleRevenueGross(sale);
+    const equipmentCost = getSaleEquipmentCost(sale);
+    const installationCost = getSaleInstallationCost(sale);
+    const sellerCommission = getSaleSellerCommission(sale);
+    const managerFee = getSaleManagerFee(sale);
+    const guaranteeFund = getSaleGuaranteeFund(sale);
+    const marketingFund = getSaleMarketingFund(sale);
+    const ownerMargin = getSaleOwnerMargin(sale);
+    const isOwnerSeller = ownerIds.has(sellerId);
+    const isManagerSeller = managerUserIds.has(sellerId);
+    const forecast = isForecastCommissionSale(sale);
+    const payable = isPayableCommissionSale(sale);
+
+    summary.salesCount += 1;
+    summary.revenueGross += revenueGross;
+    summary.guaranteeFund += guaranteeFund;
+    summary.marketingFund += marketingFund;
+    summary.equipmentCost += equipmentCost;
+    summary.installationCost += installationCost;
+    summary.sellerCommissions += sellerCommission;
+    summary.managerCommissions += managerFee;
+    summary.companyProfit += revenueGross - equipmentCost - installationCost - sellerCommission - managerFee;
+
+    if (currentUserRole === "owner" || currentUserRole === "admin") {
+      summary.ownerProfit += isOwnerSeller ? ownerMargin + sellerCommission / 3 : ownerMargin;
+    }
+
+    if (sellerId === currentUserId) {
+      if (forecast) summary.advisorCommissionForecast += sellerCommission;
+      if (payable) summary.advisorCommissionPayable += sellerCommission;
+    }
+
+    if (currentUserRole === "manager") {
+      if (forecast) summary.managerFeeForecast += managerFee;
+      if (payable) summary.managerFeePayable += managerFee;
+
+      if (sellerId === currentUserId && isManagerSeller) {
+        if (forecast) summary.managerOwnSalesCommissionForecast += sellerCommission;
+        if (payable) summary.managerOwnSalesCommissionPayable += sellerCommission;
+      }
+    }
+  });
+
+  return summary;
+}
+
 const periodButtons: Array<{ key: PeriodPreset; label: string }> = [
   { key: "day", label: "Dzień" },
   { key: "week", label: "Tydzień" },
@@ -332,6 +625,10 @@ export default function ReportsPage() {
   const [previousCcSummary, setPreviousCcSummary] = useState<CcReportSummary>(emptyCcSummary);
   const [loadingCcReport, setLoadingCcReport] = useState(false);
   const [ccReportError, setCcReportError] = useState("");
+  const [currentProfile, setCurrentProfile] = useState<ProfileRow | null>(null);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary>(emptyFinancialSummary);
+  const [loadingFinancialReport, setLoadingFinancialReport] = useState(false);
+  const [financialReportError, setFinancialReportError] = useState("");
 
   function handlePresetChange(nextPreset: PeriodPreset) {
     setPreset(nextPreset);
@@ -388,9 +685,101 @@ export default function ReportsPage() {
     }
   }
 
+  async function loadFinancialReport() {
+    setLoadingFinancialReport(true);
+    setFinancialReportError("");
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const userId = userData.user?.id || "";
+      if (!userId) throw new Error("Brak zalogowanego użytkownika.");
+
+      const currentRange = getDateRangeBoundaries(dateFrom, dateTo);
+
+      const { data: profileRows, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, display_name, email, role");
+
+      if (profilesError) throw profilesError;
+
+      const profiles = (profileRows || []) as ProfileRow[];
+      const current = profiles.find((profile) => profile.id === userId) || null;
+      setCurrentProfile(current);
+
+      const currentRole = normalizeText(current?.role || "seller");
+      const ownerIds = new Set(
+        profiles
+          .filter((profile) => normalizeText(profile.role) === "owner" || normalizeText(profile.role) === "admin")
+          .map((profile) => profile.id)
+      );
+      const managerUserIds = new Set(
+        profiles
+          .filter((profile) => normalizeText(profile.role) === "manager")
+          .map((profile) => profile.id)
+      );
+
+      const { data: saleRows, error: salesError } = await supabase
+        .from("sales")
+        .select("*")
+        .gte("created_at", currentRange.startIso)
+        .lte("created_at", currentRange.endIso);
+
+      if (salesError) throw salesError;
+
+      const allSales = (saleRows || []) as FinancialSaleRow[];
+      const visibleSales = allSales.filter((sale) => {
+        const sellerId = getSaleSellerId(sale);
+
+        if (currentRole === "admin" || currentRole === "owner") return true;
+        if (currentRole === "manager") return sellerId === userId || sale.manager_id === userId;
+        return sellerId === userId;
+      });
+
+      setFinancialSummary(
+        summarizeFinancialSales(visibleSales, userId, currentRole, ownerIds, managerUserIds)
+      );
+    } catch (error) {
+      console.error("Błąd ładowania raportu finansowego", error);
+      setFinancialReportError(error instanceof Error ? error.message : "Nie udało się załadować raportu finansowego.");
+    } finally {
+      setLoadingFinancialReport(false);
+    }
+  }
+
   useEffect(() => {
     loadCcReport();
+    loadFinancialReport();
   }, [dateFrom, dateTo]);
+
+  const currentRole = normalizeText(currentProfile?.role || "seller");
+  const canSeeOwnerFinance = currentRole === "admin" || currentRole === "owner";
+  const canSeeManagerFinance = currentRole === "manager";
+  const canSeeAdvisorFinance = currentRole === "seller" || currentRole === "manager" || currentRole === "owner" || currentRole === "admin";
+
+  const ownerFinancialMetrics: MetricCard[] = [
+    { label: "Wartość umów / przychód", value: formatCurrency(financialSummary.revenueGross), hint: "Suma wartości umów w wybranym okresie" },
+    { label: "Wpływy na fundusz gwarancyjny", value: formatCurrency(financialSummary.guaranteeFund), hint: "Suma funduszu gwarancyjnego z umów" },
+    { label: "Wpływy na marketing", value: formatCurrency(financialSummary.marketingFund), hint: "Suma wpływów marketingowych z umów" },
+    { label: "Koszt sprzętu", value: formatCurrency(financialSummary.equipmentCost), hint: "Koszty sprzętowe z umów" },
+    { label: "Koszt montażu", value: formatCurrency(financialSummary.installationCost), hint: "Koszty montażowe z umów" },
+    { label: "Prowizje doradców/managerów", value: formatCurrency(financialSummary.sellerCommissions + financialSummary.managerCommissions), hint: "Suma prowizji handlowców i manager fee" },
+    { label: "Zysk firmy", value: formatCurrency(financialSummary.companyProfit), hint: "Przychód - sprzęt - montaż - prowizje" },
+    { label: "Zysk wspólnika", value: formatCurrency(financialSummary.ownerProfit), hint: "Owner margin, a przy sprzedaży ownera także marża handlowca / 3" },
+  ];
+
+  const advisorFinancialMetrics: MetricCard[] = [
+    { label: "Prowizja prognozowana", value: formatCurrency(financialSummary.advisorCommissionForecast), hint: "Umówione do montażu, Zamontowany, Oczekiwanie na pełną wpłatę" },
+    { label: "Prowizja do wypłaty", value: formatCurrency(financialSummary.advisorCommissionPayable), hint: "Umowy zakończone" },
+  ];
+
+  const managerFinancialMetrics: MetricCard[] = [
+    { label: "Manager fee prognozowany", value: formatCurrency(financialSummary.managerFeeForecast), hint: "Manager fee z umów w statusach prognozowanych" },
+    { label: "Manager fee do wypłaty", value: formatCurrency(financialSummary.managerFeePayable), hint: "Manager fee z umów zakończonych" },
+    { label: "Prowizja z własnej sprzedaży prognozowana", value: formatCurrency(financialSummary.managerOwnSalesCommissionForecast), hint: "Marża handlowca z własnej sprzedaży managera" },
+    { label: "Prowizja z własnej sprzedaży do wypłaty", value: formatCurrency(financialSummary.managerOwnSalesCommissionPayable), hint: "Zakończona własna sprzedaż managera" },
+  ];
 
   const ccMetrics: MetricCard[] = [
     {
@@ -514,6 +903,47 @@ export default function ReportsPage() {
             </label>
           </div>
         </section>
+
+        <ReportSection
+          title="Raport finansowy"
+          description="Przychody, koszty, zysk oraz prowizje widoczne zgodnie z rolą użytkownika."
+        >
+          {loadingFinancialReport ? (
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
+              Ładowanie raportu finansowego...
+            </div>
+          ) : null}
+          {financialReportError ? (
+            <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {financialReportError}
+            </div>
+          ) : null}
+
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            Liczba umów w raporcie: <span className="font-semibold text-slate-950">{financialSummary.salesCount}</span>
+          </div>
+
+          {canSeeOwnerFinance ? (
+            <div className="mb-6">
+              <h3 className="mb-3 text-base font-semibold text-slate-950">Widok owner/admin</h3>
+              <MetricGrid metrics={ownerFinancialMetrics} />
+            </div>
+          ) : null}
+
+          {canSeeAdvisorFinance ? (
+            <div className="mb-6">
+              <h3 className="mb-3 text-base font-semibold text-slate-950">Widok doradcy</h3>
+              <MetricGrid metrics={advisorFinancialMetrics} />
+            </div>
+          ) : null}
+
+          {canSeeManagerFinance ? (
+            <div>
+              <h3 className="mb-3 text-base font-semibold text-slate-950">Widok managera</h3>
+              <MetricGrid metrics={managerFinancialMetrics} />
+            </div>
+          ) : null}
+        </ReportSection>
 
         <ReportSection
           title="Raport CC"

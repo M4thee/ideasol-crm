@@ -1664,3 +1664,248 @@ function canShowFinancialBreakdownItem(label?: string | null) {
     </main>
   );
 }
+
+// --- Financial helpers
+type FinancialSaleRow = {
+  contract_value?: number | null;
+  margin_value?: number | null;
+  customer_data?: Record<string, any> | null;
+  offer_snapshot?: Record<string, any> | null;
+  offer_data?: Record<string, any> | null;
+  [key: string]: any;
+};
+
+function normalizeText(text: string) {
+  return String(text)
+    .toLowerCase()
+    .replace(/ą/g, "a")
+    .replace(/ć/g, "c")
+    .replace(/ę/g, "e")
+    .replace(/ł/g, "l")
+    .replace(/ń/g, "n")
+    .replace(/ó/g, "o")
+    .replace(/ś/g, "s")
+    .replace(/ż/g, "z")
+    .replace(/ź/g, "z");
+}
+
+function readNumberFromObject(obj: any, keys: string[]) {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      const parsed =
+        typeof value === "number"
+          ? value
+          : Number(String(value).replace(/\s/g, "").replace(",", "."));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return 0;
+}
+
+function readSaleNumber(sale: FinancialSaleRow, keys: string[]) {
+  for (const key of keys) {
+    const value = sale?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      const parsed =
+        typeof value === "number"
+          ? value
+          : Number(String(value).replace(/\s/g, "").replace(",", "."));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return 0;
+}
+
+function getSaleFinancialResult(sale: FinancialSaleRow) {
+  const offerSnapshot = sale.offer_snapshot as Record<string, any> | null | undefined;
+  const offerData = sale.offer_data as Record<string, any> | null | undefined;
+
+  return (
+    offerSnapshot?.offer_data?.result ||
+    offerSnapshot?.result ||
+    offerData?.result ||
+    offerData ||
+    null
+  ) as Record<string, any> | null;
+}
+
+function getSaleFinancialBreakdown(sale: FinancialSaleRow) {
+  const result = getSaleFinancialResult(sale);
+  return Array.isArray(result?.breakdown) ? result.breakdown : [];
+}
+
+function readBreakdownValue(sale: FinancialSaleRow, includeWords: string[], excludeWords: string[] = []) {
+  const breakdown = getSaleFinancialBreakdown(sale);
+
+  const found = breakdown.find((item: any) => {
+    const label = normalizeText(item?.label || "");
+    const hasIncludedWord = includeWords.some((word) => label.includes(normalizeText(word)));
+    const hasExcludedWord = excludeWords.some((word) => label.includes(normalizeText(word)));
+
+    return hasIncludedWord && !hasExcludedWord;
+  });
+
+  return Number(found?.value || 0);
+}
+
+function getSaleRevenueGross(sale: FinancialSaleRow) {
+  const contractTotalFromCustomerData = readNumberFromObject(sale.customer_data, [
+    "contract_total_gross_after_discount",
+    "contract_total_gross",
+  ]);
+
+  if (contractTotalFromCustomerData) return contractTotalFromCustomerData;
+
+  return readSaleNumber(sale, [
+    "contract_value",
+    "contract_value_gross",
+    "total_gross",
+    "final_gross",
+    "gross_value",
+    "finalGross",
+    "totalGross",
+  ]);
+}
+
+function getSaleEquipmentCost(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "equipment_cost_net",
+    "equipment_cost",
+    "equipmentCostNet",
+    "equipmentCost",
+    "totalEquipmentCostNet",
+  ]);
+
+  if (directValue) return directValue;
+
+  const breakdown = getSaleFinancialBreakdown(sale);
+
+  return breakdown.reduce((sum: number, item: any) => {
+    const label = normalizeText(item?.label || "");
+    const isEquipment =
+      label.includes("panel") ||
+      label.includes("falownik") ||
+      label.includes("inwerter") ||
+      label.includes("magazyn") ||
+      label.includes("ems") ||
+      label.includes("backup") ||
+      label.includes("sprzet") ||
+      label.includes("sprzęt");
+    const isNonCost =
+      label.includes("prowizja") ||
+      label.includes("marza") ||
+      label.includes("marża") ||
+      label.includes("fundusz") ||
+      label.includes("marketing") ||
+      label.includes("montaz") ||
+      label.includes("montaż") ||
+      label.includes("robocizna");
+
+    return isEquipment && !isNonCost ? sum + Number(item?.value || 0) : sum;
+  }, 0);
+}
+
+function getSaleInstallationCost(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "installation_cost_net",
+    "installation_cost",
+    "installationCostNet",
+    "installationCost",
+    "mountingCostNet",
+  ]);
+
+  if (directValue) return directValue;
+
+  return readBreakdownValue(sale, ["montaz", "montaż", "robocizna", "instalacja"]);
+}
+
+function getSaleSellerCommission(sale: FinancialSaleRow) {
+  const directSaleMargin = readNumberFromObject(sale, ["margin_value"]);
+  if (directSaleMargin) return directSaleMargin;
+
+  const directValue = readSaleNumber(sale, [
+    "seller_commission_net",
+    "seller_commission",
+    "seller_margin",
+    "seller_markup_net",
+    "sellerCommissionNet",
+    "sellerMarkupNet",
+    "sellerMargin",
+  ]);
+
+  if (directValue) return directValue;
+
+  return readBreakdownValue(sale, ["prowizja handlowca", "handlowca", "seller commission"]);
+}
+
+function getSaleManagerFee(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "manager_fee_net",
+    "manager_fee",
+    "managerFeeNet",
+    "managerFee",
+  ]);
+
+  if (directValue) return directValue;
+
+  return readBreakdownValue(sale, ["manager fee", "manager", "menedzer", "menedżer"]);
+}
+
+function getSaleGuaranteeFund(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "guarantee_fund_net",
+    "guarantee_fund",
+    "warranty_fund_net",
+    "warranty_fund",
+    "guaranteeFundNet",
+    "guaranteeFund",
+    "warrantyFundNet",
+    "warrantyFund",
+  ]);
+
+  if (directValue) return directValue;
+
+  return readBreakdownValue(sale, ["fundusz gwarancyjny", "gwarancyjny", "rekojmia", "rękojmia"]);
+}
+
+function getSaleMarketingFund(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "marketing_fund",
+    "marketing_cost_net",
+    "marketing_cost",
+    "marketingFund",
+    "marketingCostNet",
+    "marketingCost",
+  ]);
+
+  if (directValue) return directValue;
+
+  return readBreakdownValue(sale, ["marketing"]);
+}
+
+function getSaleOwnerMargin(sale: FinancialSaleRow) {
+  const directValue = readSaleNumber(sale, [
+    "owner_margin_net",
+    "owner_margin",
+    "company_margin_net",
+    "company_margin",
+    "ownerMarginNet",
+    "ownerMargin",
+    "companyMarginNet",
+    "companyMargin",
+  ]);
+
+  if (directValue) return directValue;
+
+  const result = getSaleFinancialResult(sale);
+  const companyMargin = Number(result?.companyMargin || result?.company_margin || result?.companyMarginNet || 0);
+
+  if (Number.isFinite(companyMargin) && companyMargin) return companyMargin;
+
+  return readBreakdownValue(sale, ["marza firmy", "marża firmy", "company margin", "owner margin"]);
+}

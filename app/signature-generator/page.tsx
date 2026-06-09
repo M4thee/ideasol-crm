@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export default function SignatureGeneratorPage() {
   const [name, setName] = useState("Mateusz Rapczewski");
@@ -10,6 +12,31 @@ export default function SignatureGeneratorPage() {
   const [logoUrl, setLogoUrl] = useState(
     "https://crm.ideasol.pl/logo.png"
   );
+
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadRole() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.user) return;
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", session.user.id)
+        .maybeSingle();
+
+      setCurrentRole(data?.role ?? null);
+    }
+
+    loadRole();
+  }, []);
+
+  const canUseVcardGenerator =
+    currentRole === "admin" || currentRole === "owner";
 
   const html = useMemo(() => {
     return `
@@ -40,6 +67,48 @@ export default function SignatureGeneratorPage() {
 </table>`;
   }, [name, position, phone, email, logoUrl]);
 
+  const normalizedName = name.trim();
+  const nameParts = normalizedName.split(/\s+/).filter(Boolean);
+  const firstName = nameParts[0] || "";
+  const lastName = nameParts.slice(1).join(" ");
+
+  const vcard = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `N:${lastName};${firstName};;;`,
+    `FN:${normalizedName}`,
+    "ORG:IdeaSol Sp. z o.o.",
+    `TITLE:${position}`,
+    `TEL;TYPE=CELL,VOICE:${phone}`,
+    `EMAIL;TYPE=INTERNET:${email}`,
+    "ADR;TYPE=WORK:;;ul. Złota 23/316;Kielce;;25-015;Polska",
+    "URL:https://www.ideasol.pl",
+    "END:VCARD",
+  ].join("\n");
+
+  function escapeMeCardValue(value: string) {
+    return value
+      .replace(/\\/g, "\\\\")
+      .replace(/;/g, "\\;")
+      .replace(/:/g, "\\:")
+      .replace(/,/g, "\\,")
+      .trim();
+  }
+
+  const qrPayload = [
+    "MECARD:",
+    `N:${escapeMeCardValue(normalizedName)};`,
+    `ORG:${escapeMeCardValue("IdeaSol Sp. z o.o.")};`,
+    `TEL:${escapeMeCardValue(phone)};`,
+    `EMAIL:${escapeMeCardValue(email)};`,
+    `URL:${escapeMeCardValue("https://www.ideasol.pl")};`,
+    `ADR:${escapeMeCardValue("ul. Złota 23/316, 25-015 Kielce, Polska")};`,
+    `NOTE:${escapeMeCardValue(position)};`,
+    ";",
+  ].join("");
+
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=L&margin=8&data=${encodeURIComponent(qrPayload)}`;
+
   async function copySignature() {
     const preview = document.getElementById("signature-preview");
 
@@ -66,6 +135,18 @@ export default function SignatureGeneratorPage() {
     alert("HTML skopiowany.");
   }
 
+  function downloadVcard() {
+    const blob = new Blob([vcard], { type: "text/vcard" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${normalizedName.toLowerCase().replace(/\s+/g, "-") || "ideasol-kontakt"}.vcf`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 p-6">
       <div className="mx-auto max-w-6xl">
@@ -87,25 +168,11 @@ export default function SignatureGeneratorPage() {
               onChange={setName}
             />
 
-            <label className="mb-4 block">
-              <span className="mb-2 block text-sm font-bold text-slate-800">
-                Stanowisko
-              </span>
-
-              <select
-                value={position}
-                onChange={(e) => setPosition(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-3 text-sm outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-100"
-              >
-                <option value="Doradca Techniczno-handlowy">
-                 Doradca Techniczno-handlowy
-                </option>
-
-                <option value="Dyrektor ds. Handlowych">
-                  Dyrektor ds. Handlowych
-                </option>
-              </select>
-            </label>
+            <Field
+              label="Stanowisko"
+              value={position}
+              onChange={setPosition}
+            />
 
             <Field
               label="Telefon"
@@ -193,6 +260,60 @@ export default function SignatureGeneratorPage() {
               value={html}
               className="h-64 w-full rounded-xl border border-slate-300 p-4 font-mono text-xs text-slate-700"
             />
+
+            {canUseVcardGenerator && (
+              <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                <h3 className="mb-4 text-lg font-bold text-emerald-900">
+                  Generator vCard / QR (Admin / Owner)
+                </h3>
+
+                <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+                  <div>
+                    <img
+                      src={qrUrl}
+                      alt="QR vCard"
+                      className="rounded-xl border border-emerald-200 bg-white p-2"
+                    />
+
+                    <button
+                      onClick={downloadVcard}
+                      className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white"
+                    >
+                      Pobierz vCard (.vcf)
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-emerald-900">
+                        Dane zapisane w QR — pełna wizytówka MECARD
+                      </p>
+                      <p className="mb-3 text-xs text-emerald-800">
+                        QR zawiera imię i nazwisko, stanowisko, telefon, e-mail, nazwę firmy, adres oraz stronę WWW.
+                      </p>
+
+                      <textarea
+                        readOnly
+                        value={qrPayload}
+                        className="h-24 w-full rounded-xl border border-slate-300 p-4 font-mono text-xs text-slate-700"
+                      />
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-emerald-900">
+                        Plik vCard do pobrania
+                      </p>
+
+                      <textarea
+                        readOnly
+                        value={vcard}
+                        className="h-36 w-full rounded-xl border border-slate-300 p-4 font-mono text-xs text-slate-700"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       </div>

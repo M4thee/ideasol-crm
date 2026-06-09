@@ -679,95 +679,183 @@ function getTechnicalData(sale: Record<string, any>) {
     resultData,
   };
 
-  return {
-    hasPv: Boolean(
-      getNestedValue(source, ["withPv", "hasPv", "pv", "formData.withPv", "formData.hasPv", "offer_type"])
-    ),
-    hasStorage: Boolean(
-      getNestedValue(source, ["withStorage", "hasStorage", "energyStorage", "storage", "formData.withStorage", "formData.energyStorage"])
-    ),
-    hasEms: Boolean(
-      getNestedValue(source, ["withEms", "ems", "formData.withEms", "formData.ems"])
-    ),
-    hasBackup: Boolean(
-      getNestedValue(source, ["withBackup", "backup", "formData.withBackup", "formData.backup"])
-    ),
-    pvPowerKw: getNestedValue(source, ["pvPowerKw", "pv_power_kw", "powerKw", "formData.pvPowerKw", "resultData.pvPowerKw"]),
-    panelModel: getNestedValue(source, [
-      "panelDisplayName",
-      "panel_display_name",
-      "displayPanelName",
-      "display_panel_name",
-      "panelName",
-      "panelModelDisplayName",
-      "panel_model_display_name",
-      "resultData.panelDisplayName",
-      "resultData.panel_display_name",
-      "resultData.panelName",
-      "offerData.panelDisplayName",
-      "offerData.panel_display_name",
-      "formData.panelDisplayName",
-      "formData.panel_display_name",
-      "panelModel",
-      "panel",
-      "moduleName",
-      "formData.panelName",
-      "formData.panelModel",
-    ]),
-    panelPowerWp: getNestedValue(source, ["panelPowerWp", "panel_power_wp", "modulePowerWp", "formData.panelPowerWp", "resultData.panelPowerWp"]),
-    panelCount: getNestedValue(source, ["panelCount", "panel_count", "modulesCount", "formData.panelCount", "resultData.panelCount"]),
-    inverterType: getNestedValue(source, [
-      "inverterType",
-      "inverter_type",
-      "selectedInverterType",
-      "selected_inverter_type",
-      "formData.inverterType",
-      "formData.selectedInverterType",
-      "resultData.inverterType",
-      "offerData.inverterType",
-    ]),
-    inverterModel: getNestedValue(source, [
-      "inverterDisplayName",
-      "inverter_display_name",
-      "displayInverterName",
-      "display_inverter_name",
-      "resultData.inverterDisplayName",
-      "resultData.inverter_display_name",
-      "resultData.inverter",
-      "offerData.inverterDisplayName",
-      "offerData.inverter_display_name",
-      "formData.inverterDisplayName",
-      "formData.inverter_display_name",
-      "inverter",
-      "inverterModel",
-      "inverterName",
-      "formData.inverter",
-    ]),
-    inverterPowerKw: getNestedValue(source, [
-      "inverterPowerKw",
-      "inverter_power_kw",
-      "inverterPower",
-      "inverter_power",
-      "inverterKw",
-      "inverter_kw",
+  // Inserted logic for robust hasPv/hasStorage/hasEms/hasBackup detection
+  const offerTypeText = String(
+    offerData.offerType ||
+      offerData.offer_type ||
+      formData.offerType ||
+      formData.offer_type ||
+      formData.selectedOfferType ||
+      formData.selected_offer_type ||
+      ""
+  ).toLowerCase();
+
+  const selectedProducts = [
+    ...(Array.isArray(formData.selectedProducts) ? formData.selectedProducts : []),
+    ...(Array.isArray(formData.products) ? formData.products : []),
+    ...(Array.isArray(formData.productTypes) ? formData.productTypes : []),
+    ...(Array.isArray(offerData.selectedProducts) ? offerData.selectedProducts : []),
+  ];
+
+  const selectedProductsText = selectedProducts.join(" ").toLowerCase();
+  const soldItemsTextForTechnicalData = getSoldItems(sale).join(" ").toLowerCase();
+
+  const pvPowerCandidate = toNumber(
+    getNestedValue(source, [
+      "pvPowerKw",
+      "pv_power_kw",
       "powerKw",
-      "power_kw",
-      "selectedInverterPowerKw",
-      "selected_inverter_power_kw",
-      "formData.inverterPowerKw",
-      "formData.inverter_power_kw",
-      "formData.inverterPower",
-      "formData.inverter_power",
-      "formData.inverterKw",
-      "formData.inverter_kw",
-      "formData.selectedInverterPowerKw",
-      "resultData.inverterPowerKw",
-      "resultData.inverter_power_kw",
-      "resultData.inverterPower",
-      "offerData.inverterPowerKw",
-      "offerData.inverter_power_kw",
-    ]),
-    mountingType: getNestedValue(source, ["mountingType", "mount_type", "roofType", "formData.mountingType", "formData.roofType"]),
+      "formData.pvPowerKw",
+      "resultData.pvPowerKw",
+    ])
+  );
+
+  const hasExplicitPvFalse =
+    formData.withPv === false ||
+    formData.hasPv === false ||
+    formData.includePv === false ||
+    formData.pv === false;
+
+  const hasExplicitPvTrue =
+    formData.withPv === true ||
+    formData.hasPv === true ||
+    formData.includePv === true ||
+    formData.pv === true;
+
+  const selectedProductTokens = selectedProducts.map((product) =>
+    String(product).trim().toLowerCase()
+  );
+
+  const hasPvSelectedInProducts = selectedProductTokens.some((product) =>
+    ["pv", "fotowoltaika", "instalacja pv"].includes(product)
+  );
+
+  const hasPv =
+    !hasExplicitPvFalse &&
+    (pvPowerCandidate > 0 || hasExplicitPvTrue || hasPvSelectedInProducts);
+
+  const hasStorage =
+    formData.withStorage === true ||
+    formData.hasStorage === true ||
+    formData.includeStorage === true ||
+    Boolean(formData.energyStorage) ||
+    offerTypeText.includes("storage") ||
+    offerTypeText.includes("magazyn") ||
+    selectedProductsText.includes("storage") ||
+    selectedProductsText.includes("magazyn") ||
+    selectedProductsText.includes("me") ||
+    soldItemsTextForTechnicalData.includes("magazyn") ||
+    soldItemsTextForTechnicalData.includes("storage");
+
+  const hasEms =
+    formData.withEms === true ||
+    formData.hasEms === true ||
+    formData.includeEms === true;
+
+  const hasBackup =
+    formData.withBackup === true ||
+    formData.hasBackup === true ||
+    formData.includeBackup === true ||
+    formData.backup === true;
+
+  const hasInverter = hasPv || hasStorage;
+
+  return {
+    hasPv,
+    hasStorage,
+    hasEms,
+    hasBackup,
+    hasInverter,
+    pvPowerKw: (hasPv ? getNestedValue(source, ["pvPowerKw", "pv_power_kw", "powerKw", "formData.pvPowerKw", "resultData.pvPowerKw"]) : ""),
+    panelModel: hasPv
+      ? getNestedValue(source, [
+          "panelDisplayName",
+          "panel_display_name",
+          "displayPanelName",
+          "display_panel_name",
+          "panelName",
+          "panelModelDisplayName",
+          "panel_model_display_name",
+          "resultData.panelDisplayName",
+          "resultData.panel_display_name",
+          "resultData.panelName",
+          "offerData.panelDisplayName",
+          "offerData.panel_display_name",
+          "formData.panelDisplayName",
+          "formData.panel_display_name",
+          "panelModel",
+          "panel",
+          "moduleName",
+          "formData.panelName",
+          "formData.panelModel",
+        ])
+      : "",
+    panelPowerWp: hasPv
+      ? getNestedValue(source, ["panelPowerWp", "panel_power_wp", "modulePowerWp", "formData.panelPowerWp", "resultData.panelPowerWp"])
+      : "",
+    panelCount: hasPv
+      ? getNestedValue(source, ["panelCount", "panel_count", "modulesCount", "formData.panelCount", "resultData.panelCount"])
+      : "",
+    inverterType: hasInverter
+      ? getNestedValue(source, [
+          "inverterType",
+          "inverter_type",
+          "selectedInverterType",
+          "selected_inverter_type",
+          "formData.inverterType",
+          "formData.selectedInverterType",
+          "resultData.inverterType",
+          "offerData.inverterType",
+        ])
+      : "",
+    inverterModel: hasInverter
+      ? getNestedValue(source, [
+          "inverterDisplayName",
+          "inverter_display_name",
+          "displayInverterName",
+          "display_inverter_name",
+          "resultData.inverterDisplayName",
+          "resultData.inverter_display_name",
+          "resultData.inverter",
+          "offerData.inverterDisplayName",
+          "offerData.inverter_display_name",
+          "formData.inverterDisplayName",
+          "formData.inverter_display_name",
+          "inverter",
+          "inverterModel",
+          "inverterName",
+          "formData.inverter",
+        ])
+      : "",
+    inverterPowerKw: hasInverter
+      ? getNestedValue(source, [
+          "inverterPowerKw",
+          "inverter_power_kw",
+          "inverterPower",
+          "inverter_power",
+          "inverterKw",
+          "inverter_kw",
+          "powerKw",
+          "power_kw",
+          "selectedInverterPowerKw",
+          "selected_inverter_power_kw",
+          "formData.inverterPowerKw",
+          "formData.inverter_power_kw",
+          "formData.inverterPower",
+          "formData.inverter_power",
+          "formData.inverterKw",
+          "formData.inverter_kw",
+          "formData.selectedInverterPowerKw",
+          "resultData.inverterPowerKw",
+          "resultData.inverter_power_kw",
+          "resultData.inverterPower",
+          "offerData.inverterPowerKw",
+          "offerData.inverter_power_kw",
+        ])
+      : "",
+    mountingType: hasPv
+      ? getNestedValue(source, ["mountingType", "mount_type", "roofType", "formData.mountingType", "formData.roofType"])
+      : "",
     storageBrand: getNestedValue(source, ["storageBrand", "batteryBrand", "formData.storageBrand"]),
     storageModel: getNestedValue(source, [
       "storageDisplayName",
@@ -1342,73 +1430,71 @@ export async function GET(request: NextRequest, context: RouteContext) {
   );
 
   // Page 2 — technical data from offer snapshot
-  drawOnPage(
-    1,
-    asPrintable(technicalData.pvPowerKw, " kWp"),
-    contractPdfPositions.page2.pvPower.x,
-    contractPdfPositions.page2.pvPower.y,
-    { size: contractPdfPositions.page2.pvPower.size, bold: true }
-  );
+  if (technicalData.hasPv) {
+    drawOnPage(
+      1,
+      asPrintable(technicalData.pvPowerKw, " kWp"),
+      contractPdfPositions.page2.pvPower.x,
+      contractPdfPositions.page2.pvPower.y,
+      { size: contractPdfPositions.page2.pvPower.size, bold: true }
+    );
+    drawOnPage(
+      1,
+      humanizeEquipmentName(technicalData.panelModel),
+      contractPdfPositions.page2.panelModel.x,
+      contractPdfPositions.page2.panelModel.y,
+      { size: contractPdfPositions.page2.panelModel.size }
+    );
+    drawOnPage(
+      1,
+      asPrintable(technicalData.panelPowerWp, " Wp"),
+      contractPdfPositions.page2.panelPower.x,
+      contractPdfPositions.page2.panelPower.y,
+      { size: contractPdfPositions.page2.panelPower.size }
+    );
+  }
+  if (technicalData.hasInverter) {
+    const inverterModelKeyForDisplay = normalizeEquipmentKey(technicalData.inverterModel);
+    const inferredInverterType =
+      technicalData.inverterType ||
+      (inverterModelKeyForDisplay.includes("hybryd") ||
+      inverterModelKeyForDisplay.includes("hybrid") ||
+      inverterModelKeyForDisplay.includes("sg04") ||
+      inverterModelKeyForDisplay.includes("sg05") ||
+      Boolean(technicalData.hasStorage)
+        ? "hybrydowy"
+        : inverterModelKeyForDisplay.includes("brak") ||
+            inverterModelKeyForDisplay.includes("wlasny") ||
+            inverterModelKeyForDisplay.includes("klienta")
+          ? "własny klienta"
+          : technicalData.inverterModel
+            ? "sieciowy"
+            : "");
 
-  const inverterModelKeyForDisplay = normalizeEquipmentKey(technicalData.inverterModel);
-  const inferredInverterType =
-    technicalData.inverterType ||
-    (inverterModelKeyForDisplay.includes("hybryd") ||
-    inverterModelKeyForDisplay.includes("hybrid") ||
-    inverterModelKeyForDisplay.includes("sg04") ||
-    inverterModelKeyForDisplay.includes("sg05") ||
-    Boolean(technicalData.hasStorage)
-      ? "hybrydowy"
-      : inverterModelKeyForDisplay.includes("brak") ||
-          inverterModelKeyForDisplay.includes("wlasny") ||
-          inverterModelKeyForDisplay.includes("klienta")
-        ? "własny klienta"
-        : technicalData.inverterModel
-          ? "sieciowy"
-          : "");
-
-  drawOnPage(
-    1,
-    String(inferredInverterType || ""),
-    contractPdfPositions.page2.inverterType.x,
-    contractPdfPositions.page2.inverterType.y,
-    { size: contractPdfPositions.page2.inverterType.size, bold: true }
-  );
-
-  drawOnPage(
-    1,
-    humanizeEquipmentName(technicalData.panelModel),
-    contractPdfPositions.page2.panelModel.x,
-    contractPdfPositions.page2.panelModel.y,
-    { size: contractPdfPositions.page2.panelModel.size }
-  );
-
-  drawOnPage(
-    1,
-    humanizeEquipmentName(technicalData.inverterModel),
-    contractPdfPositions.page2.inverterModel.x,
-    contractPdfPositions.page2.inverterModel.y,
-    { size: contractPdfPositions.page2.inverterModel.size }
-  );
-
-  drawOnPage(
-    1,
-    asPrintable(technicalData.panelPowerWp, " Wp"),
-    contractPdfPositions.page2.panelPower.x,
-    contractPdfPositions.page2.panelPower.y,
-    { size: contractPdfPositions.page2.panelPower.size }
-  );
-
-  const inverterPowerKw =
-    technicalData.inverterPowerKw || inferInverterPowerKwFromModel(technicalData.inverterModel);
-
-  drawOnPage(
-    1,
-    asPrintable(inverterPowerKw, " kW"),
-    contractPdfPositions.page2.inverterPower.x,
-    contractPdfPositions.page2.inverterPower.y,
-    { size: contractPdfPositions.page2.inverterPower.size }
-  );
+    drawOnPage(
+      1,
+      String(inferredInverterType || ""),
+      contractPdfPositions.page2.inverterType.x,
+      contractPdfPositions.page2.inverterType.y,
+      { size: contractPdfPositions.page2.inverterType.size, bold: true }
+    );
+    drawOnPage(
+      1,
+      humanizeEquipmentName(technicalData.inverterModel),
+      contractPdfPositions.page2.inverterModel.x,
+      contractPdfPositions.page2.inverterModel.y,
+      { size: contractPdfPositions.page2.inverterModel.size }
+    );
+    const inverterPowerKw =
+      technicalData.inverterPowerKw || inferInverterPowerKwFromModel(technicalData.inverterModel);
+    drawOnPage(
+      1,
+      asPrintable(inverterPowerKw, " kW"),
+      contractPdfPositions.page2.inverterPower.x,
+      contractPdfPositions.page2.inverterPower.y,
+      { size: contractPdfPositions.page2.inverterPower.size }
+    );
+  }
 
   const storageDetails = parseStorageDetails(technicalData);
   if (storageDetails.brand) {
@@ -1479,31 +1565,46 @@ if (hasOptimizers) {
 }
   // Simple automatic checks based on sold item names
   const soldItemsText = `${soldItems.join(" ")} ${JSON.stringify(technicalData)}`.toLowerCase();
-  const inverterTypeKey = normalizeEquipmentKey(inferredInverterType);
+  const inverterTypeKey = normalizeEquipmentKey(
+    String(technicalData.inverterType || "")
+  );
   const inverterModelKey = normalizeEquipmentKey(technicalData.inverterModel);
   const mountingTypeKey = normalizeEquipmentKey(technicalData.mountingType);
 
-  if (soldItemsText.includes("magazyn")) {
+  const effectiveInverterTypeKey = normalizeEquipmentKey(
+    String(
+      technicalData.inverterType ||
+        (technicalData.hasStorage
+          ? "hybrydowy"
+          : technicalData.inverterModel
+            ? "sieciowy"
+            : "")
+    )
+  );
+
+  if (technicalData.hasStorage) {
     drawCheck(1, contractPdfPositions.page2.storageCheck.x, contractPdfPositions.page2.storageCheck.y);
   }
-  if (soldItemsText.includes("ems") || soldItemsText.includes("hems")) {
+  if (technicalData.hasEms) {
     drawCheck(1, contractPdfPositions.page2.emsCheck.x, contractPdfPositions.page2.emsCheck.y);
   }
-  if (soldItemsText.includes("backup")) {
+  if (technicalData.hasBackup) {
     drawCheck(1, contractPdfPositions.page2.backupCheck.x, contractPdfPositions.page2.backupCheck.y);
   }
 
-  if (inverterTypeKey.includes("sieciowy") || inverterTypeKey.includes("grid")) {
-    drawCheck(1, contractPdfPositions.page2.inverterGridCheck.x, contractPdfPositions.page2.inverterGridCheck.y);
-  }
-  if (inverterTypeKey.includes("hybryd") || inverterTypeKey.includes("hybrid")) {
-    drawCheck(1, contractPdfPositions.page2.inverterHybridCheck.x, contractPdfPositions.page2.inverterHybridCheck.y);
-  }
-  if (inverterTypeKey.includes("mikro") || inverterTypeKey.includes("micro")) {
-    drawCheck(1, contractPdfPositions.page2.inverterMicroCheck.x, contractPdfPositions.page2.inverterMicroCheck.y);
-  }
-  if (inverterTypeKey.includes("wlasny") || inverterTypeKey.includes("klienta") || inverterTypeKey.includes("brak") || inverterModelKey.includes("wlasny")) {
-    drawCheck(1, contractPdfPositions.page2.inverterOwnCheck.x, contractPdfPositions.page2.inverterOwnCheck.y);
+  if (technicalData.hasInverter) {
+    if (effectiveInverterTypeKey.includes("sieciowy") || effectiveInverterTypeKey.includes("grid")) {
+      drawCheck(1, contractPdfPositions.page2.inverterGridCheck.x, contractPdfPositions.page2.inverterGridCheck.y);
+    }
+    if (effectiveInverterTypeKey.includes("hybryd") || effectiveInverterTypeKey.includes("hybrid")) {
+      drawCheck(1, contractPdfPositions.page2.inverterHybridCheck.x, contractPdfPositions.page2.inverterHybridCheck.y);
+    }
+    if (effectiveInverterTypeKey.includes("mikro") || effectiveInverterTypeKey.includes("micro")) {
+      drawCheck(1, contractPdfPositions.page2.inverterMicroCheck.x, contractPdfPositions.page2.inverterMicroCheck.y);
+    }
+    if (effectiveInverterTypeKey.includes("wlasny") || effectiveInverterTypeKey.includes("klienta") || effectiveInverterTypeKey.includes("brak") || inverterModelKey.includes("wlasny")) {
+      drawCheck(1, contractPdfPositions.page2.inverterOwnCheck.x, contractPdfPositions.page2.inverterOwnCheck.y);
+    }
   }
 
   if (mountingTypeKey.includes("blacha")) {
