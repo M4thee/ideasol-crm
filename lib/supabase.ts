@@ -31,7 +31,24 @@ function migrateSupabaseSessionStorage() {
   }
 }
 
+
 migrateSupabaseSessionStorage();
+
+function clearBrokenSupabaseSession() {
+  if (typeof window === "undefined") return;
+
+  try {
+    const projectRef = getProjectRefFromSupabaseUrl(supabaseUrl);
+
+    if (projectRef) {
+      window.localStorage.removeItem(`sb-${projectRef}-auth-token`);
+    }
+
+    window.localStorage.removeItem(storageKey);
+  } catch (error) {
+    console.error("Failed to clear Supabase session", error);
+  }
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -41,3 +58,21 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storageKey,
   },
 });
+
+if (typeof window !== "undefined") {
+  supabase.auth.onAuthStateChange((_event, _session) => {
+    // noop - keeps auth listener alive
+  });
+
+  supabase.auth.getSession().catch((error) => {
+    const message = String(error?.message || error || "");
+
+    if (
+      message.includes("Invalid Refresh Token") ||
+      message.includes("Refresh Token Not Found")
+    ) {
+      clearBrokenSupabaseSession();
+      window.location.reload();
+    }
+  });
+}

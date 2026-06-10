@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
   if (
     maintenanceMode &&
     pathname !== "/maintenance" &&
+    !pathname.startsWith("/kalkulator-magazynu-energii") &&
     !pathname.startsWith("/_next") &&
     !pathname.startsWith("/favicon") &&
     !pathname.startsWith("/logo.png")
