@@ -5,6 +5,7 @@ import {
   buildTeamsEnergyStorageLeadChannelMessage,
   buildTeamsEnergyStorageLeadDirectMessage,
   sendTeamsDelegatedDirectCalendarNotification,
+  sendTeamsDelegatedLeadChannelNotification,
   sendTeamsDirectEnergyStorageLeadNotification,
   sendTeamsLeadChannelNotification,
 } from "@/lib/microsoftTeams";
@@ -434,12 +435,21 @@ async function sendTeamsNotifications(params: {
   };
 
   const channelMessage = buildTeamsEnergyStorageLeadChannelMessage(notificationPayload);
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
 
   try {
-    await sendTeamsLeadChannelNotification({
-      userEmail: params.advisor.email ?? "",
-      message: channelMessage,
-    });
+    if (delegatedRefreshToken) {
+      const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+      await sendTeamsDelegatedLeadChannelNotification({
+        message: channelMessage,
+        accessToken: delegatedToken.access_token || "",
+      });
+    } else {
+      await sendTeamsLeadChannelNotification({
+        message: channelMessage,
+      });
+    }
   } catch (error) {
     console.error("energy-storage-lead Teams channel notification failed", error);
   }
@@ -451,7 +461,6 @@ async function sendTeamsNotifications(params: {
   const directMessage = buildTeamsEnergyStorageLeadDirectMessage(notificationPayload);
 
   try {
-    const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
 
     if (delegatedRefreshToken) {
       const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);

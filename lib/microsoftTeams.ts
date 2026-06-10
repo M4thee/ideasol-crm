@@ -12,6 +12,14 @@ export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificatio
   accessToken: string;
 };
 
+export type TeamsChannelNotificationPayload = {
+  message: string;
+};
+
+export type TeamsDelegatedChannelNotificationPayload = TeamsChannelNotificationPayload & {
+  accessToken: string;
+};
+
 export type TeamsMetaLeadNotificationPayload = {
   assignedUserName: string;
   clientName: string;
@@ -169,7 +177,7 @@ export async function sendTeamsCalendarNotification(
 }
 
 export async function sendTeamsLeadChannelNotification(
-  payload: TeamsCalendarNotificationPayload
+  payload: TeamsChannelNotificationPayload
 ) {
   const teamId = process.env.MICROSOFT_TEAMS_LEADS_TEAM_ID || requireEnv("MICROSOFT_TEAMS_TEAM_ID");
   const channelId = process.env.MICROSOFT_TEAMS_LEADS_CHANNEL_ID || requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
@@ -329,4 +337,30 @@ export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendar
 
 export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {
   return sendTeamsDirectCalendarNotification(payload);
+}
+
+export async function sendTeamsDelegatedLeadChannelNotification(
+  payload: TeamsDelegatedChannelNotificationPayload
+) {
+  const teamId = process.env.MICROSOFT_TEAMS_LEADS_TEAM_ID || requireEnv("MICROSOFT_TEAMS_TEAM_ID");
+  const channelId = process.env.MICROSOFT_TEAMS_LEADS_CHANNEL_ID || requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
+
+  const message = await graphApiRequestWithAccessToken<GraphChannelMessage>(
+    `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
+    payload.accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: {
+          contentType: "html",
+          content: payload.message.replaceAll("\n", "<br />"),
+        },
+      }),
+    }
+  );
+
+  return {
+    success: true,
+    messageId: message.id,
+  };
 }
