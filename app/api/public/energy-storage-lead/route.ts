@@ -60,6 +60,92 @@ function formatMoney(value: unknown) {
   return `${Math.round(numberValue).toLocaleString("pl-PL")} zł`;
 }
 
+function normalizeProvinceName(value: string | null | undefined) {
+  if (!value) return null;
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  const map: Record<string, string> = {
+    "dolnoslaskie": "Dolnośląskie",
+    "dolno slaskie": "Dolnośląskie",
+    "lower silesia": "Dolnośląskie",
+    "lower silesian": "Dolnośląskie",
+
+    "kujawsko pomorskie": "Kujawsko-pomorskie",
+    "kuyavian pomeranian": "Kujawsko-pomorskie",
+    "cuyavian pomeranian": "Kujawsko-pomorskie",
+
+    "lubelskie": "Lubelskie",
+    "lublin": "Lubelskie",
+    "lublin province": "Lubelskie",
+
+    "lubuskie": "Lubuskie",
+    "lubusz": "Lubuskie",
+    "lubusz province": "Lubuskie",
+
+    "lodzkie": "Łódzkie",
+    "lodz": "Łódzkie",
+    "lodz province": "Łódzkie",
+    "lodz voivodeship": "Łódzkie",
+
+    "malopolskie": "Małopolskie",
+    "malo polskie": "Małopolskie",
+    "lesser poland": "Małopolskie",
+    "lesser poland province": "Małopolskie",
+
+    "mazowieckie": "Mazowieckie",
+    "masovian": "Mazowieckie",
+    "masovia": "Mazowieckie",
+    "mazovia": "Mazowieckie",
+
+    "opolskie": "Opolskie",
+    "opole": "Opolskie",
+    "opole province": "Opolskie",
+
+    "podkarpackie": "Podkarpackie",
+    "subcarpathian": "Podkarpackie",
+    "subcarpathia": "Podkarpackie",
+
+    "podlaskie": "Podlaskie",
+    "podlasie": "Podlaskie",
+
+    "pomorskie": "Pomorskie",
+    "pomeranian": "Pomorskie",
+    "pomerania": "Pomorskie",
+
+    "slaskie": "Śląskie",
+    "silesia": "Śląskie",
+    "silesian": "Śląskie",
+    "upper silesia": "Śląskie",
+
+    "swietokrzyskie": "Świętokrzyskie",
+    "holy cross": "Świętokrzyskie",
+    "holy cross province": "Świętokrzyskie",
+
+    "warminsko mazurskie": "Warmińsko-mazurskie",
+    "warmian masurian": "Warmińsko-mazurskie",
+    "warmia masuria": "Warmińsko-mazurskie",
+
+    "wielkopolskie": "Wielkopolskie",
+    "greater poland": "Wielkopolskie",
+    "greater poland province": "Wielkopolskie",
+
+    "zachodniopomorskie": "Zachodniopomorskie",
+    "zachodnio pomorskie": "Zachodniopomorskie",
+    "west pomeranian": "Zachodniopomorskie",
+    "western pomerania": "Zachodniopomorskie",
+  };
+
+  return map[normalized] ?? value.trim();
+}
+
 async function getPostalCodeDetails(postalCode: string) {
   const normalizedPostalCode = postalCode.trim();
 
@@ -92,7 +178,7 @@ async function getPostalCodeDetails(postalCode: string) {
   );
 
   return {
-    province: regionResponse.data?.province ?? null,
+    province: normalizeProvinceName(regionResponse.data?.province ?? null),
     cities,
   };
 }
