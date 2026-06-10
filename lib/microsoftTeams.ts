@@ -27,6 +27,14 @@ export type TeamsMetaLeadNotificationPayload = {
   };
 };
 
+export type TeamsEnergyStorageLeadNotificationPayload = {
+  advisorName?: string | null;
+  clientName: string;
+  clientPhone: string;
+  postalCode: string;
+  crmUrl?: string | null;
+};
+
 type GraphChannelMessage = {
   id: string;
 };
@@ -96,11 +104,75 @@ export function buildTeamsMetaLeadMessage(payload: TeamsMetaLeadNotificationPayl
   return lines.join("\n");
 }
 
+export function buildTeamsEnergyStorageLeadDirectMessage(
+  payload: TeamsEnergyStorageLeadNotificationPayload
+) {
+  const lines = [
+    "<strong>🔥 Przypisano Ci nowego leada do obsługi</strong>",
+    "",
+    "Kampania: <strong>Kalkulator Magazynu Energii</strong>",
+    `Klient: <strong>${displayValue(payload.clientName)}</strong>`,
+    `Kod pocztowy: <strong>${displayValue(payload.postalCode)}</strong>`,
+    `Telefon: <strong>${displayValue(payload.clientPhone)}</strong>`,
+  ];
+
+  if (payload.crmUrl) {
+    lines.push("", `<a href="${escapeHtml(payload.crmUrl)}">Otwórz klienta w CRM</a>`);
+  }
+
+  return lines.join("\n");
+}
+
+export function buildTeamsEnergyStorageLeadChannelMessage(
+  payload: TeamsEnergyStorageLeadNotificationPayload
+) {
+  const lines = [
+    "<strong>📥 Nowy lead CRM</strong>",
+    "",
+    "Źródło: <strong>Kalkulator Magazynu Energii</strong>",
+    `Klient: <strong>${displayValue(payload.clientName)}</strong>`,
+    `Kod pocztowy: <strong>${displayValue(payload.postalCode)}</strong>`,
+    `Telefon: <strong>${displayValue(payload.clientPhone)}</strong>`,
+    `Przypisano do: <strong>${displayValue(payload.advisorName)}</strong>`,
+  ];
+
+  if (payload.crmUrl) {
+    lines.push("", `<a href="${escapeHtml(payload.crmUrl)}">Otwórz klienta w CRM</a>`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function sendTeamsCalendarNotification(
   payload: TeamsCalendarNotificationPayload
 ) {
   const teamId = requireEnv("MICROSOFT_TEAMS_TEAM_ID");
   const channelId = requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
+
+  const message = await graphApiRequest<GraphChannelMessage>(
+    `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: {
+          contentType: "html",
+          content: payload.message.replaceAll("\n", "<br />"),
+        },
+      }),
+    }
+  );
+
+  return {
+    success: true,
+    messageId: message.id,
+  };
+}
+
+export async function sendTeamsLeadChannelNotification(
+  payload: TeamsCalendarNotificationPayload
+) {
+  const teamId = process.env.MICROSOFT_TEAMS_LEADS_TEAM_ID || requireEnv("MICROSOFT_TEAMS_TEAM_ID");
+  const channelId = process.env.MICROSOFT_TEAMS_LEADS_CHANNEL_ID || requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
 
   const message = await graphApiRequest<GraphChannelMessage>(
     `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
@@ -252,5 +324,9 @@ export async function sendTeamsDelegatedDirectCalendarNotification(
 }
 
 export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendarNotificationPayload) {
+  return sendTeamsDirectCalendarNotification(payload);
+}
+
+export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {
   return sendTeamsDirectCalendarNotification(payload);
 }
