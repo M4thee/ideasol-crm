@@ -30,6 +30,10 @@ type ThemeMode = "auto" | "light" | "dark";
 type RecommendationType = "recommended" | "consider" | "not_recommended";
 
 const ENERGY_PRICE_PER_KWH = 1.15;
+const NET_BILLING_EXPORT_PRICE_PER_KWH = 0.27;
+const NET_BILLING_BASE_AUTOCONSUMPTION_RATE = 0.2;
+const NET_METERING_BASE_AUTOCONSUMPTION_RATE = 0.3;
+const STORAGE_ROUND_TRIP_EFFICIENCY = 0.9;
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("pl-PL", {
@@ -131,6 +135,49 @@ function getPvStorageBasePriceWithoutSellerMarkup(pvKw: number, storageKwh: numb
   if (pvKw <= 10 && storageKwh <= 20) return 45900;
   if (pvKw <= 12 && storageKwh <= 30) return 52900;
   return 52900;
+}
+
+function getAutoconsumptionRateWithStorageAndHems(storageKwh: number) {
+  if (storageKwh <= 10) return 0.7;
+  if (storageKwh <= 16) return 0.78;
+  if (storageKwh <= 20) return 0.83;
+  return 0.88;
+}
+
+function getNetBillingStorageSavingsRange(params: {
+  pvProductionKwh: number;
+  yearlyConsumptionKwh: number;
+  storageKwh: number;
+}) {
+  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh } = params;
+
+  const baseAutoconsumedKwh = Math.min(
+    pvProductionKwh * NET_BILLING_BASE_AUTOCONSUMPTION_RATE,
+    yearlyConsumptionKwh
+  );
+
+  const autoconsumptionRateWithStorage = getAutoconsumptionRateWithStorageAndHems(storageKwh);
+  const autoconsumedWithStorageKwh = Math.min(
+    pvProductionKwh * autoconsumptionRateWithStorage,
+    yearlyConsumptionKwh
+  );
+
+  const additionalAutoconsumedKwh = Math.max(
+    0,
+    (autoconsumedWithStorageKwh - baseAutoconsumedKwh) * STORAGE_ROUND_TRIP_EFFICIENCY
+  );
+
+  const valueDifferencePerKwh = ENERGY_PRICE_PER_KWH - NET_BILLING_EXPORT_PRICE_PER_KWH;
+  const expectedSavings = additionalAutoconsumedKwh * valueDifferencePerKwh;
+
+  return {
+    baseAutoconsumptionRate: NET_BILLING_BASE_AUTOCONSUMPTION_RATE,
+    autoconsumptionRateWithStorage,
+    additionalAutoconsumedKwh,
+    valueDifferencePerKwh,
+    low: expectedSavings * 0.85,
+    high: expectedSavings * 1.15,
+  };
 }
 
 function getSavingsRateRange(params: {
@@ -609,7 +656,18 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
   const currentPvPowerKw = parseDecimal(pvPower);
   const estimatedGridConsumptionKwh = yearlyBill > 0 ? yearlyBill / ENERGY_PRICE_PER_KWH : 0;
   const estimatedPvProductionKwh = hasPv === "yes" && currentPvPowerKw > 0 ? currentPvPowerKw * 1000 : 0;
-  const yearlyConsumptionKwh = hasPv === "yes" ? estimatedGridConsumptionKwh + estimatedPvProductionKwh : estimatedGridConsumptionKwh;
+  const baseAutoconsumptionRate =
+    settlementSystem === "net_metering"
+      ? NET_METERING_BASE_AUTOCONSUMPTION_RATE
+      : NET_BILLING_BASE_AUTOCONSUMPTION_RATE;
+  const estimatedSelfConsumedPvKwh =
+    hasPv === "yes" ? estimatedPvProductionKwh * baseAutoconsumptionRate : 0;
+  const estimatedExportedPvKwh =
+    hasPv === "yes" ? Math.max(0, estimatedPvProductionKwh - estimatedSelfConsumedPvKwh) : 0;
+  const yearlyConsumptionKwh =
+    hasPv === "yes"
+      ? estimatedGridConsumptionKwh + estimatedSelfConsumedPvKwh
+      : estimatedGridConsumptionKwh;
 
     const result = useMemo(() => {
     if (!hasPv || yearlyBill <= 0) return null;
@@ -662,8 +720,22 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
       yearlyBill,
       recommendedStorageKwh,
     });
-    const yearlySavingsLow = yearlyBill * savingsRate.low;
-    const yearlySavingsHigh = yearlyBill * savingsRate.high;
+
+    const netBillingSavingsDetails =
+      hasPv === "yes" && settlementSystem === "net_billing" && estimatedPvProductionKwh > 0
+        ? getNetBillingStorageSavingsRange({
+            pvProductionKwh: estimatedPvProductionKwh,
+            yearlyConsumptionKwh,
+            storageKwh: recommendedStorageKwh,
+          })
+        : null;
+
+    const yearlySavingsLow = netBillingSavingsDetails
+      ? netBillingSavingsDetails.low
+      : yearlyBill * savingsRate.low;
+    const yearlySavingsHigh = netBillingSavingsDetails
+      ? netBillingSavingsDetails.high
+      : yearlyBill * savingsRate.high;
 
     const baseCalculatorPriceWithoutSellerMarkup =
       hasPv === "yes"
@@ -700,6 +772,7 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
       shouldRecommendPvExpansion,
       pvExpansionStorageKwh,
       pvExpansionPriceRange,
+      netBillingSavingsDetails,
       yearlySavingsLow,
       yearlySavingsHigh,
       savingsRateLow: savingsRate.low,
@@ -777,6 +850,11 @@ const canSubmitLead = Boolean(
             billAmount,
             yearlyBill,
             yearlyConsumptionKwh,
+            estimatedGridConsumptionKwh,
+            estimatedPvProductionKwh,
+            estimatedSelfConsumedPvKwh,
+            estimatedExportedPvKwh,
+            baseAutoconsumptionRate,
             tariff,
             priorities,
           },
@@ -792,6 +870,7 @@ const canSubmitLead = Boolean(
             pvExpansionPriceHigh: result.pvExpansionPriceRange[1],
             yearlySavingsLow: result.yearlySavingsLow,
             yearlySavingsHigh: result.yearlySavingsHigh,
+            netBillingSavingsDetails: result.netBillingSavingsDetails,
             priceLow: result.priceLow,
             priceHigh: result.priceHigh,
             subsidyEstimate: result.subsidyEstimate,
@@ -908,7 +987,7 @@ const canSubmitLead = Boolean(
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Twój wstępny wynik</p>
                   <h2 className="mt-4 text-3xl font-bold">
-                    {hasPv === "yes" ? "Magazyn energii może mieć sens" : "PV + magazyn energii może mieć sens"}
+                    {hasPv === "yes" ? "Magazyn energii może mieć sens" : "Fotowoltaika i magazyn energii mogą mieć sens"}
                   </h2>
                 </div>
 
@@ -920,25 +999,36 @@ const canSubmitLead = Boolean(
                     <p className="mt-1 text-2xl font-bold">{Math.round(yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh</p>
                     {hasPv === "yes" && result.estimatedPvProductionKwh > 0 && (
                       <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        W tym około {Math.round(yearlyConsumptionKwh - result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh z rachunku oraz około {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh produkcji z obecnej PV.
+                        W tym około {Math.round(estimatedGridConsumptionKwh).toLocaleString("pl-PL")} kWh kupione z sieci oraz około {Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh zużyte bezpośrednio z obecnej instalacji fotowoltaicznej. Około {Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh traktujemy jako nadwyżkę oddaną do sieci.
                       </p>
                     )}
                   </div>
                   {hasPv === "yes" && (
                     <div className={resultCardClass}>
-                      <p className={`text-sm ${mutedTextClass}`}>Twoja obecna instalacja PV</p>
+                      <p className={`text-sm ${mutedTextClass}`}>Twoja obecna instalacja fotowoltaiczna</p>
                       <p className="mt-1 text-2xl font-bold">
                         {pvPower ? `${pvPower} kWp` : "moc niepodana"} · {settlementSystem === "net_billing" ? "net-billing" : settlementSystem === "net_metering" ? "net-metering" : "system nieznany"}
                       </p>
                       <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        Szacowana produkcja PV: {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh/rok
+                        Szacowana produkcja z fotowoltaiki: {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh/rok
                       </p>
                       <p className={`mt-1 text-sm ${mutedTextClass}`}>
-                        Pokrycie zapotrzebowania: {result.coveragePercent}%
+                        Szacowana autokonsumpcja bez magazynu: {Math.round(baseAutoconsumptionRate * 100)}% ({Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh/rok)
+                      </p>
+                      <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>
+                        Twoja instalacja fotowoltaiczna produkuje około {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh energii rocznie, co odpowiada około {result.coveragePercent}% rocznego zużycia energii w domu.
+                      </p>
+
+                      <p className={`mt-2 text-sm leading-6 ${mutedTextClass}`}>
+                        Obecnie wykorzystujesz bezpośrednio około {Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh ({Math.round(baseAutoconsumptionRate * 100)}%) tej energii, a pozostałe około {Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh trafia do sieci.
+                      </p>
+
+                      <p className={`mt-2 text-sm font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
+                        To właśnie ten obszar może poprawić magazyn energii, zwiększając wykorzystanie własnej produkcji zamiast oddawania jej do sieci.
                       </p>
                       {result.shouldRecommendPvExpansion && (
                         <p className={`mt-2 text-sm font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
-                          Obecna PV pokrywa mniej niż 70% szacowanego zapotrzebowania — warto sprawdzić wariant z rozbudową fotowoltaiki.
+                          Obecna instalacja fotowoltaiczna pokrywa mniej niż 70% szacowanego zapotrzebowania — warto sprawdzić wariant z rozbudową instalacji.
                         </p>
                       )}
                     </div>
@@ -951,7 +1041,7 @@ const canSubmitLead = Boolean(
                   )}
                   {hasPv === "no" && (
                     <div className={resultCardClass}>
-                      <p className={`text-sm ${mutedTextClass}`}>Sugerowana moc PV</p>
+                      <p className={`text-sm ${mutedTextClass}`}>Sugerowana moc instalacji fotowoltaicznej</p>
                       <p className="mt-1 text-2xl font-bold">około {result.suggestedPvKw} kWp</p>
                     </div>
                   )}
@@ -964,9 +1054,22 @@ const canSubmitLead = Boolean(
                     <p className="mt-1 text-2xl font-bold">
                       {formatMoney(result.yearlySavingsLow)} – {formatMoney(result.yearlySavingsHigh)} / rok
                     </p>
-                    <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                      To nawet około {Math.round(result.savingsRateLow * 100)}–{Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.
-                    </p>
+
+                    {result.netBillingSavingsDetails ? (
+                      <p className={`mt-2 text-sm ${mutedTextClass}`}>
+                        Dla net-billingu przyjęliśmy około 20% autokonsumpcji bez magazynu energii oraz około {Math.round(result.netBillingSavingsDetails.autoconsumptionRateWithStorage * 100)}% autokonsumpcji z zastosowaniem magazynu energii i HEMS. Korzyść wynika z tego, że zamiast sprzedawać energię po około {NET_BILLING_EXPORT_PRICE_PER_KWH.toLocaleString("pl-PL", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })} zł/kWh, a następnie kupować ją po około {ENERGY_PRICE_PER_KWH.toLocaleString("pl-PL", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })} zł/kWh, zużywasz większą część własnej energii na potrzeby domu.
+                      </p>
+                    ) : (
+                      <p className={`mt-2 text-sm ${mutedTextClass}`}>
+                        To nawet około {Math.round(result.savingsRateLow * 100)}–{Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.
+                      </p>
+                    )}
                   </div>
                   <div className={resultCardClass}>
                     <p className={`text-sm ${mutedTextClass}`}>Orientacyjny koszt inwestycji</p>
@@ -1018,7 +1121,7 @@ const canSubmitLead = Boolean(
                       Twoja obecna instalacja fotowoltaiczna produkuje około {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh rocznie, podczas gdy całkowite zużycie energii szacujemy na około {Math.round(yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh rocznie.
                     </p>
                     <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>
-                      Sam magazyn energii pomoże lepiej wykorzystać energię z obecnej instalacji PV, ale nie zwiększy ilości produkowanej energii. Przy takim profilu warto porównać sam magazyn z wariantem PV + magazyn.
+                      Sam magazyn energii pomoże lepiej wykorzystać energię z obecnej instalacji fotowoltaicznej, ale nie zwiększy ilości produkowanej energii. Przy takim profilu warto porównać sam magazyn z wariantem rozbudowy instalacji fotowoltaicznej wraz z magazynem energii.
                     </p>
                     <div className="mt-5 grid gap-3 md:grid-cols-2">
                       <div className={resultCardClass}>
@@ -1029,7 +1132,7 @@ const canSubmitLead = Boolean(
                       </div>
                       <div className={resultCardClass}>
                         <p className={`text-sm ${mutedTextClass}`}>Wariant B</p>
-                        <p className="mt-1 text-lg font-bold">PV + magazyn energii</p>
+                        <p className="mt-1 text-lg font-bold">Fotowoltaika + magazyn energii</p>
                         <p className={`mt-2 text-sm ${mutedTextClass}`}>około {result.suggestedPvKw} kWp + {result.pvExpansionStorageKwh} kWh</p>
                         <p className="mt-2 font-bold">{formatMoney(result.pvExpansionPriceRange[0])} – {formatMoney(result.pvExpansionPriceRange[1])}</p>
                       </div>
@@ -1192,7 +1295,7 @@ const canSubmitLead = Boolean(
                         onPointerUp={() => selectHasPv("yes")}
                         className={optionButtonClass(hasPv === "yes")}
                       >
-                        <span className="block text-lg font-bold">Tak, ale chcę dobrać do niej magazyn energii</span>
+                        <span className="block text-lg font-bold">Tak, mam instalację fotowoltaiczną i chcę dobrać do niej magazyn energii</span>
                         <span className={`mt-1 block text-sm ${mutedTextClass}`}>Sprawdzimy pojemność magazynu, oszczędności i możliwą dotację.</span>
                       </button>
                       <button
@@ -1200,8 +1303,8 @@ const canSubmitLead = Boolean(
                         onPointerUp={() => selectHasPv("no")}
                         className={optionButtonClass(hasPv === "no")}
                       >
-                        <span className="block text-lg font-bold">Nie, ale chcę mieć instalację wraz z magazynem</span>
-                        <span className={`mt-1 block text-sm ${mutedTextClass}`}>Oszacujemy moc instalacji PV i magazynu energii na podstawie Twojego zużycia.</span>
+                        <span className="block text-lg font-bold">Nie, ale chcę mieć fotowoltaikę wraz z magazynem energii</span>
+                        <span className={`mt-1 block text-sm ${mutedTextClass}`}>Oszacujemy moc instalacji fotowoltaicznej i magazynu energii na podstawie Twojego zużycia.</span>
                       </button>
                     </div>
                   </div>
@@ -1214,7 +1317,7 @@ const canSubmitLead = Boolean(
 
                     <div className="mt-5 grid gap-4">
                       <label className="block">
-                        <span className={labelClass}>Moc obecnej instalacji PV</span>
+                        <span className={labelClass}>Moc obecnej instalacji fotowoltaicznej</span>
                         <div className="mt-2 flex items-center gap-3">
                           <input
                             value={pvPower}
