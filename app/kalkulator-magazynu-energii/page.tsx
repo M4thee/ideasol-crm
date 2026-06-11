@@ -3,6 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Script from "next/script";
 
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (
+        element: HTMLElement,
+        options: {
+          sitekey: string;
+          callback: (token: string) => void;
+          "expired-callback": () => void;
+        }
+      ) => string;
+      reset: (widgetId?: string) => void;
+    };
+  }
+}
+
 type HasPv = "yes" | "no" | null;
 type Tariff = "G11" | "G12" | "G13" | "other" | "unknown";
 type BillMode = "monthly" | "yearly";
@@ -285,6 +301,8 @@ const [leadSubmitStatus, setLeadSubmitStatus] =
 const [turnstileToken, setTurnstileToken] = useState("");
 const [honeypot, setHoneypot] = useState("");
 const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+const turnstileRef = useRef<HTMLDivElement | null>(null);
+const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
 
   useEffect(() => {
     const savedThemeMode = window.localStorage.getItem("energyStorageCalculatorTheme") as ThemeMode | null;
@@ -308,23 +326,22 @@ const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
   }, []);
 
   useEffect(() => {
-    const handleSuccess = (event: Event) => {
-      const customEvent = event as CustomEvent<string>;
-      setTurnstileToken(customEvent.detail || "");
-    };
+    if (!turnstileSiteKey || !isTurnstileLoaded || !turnstileRef.current || !window.turnstile) {
+      return;
+    }
 
-    const handleExpired = () => {
-      setTurnstileToken("");
-    };
+    turnstileRef.current.innerHTML = "";
 
-    window.addEventListener("turnstile-success", handleSuccess);
-    window.addEventListener("turnstile-expired", handleExpired);
-
-    return () => {
-      window.removeEventListener("turnstile-success", handleSuccess);
-      window.removeEventListener("turnstile-expired", handleExpired);
-    };
-  }, []);
+    window.turnstile.render(turnstileRef.current, {
+      sitekey: turnstileSiteKey,
+      callback: (token: string) => {
+        setTurnstileToken(token);
+      },
+      "expired-callback": () => {
+        setTurnstileToken("");
+      },
+    });
+  }, [turnstileSiteKey, isTurnstileLoaded]);
 
   function changeThemeMode(nextThemeMode: ThemeMode) {
     setThemeMode(nextThemeMode);
@@ -1115,12 +1132,7 @@ const canSubmitLead = Boolean(
 
                   <div className="mt-4 flex justify-center">
                     {turnstileSiteKey ? (
-                      <div
-                        className="cf-turnstile"
-                        data-sitekey={turnstileSiteKey}
-                        data-callback="onTurnstileSuccess"
-                        data-expired-callback="onTurnstileExpired"
-                      />
+                      <div ref={turnstileRef} />
                     ) : (
                       <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                         Brak konfiguracji Turnstile (NEXT_PUBLIC_TURNSTILE_SITE_KEY).
@@ -1370,22 +1382,10 @@ const canSubmitLead = Boolean(
         )}
       </div>
       <Script
-        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-        async
-        defer
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        strategy="afterInteractive"
+        onLoad={() => setIsTurnstileLoaded(true)}
       />
-
-      <Script id="turnstile-callbacks">
-        {`
-          window.onTurnstileSuccess = function(token) {
-            window.dispatchEvent(new CustomEvent('turnstile-success', { detail: token }));
-          };
-
-          window.onTurnstileExpired = function() {
-            window.dispatchEvent(new CustomEvent('turnstile-expired'));
-          };
-        `}
-      </Script>
       <style jsx global>{`
         @keyframes fadeInUp {
           from {
