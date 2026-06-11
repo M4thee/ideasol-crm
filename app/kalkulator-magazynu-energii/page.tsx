@@ -326,10 +326,15 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
   }, []);
 
   useEffect(() => {
+    if (!showResult) {
+      return;
+    }
+
     if (!turnstileSiteKey || !isTurnstileLoaded || !turnstileRef.current || !window.turnstile) {
       return;
     }
 
+    setTurnstileToken("");
     turnstileRef.current.innerHTML = "";
 
     window.turnstile.render(turnstileRef.current, {
@@ -341,7 +346,7 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
         setTurnstileToken("");
       },
     });
-  }, [turnstileSiteKey, isTurnstileLoaded]);
+  }, [turnstileSiteKey, isTurnstileLoaded, showResult]);
 
   function changeThemeMode(nextThemeMode: ThemeMode) {
     setThemeMode(nextThemeMode);
