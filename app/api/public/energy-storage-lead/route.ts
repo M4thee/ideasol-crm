@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
 import {
@@ -20,6 +21,8 @@ type LeadPayload = {
     postalCode?: string;
     phone?: string;
     email?: string | null;
+    turnstileToken?: string | null;
+    honeypot?: string | null;
   };
   answers?: {
     hasPv?: "yes" | "no" | null;
@@ -47,10 +50,117 @@ type LeadPayload = {
   };
 };
 
+type LeadAnswers = NonNullable<LeadPayload["answers"]>;
+
 type AdvisorInfo = {
   displayName: string | null;
   email: string | null;
 };
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://crm.ideasol.pl",
+  "https://www.ideasol.pl",
+  "https://ideasol.pl",
+];
+
+function getAllowedOrigins() {
+  const configuredOrigins = process.env.PUBLIC_LEAD_ALLOWED_ORIGINS?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) ?? [];
+
+  return Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...configuredOrigins]));
+}
+
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get("origin");
+  const allowedOrigins = getAllowedOrigins();
+  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin",
+  };
+}
+
+export async function OPTIONS(request: Request) {
+  return new NextResponse(null, {
+    status: 204,
+    headers: getCorsHeaders(request),
+  });
+}
+
+async function findRecentDuplicateLead(phone: string, email: string | null) {
+  const normalizedPhone = phone.replace(/\D/g, "");
+  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+  let query = supabaseAdmin
+    .from("clients")
+    .select("id, phone, email, created_at")
+    .gte("created_at", since)
+    .limit(1);
+
+  if (email) {
+    query = query.or(`phone.ilike.%${normalizedPhone}%,email.ilike.${email}`);
+  } else {
+    query = query.ilike("phone", `%${normalizedPhone}%`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.warn("energy-storage-lead duplicate check failed", error);
+    return null;
+  }
+
+  return data?.[0] ?? null;
+}
+
+async function verifyTurnstileToken(token: string, request: Request) {
+  const secretKey = process.env.TURNSTILE_SECRET_KEY?.trim();
+
+  if (!secretKey) {
+    console.warn("energy-storage-lead Turnstile skipped - secret key not configured");
+    return true;
+  }
+
+  if (!token) {
+    return false;
+  }
+
+  const formData = new FormData();
+  formData.append("secret", secretKey);
+  formData.append("response", token);
+
+  const ip =
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+
+  if (ip) {
+    formData.append("remoteip", ip);
+  }
+
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    console.error("energy-storage-lead Turnstile verification HTTP error", response.status);
+    return false;
+  }
+
+  const result = (await response.json()) as { success?: boolean; [key: string]: unknown };
+
+  if (!result.success) {
+    console.warn("energy-storage-lead Turnstile verification failed", result);
+  }
+
+  return Boolean(result.success);
+}
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -59,6 +169,88 @@ function cleanText(value: unknown) {
 function formatMoney(value: unknown) {
   const numberValue = typeof value === "number" ? value : 0;
   return `${Math.round(numberValue).toLocaleString("pl-PL")} zł`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatSettlementSystem(value: LeadAnswers["settlementSystem"]) {
+  if (value === "net_billing") return "Net-billing";
+  if (value === "net_metering") return "Net-metering";
+  return "Nie wiem / brak danych";
+}
+
+function formatHasPv(value: LeadAnswers["hasPv"]) {
+  if (value === "yes") return "TAK";
+  if (value === "no") return "NIE";
+  return "Brak danych";
+}
+
+function formatPaybackYears(low: unknown, high: unknown) {
+  const lowValue = typeof low === "number" ? low : null;
+  const highValue = typeof high === "number" ? high : null;
+
+  if (lowValue === null && highValue === null) return "Brak danych";
+  if (lowValue !== null && highValue !== null && lowValue === highValue) return `około ${lowValue} lat`;
+  if (lowValue !== null && highValue !== null) return `${lowValue}-${highValue} lat`;
+  return `${lowValue ?? highValue} lat`;
+}
+
+function buildHumanRecommendation(payload: LeadPayload) {
+  const result = payload.result ?? {};
+  const answers = payload.answers ?? {};
+  const storageLabel = result.recommendedStorageKwh ? `${result.recommendedStorageKwh} kWh` : "magazyn energii";
+  const pvLabel = result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : null;
+
+  const mainRecommendation = answers.hasPv === "no" && pvLabel
+    ? `Instalacja PV ${pvLabel} + magazyn energii ${storageLabel}`
+    : `Magazyn energii ${storageLabel}`;
+
+  if (result.recommendationType === "not_recommended") {
+    return {
+      title: mainRecommendation,
+      description:
+        "W obecnej sytuacji magazyn energii może nie przynieść znaczących oszczędności wyłącznie finansowych, ale nadal może być interesującym rozwiązaniem, jeżeli zależy Panu/Pani na większej autokonsumpcji, zasilaniu awaryjnym lub lepszym wykorzystaniu instalacji fotowoltaicznej.",
+    };
+  }
+
+  if (result.recommendationType === "consider") {
+    return {
+      title: mainRecommendation,
+      description:
+        "Wynik wskazuje, że magazyn energii może mieć sens, szczególnie gdy oprócz oszczędności ważne są dla Pana/Pani bezpieczeństwo energetyczne, backup lub lepsze wykorzystanie energii z fotowoltaiki.",
+    };
+  }
+
+  return {
+    title: mainRecommendation,
+    description:
+      "Na podstawie podanych danych magazyn energii wygląda na rozwiązanie warte dalszej analizy. Dokładny dobór powinien uwzględniać profil zużycia energii, parametry instalacji oraz możliwości uzyskania dotacji.",
+  };
+}
+
+function buildEmailMetricCard(label: string, value: string, accentColor: string) {
+  return `
+    <td style="width:33.33%;padding:8px;vertical-align:top;">
+      <div style="border:1px solid #E5E7EB;border-radius:18px;padding:16px;background:#FFFFFF;min-height:92px;">
+        <div style="font-size:12px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.08em;">${escapeHtml(label)}</div>
+        <div style="margin-top:10px;font-size:20px;font-weight:800;color:${accentColor};line-height:1.2;">${escapeHtml(value)}</div>
+      </div>
+    </td>`;
+}
+
+function buildEmailTableRow(label: string, value: string) {
+  return `
+    <tr>
+      <td style="padding:11px 12px;border-bottom:1px solid #E5E7EB;color:#64748B;font-size:14px;">${escapeHtml(label)}</td>
+      <td style="padding:11px 12px;border-bottom:1px solid #E5E7EB;color:#0F172A;font-size:14px;font-weight:700;text-align:right;">${escapeHtml(value)}</td>
+    </tr>`;
 }
 
 function normalizeProvinceName(value: string | null | undefined) {
@@ -331,6 +523,168 @@ function buildAnalysisNote(
 }
 
 
+async function sendLeadResultEmail(payload: LeadPayload) {
+  const email = cleanText(payload.contact?.email);
+
+  if (!email) {
+    return;
+  }
+
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    console.warn("energy-storage-lead email skipped - SMTP not configured");
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    requireTLS: smtpPort === 587,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+  });
+
+  const contact = payload.contact ?? {};
+  const answers = payload.answers ?? {};
+  const result = payload.result ?? {};
+  const recommendation = buildHumanRecommendation(payload);
+  const firstName = cleanText(contact.firstName);
+  const greeting = firstName ? `Dzień dobry, ${escapeHtml(firstName)}.` : "Dzień dobry.";
+  const landingName = process.env.KALKULATOR_ME_LANDING_NAME || "IdeaSol";
+  const landingUrl = process.env.KALKULATOR_ME_LANDING_URL || "https://www.ideasol.pl";
+  const logoUrl = process.env.KALKULATOR_ME_LOGO_URL || "https://www.ideasol.pl/logo.png";
+  const priorities = answers.priorities?.length ? answers.priorities.join(", ") : "Brak danych";
+  const yearlyBillLabel = typeof answers.yearlyBill === "number" ? formatMoney(answers.yearlyBill) : "Brak danych";
+  const yearlyConsumptionLabel = typeof answers.yearlyConsumptionKwh === "number"
+    ? `${Math.round(answers.yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh`
+    : "Brak danych";
+
+  const metricsHtml = [
+    buildEmailMetricCard(
+      "Szacowana korzyść",
+      `${formatMoney(result.yearlySavingsLow)} - ${formatMoney(result.yearlySavingsHigh)} / rok`,
+      "#059669"
+    ),
+    buildEmailMetricCard(
+      "Koszt inwestycji",
+      `${formatMoney(result.priceLow)} - ${formatMoney(result.priceHigh)}`,
+      "#EA580C"
+    ),
+    buildEmailMetricCard(
+      "Możliwa dotacja",
+      `do ${formatMoney(result.subsidyEstimate)}`,
+      "#0284C7"
+    ),
+  ].join("");
+
+  const answersRowsHtml = [
+    buildEmailTableRow("Posiada PV", formatHasPv(answers.hasPv)),
+    buildEmailTableRow("Moc PV", answers.pvPower ? `${answers.pvPower} kWp` : "Brak / nie dotyczy"),
+    buildEmailTableRow("System rozliczeń", formatSettlementSystem(answers.settlementSystem)),
+    buildEmailTableRow("Taryfa", answers.tariff || "Brak danych"),
+    buildEmailTableRow("Rachunek", `${answers.billAmount || "Brak"} ${answers.billMode === "yearly" ? "zł rocznie" : "zł miesięcznie"}`),
+    buildEmailTableRow("Szacowany roczny koszt energii", yearlyBillLabel),
+    buildEmailTableRow("Szacowane roczne zużycie", yearlyConsumptionLabel),
+    buildEmailTableRow("Priorytety", priorities),
+  ].join("");
+
+  const html = `
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charSet="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wynik analizy magazynu energii</title>
+  </head>
+  <body style="margin:0;padding:0;background:#F1F5F9;font-family:Arial,Helvetica,sans-serif;color:#0F172A;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      Twój wynik z kalkulatora magazynów energii jest gotowy.
+    </div>
+
+    <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="background:#F1F5F9;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="max-width:720px;background:#FFFFFF;border-radius:28px;overflow:hidden;border:1px solid #E2E8F0;box-shadow:0 18px 50px rgba(15,23,42,0.10);">
+            <tr>
+              <td style="padding:28px;background:linear-gradient(135deg,#061524 0%,#0F172A 58%,#164E63 100%);color:#FFFFFF;">
+                <table role="presentation" width="100%" cellPadding="0" cellSpacing="0">
+                  <tr>
+                    <td style="vertical-align:middle;">
+                      <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(landingName)}" style="max-height:42px;max-width:170px;display:block;margin-bottom:24px;" />
+                      <div style="display:inline-block;padding:8px 12px;border-radius:999px;background:rgba(34,211,238,0.14);color:#A5F3FC;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">
+                        Raport z kalkulatora
+                      </div>
+                      <h1 style="margin:18px 0 0 0;font-size:30px;line-height:1.15;letter-spacing:-0.03em;">Twój wynik jest gotowy</h1>
+                      <p style="margin:14px 0 0 0;color:#CBD5E1;font-size:16px;line-height:1.6;">${greeting} Poniżej znajduje się podsumowanie wstępnej analizy magazynu energii przygotowane na podstawie podanych danych.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:28px;">
+                <div style="border-radius:24px;background:linear-gradient(135deg,#ECFEFF 0%,#F7FEE7 100%);border:1px solid #BAE6FD;padding:22px;">
+                  <div style="font-size:12px;font-weight:800;color:#0369A1;text-transform:uppercase;letter-spacing:0.10em;">Rekomendacja</div>
+                  <div style="margin-top:10px;font-size:28px;font-weight:900;line-height:1.15;color:#0F172A;">${escapeHtml(recommendation.title)}</div>
+                  <p style="margin:14px 0 0 0;color:#334155;font-size:15px;line-height:1.65;">${escapeHtml(recommendation.description)}</p>
+                  <div style="margin-top:16px;color:#475569;font-size:14px;line-height:1.6;">
+                    <strong>Szacowany okres zwrotu:</strong> ${escapeHtml(formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh))}
+                  </div>
+                </div>
+
+                <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="margin-top:18px;">
+                  <tr>${metricsHtml}</tr>
+                </table>
+
+                <div style="margin-top:22px;border:1px solid #E5E7EB;border-radius:22px;overflow:hidden;background:#FFFFFF;">
+                  <div style="padding:16px 18px;background:#F8FAFC;border-bottom:1px solid #E5E7EB;font-weight:900;font-size:16px;color:#0F172A;">Twoje odpowiedzi</div>
+                  <table role="presentation" width="100%" cellPadding="0" cellSpacing="0">
+                    ${answersRowsHtml}
+                  </table>
+                </div>
+
+                <div style="margin-top:22px;border-radius:22px;background:#F8FAFC;border:1px solid #E2E8F0;padding:20px;">
+                  <h2 style="margin:0;font-size:20px;color:#0F172A;">Co dalej?</h2>
+                  <p style="margin:12px 0 0 0;color:#334155;font-size:15px;line-height:1.7;">
+                    Otrzymaliśmy zgłoszenie wraz z prośbą o kontakt telefoniczny. Doradca przeanalizuje wynik i skontaktuje się, aby potwierdzić dobór magazynu energii, omówić możliwości uzyskania dotacji oraz odpowiedzieć na dodatkowe pytania.
+                  </p>
+                </div>
+
+                <div style="margin-top:24px;text-align:center;">
+                  <a href="${escapeHtml(landingUrl)}" style="display:inline-block;background:#0F172A;color:#FFFFFF;text-decoration:none;padding:14px 22px;border-radius:16px;font-weight:900;">
+                    Poznaj więcej rozwiązań
+                  </a>
+                </div>
+
+                <p style="margin:24px 0 0 0;color:#64748B;font-size:12px;line-height:1.6;text-align:center;">
+                  Wynik ma charakter orientacyjny i nie stanowi oferty handlowej. Dokładny dobór magazynu energii wymaga analizy profilu zużycia, warunków technicznych oraz aktualnych zasad dofinansowania.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+
+  await transporter.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_FROM || smtpUser,
+    to: email,
+    subject: "Twój wynik z kalkulatora magazynu energii",
+    html,
+  });
+}
+
+
 async function insertClient(payload: LeadPayload) {
   const contact = payload.contact ?? {};
   const firstName = cleanText(contact.firstName);
@@ -496,9 +850,42 @@ export async function POST(request: Request) {
     const firstName = cleanText(contact.firstName);
     const phone = cleanText(contact.phone);
     const postalCode = cleanText(contact.postalCode);
+    const turnstileToken = cleanText(contact.turnstileToken);
+    const honeypot = cleanText(contact.honeypot);
+    const email = cleanText(contact.email).toLowerCase() || null;
+
+    if (honeypot) {
+      console.warn("energy-storage-lead honeypot triggered");
+      return NextResponse.json(
+        { ok: true, skipped: true },
+        { headers: getCorsHeaders(request) }
+      );
+    }
 
     if (!firstName || phone.replace(/\D/g, "").length < 9 || !/^\d{2}-\d{3}$/.test(postalCode)) {
-      return NextResponse.json({ error: "Nieprawidłowe dane kontaktowe." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Nieprawidłowe dane kontaktowe." },
+        { status: 400, headers: getCorsHeaders(request) }
+      );
+    }
+
+    const isTurnstileValid = await verifyTurnstileToken(turnstileToken, request);
+
+    if (!isTurnstileValid) {
+      return NextResponse.json(
+        { error: "Nie udało się zweryfikować zabezpieczenia formularza." },
+        { status: 403, headers: getCorsHeaders(request) }
+      );
+    }
+
+    const duplicateLead = await findRecentDuplicateLead(phone, email);
+
+    if (duplicateLead) {
+      console.warn("energy-storage-lead duplicate skipped", duplicateLead.id);
+      return NextResponse.json(
+        { ok: true, duplicate: true, clientId: duplicateLead.id },
+        { headers: getCorsHeaders(request) }
+      );
     }
 
     const clientResult = await insertClient(payload);
@@ -535,10 +922,21 @@ export async function POST(request: Request) {
       clientPhone: phone,
       postalCode,
     });
+    try {
+      await sendLeadResultEmail(payload);
+    } catch (error) {
+      console.error("energy-storage-lead email failed", error);
+    }
 
-    return NextResponse.json({ ok: true, clientId: clientResult.clientId });
+    return NextResponse.json(
+      { ok: true, clientId: clientResult.clientId },
+      { headers: getCorsHeaders(request) }
+    );
   } catch (error) {
     console.error("energy-storage-lead error", error);
-    return NextResponse.json({ error: "Nie udało się zapisać zgłoszenia." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Nie udało się zapisać zgłoszenia." },
+      { status: 500, headers: getCorsHeaders(request) }
+    );
   }
 }
