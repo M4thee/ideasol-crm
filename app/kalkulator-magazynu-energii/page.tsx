@@ -242,7 +242,7 @@ function getRecommendation(params: {
   description: string;
 } {
   const { paybackYearsLow, paybackYearsHigh, priorities } = params;
-  const paybackYearsForRecommendation = Math.round((paybackYearsLow + paybackYearsHigh) / 2);
+  const paybackYearsForRecommendation = paybackYearsLow;
   const caresAboutSavings = priorities.includes("Niższe rachunki");
   const caresAboutBackup = priorities.includes("Awaryjne zasilanie domu w razie awarii");
   const caresAboutEfficiency = priorities.includes("Zwiększenie wydajności mojej instalacji (mniej wyłączeń)");
@@ -924,15 +924,33 @@ const canSubmitLead = Boolean(
           <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-cyan-400/25 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-32 left-10 h-72 w-72 rounded-full bg-lime-300/20 blur-3xl" />
           <div className="relative max-w-3xl">
-            <p className="mb-4 inline-flex rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-cyan-200 backdrop-blur">
-              Kalkulator IdeaSol
+            <p
+              className={`mb-4 inline-flex rounded-full px-4 py-2 text-sm font-semibold backdrop-blur ${
+                isDarkMode
+                  ? "border border-white/15 bg-white/10 text-cyan-200"
+                  : "bg-white/70 text-[#1F9ABF]"
+              }`}
+            >
+              Niezależna analiza opłacalności magazynu energii
             </p>
             <h1 className="text-3xl font-bold tracking-tight sm:text-5xl">
-              Czy magazyn energii ma sens w Twoim domu?
+              Czy magazyn energii naprawdę się opłaca?
             </h1>
             <p className={`mt-5 text-lg leading-8 ${isDarkMode ? "text-[#EDE6E0]" : "text-slate-600"}`}>
-              Odpowiedz na kilka pytań i sprawdź potencjalne oszczędności, sugerowaną pojemność magazynu energii oraz możliwą dotację.
+              Dla jednych domów magazyn energii może znacząco obniżyć rachunki za prąd i zwiększyć niezależność energetyczną. W innych przypadkach większy efekt może dać rozbudowa instalacji fotowoltaicznej albo zmiana sposobu wykorzystania energii.
+              <br />
+              <br />
+              Odpowiedz na kilka prostych pytań, a kalkulator oszacuje potencjalne korzyści, sugerowaną pojemność magazynu energii oraz możliwy okres zwrotu inwestycji.
             </p>
+            <div className={`mt-5 rounded-2xl border p-4 text-sm leading-6 ${
+              isDarkMode
+                ? "border-cyan-300/20 bg-cyan-300/10 text-cyan-50"
+                : "border-white/20 bg-white/15 text-slate-700 backdrop-blur-xl"
+            }`}>
+              <strong>Wynik może być zupełnie inny, niż zakładasz.</strong>
+              <br />
+              W ciągu kilkudziesięciu sekund sprawdzisz, czy magazyn energii ma szansę być opłacalny w Twoim domu oraz jaki wariant może mieć największy sens.
+            </div>
             <a
               href="#analiza"
               onClick={(event) => {
@@ -950,8 +968,16 @@ const canSubmitLead = Boolean(
         <section className="grid gap-6">
           <div id="analiza" ref={formRef} className={panelClass}>
             {isAnalyzing ? (
-              <div className="flex min-h-[520px] flex-col justify-center rounded-[28px] bg-slate-950 p-6 text-white sm:p-8">
-                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Analiza</p>
+              <div
+                className={`flex min-h-[520px] flex-col justify-center rounded-[28px] p-6 sm:p-8 ${
+                  isDarkMode
+                    ? "bg-slate-950 text-white"
+                    : "border border-slate-200 bg-white text-slate-950 shadow-xl shadow-slate-950/10"
+                }`}
+              >
+                <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${isDarkMode ? "text-cyan-200" : "text-cyan-600"}`}>
+                  Analiza
+                </p>
                 <h2 className="mt-4 text-3xl font-bold">Liczymy potencjał Twojego domu</h2>
                 <div className="mt-8 space-y-3">
                   {analysisSteps.map((item, index) => {
@@ -963,20 +989,42 @@ const canSubmitLead = Boolean(
                         key={item}
                         className={`flex items-center gap-3 rounded-[20px] border p-4 transition ${
                           isDone
-                            ? "border-cyan-300/30 bg-cyan-300/15"
+                            ? isDarkMode
+                              ? "border-cyan-300/30 bg-cyan-300/15"
+                              : "border-cyan-200 bg-cyan-50"
                             : isCurrent
-                              ? "border-white/20 bg-white/10"
-                              : "border-white/10 bg-white/5"
+                              ? isDarkMode
+                                ? "border-white/20 bg-white/10"
+                                : "border-slate-300 bg-slate-100"
+                              : isDarkMode
+                                ? "border-white/10 bg-white/5"
+                                : "border-slate-200 bg-white"
                         }`}
                       >
                         <span
                           className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${
-                            isDone ? "bg-cyan-300 text-slate-950" : "bg-white/10 text-white/60"
+                            isDone
+                              ? "bg-cyan-300 text-slate-950"
+                              : isDarkMode
+                                ? "bg-white/10 text-white/60"
+                                : "bg-slate-200 text-slate-500"
                           }`}
                         >
                           {isDone ? "✓" : index + 1}
                         </span>
-                        <span className={isDone ? "font-bold text-white" : "text-white/70"}>{item}</span>
+                        <span
+                          className={
+                            isDone
+                              ? isDarkMode
+                                ? "font-bold text-white"
+                                : "font-bold text-slate-950"
+                              : isDarkMode
+                                ? "text-white/70"
+                                : "text-slate-600"
+                          }
+                        >
+                          {item}
+                        </span>
                       </div>
                     );
                   })}
@@ -1085,11 +1133,11 @@ const canSubmitLead = Boolean(
                     <p className={`text-sm ${mutedTextClass}`}>Szacunkowy okres zwrotu inwestycji</p>
                     <p className="mt-1 text-2xl font-bold">
                       {result.paybackYearsLow === result.paybackYearsHigh
-                        ? `około ${result.paybackYearsLow} lat`
+                        ? `około ${result.paybackYearsLow} ${result.paybackYearsLow === 1 ? "rok" : result.paybackYearsLow >= 2 && result.paybackYearsLow <= 4 ? "lata" : "lat"}`
                         : `${result.paybackYearsLow}–${result.paybackYearsHigh} lat`}
                     </p>
                     <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                      Szacunek uwzględnia cenę inwestycji po dotacji oraz wzrost ceny energii o 11% rocznie.
+                      Szacunek opiera się na dolnych widełkach ceny inwestycji po dotacji oraz prognozowanym wzroście ceny energii o 11% rocznie.
                     </p>
                   </div>
                 </div>
@@ -1142,7 +1190,7 @@ const canSubmitLead = Boolean(
 
 
                 <div className={`rounded-[24px] border p-5 text-sm leading-6 ${isDarkMode ? "border-white/10 bg-white/5 text-[#D8CEC7]" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                  Wynik ma charakter orientacyjny i został przygotowany na podstawie podanych danych. Dokładna analiza uwzględnia dodatkowo profil zużycia energii, parametry instalacji fotowoltaicznej, warunki techniczne budynku oraz możliwości uzyskania dotacji.
+                  Wynik ma charakter orientacyjny i został przygotowany na podstawie danych podanych przez uytkownika, średnich cen zakupu i odsprzeday energii w Polsce oraz statystyk dotyczących historycznego wzrostu cen energii w Polsce. Dokładna analiza wymaga dodatkowo profil zużycia energii, parametry instalacji fotowoltaicznej, warunki techniczne budynku oraz możliwości uzyskania dotacji.
                 </div>
 
                 <div className={contactPanelClass}>
@@ -1334,17 +1382,22 @@ const canSubmitLead = Boolean(
                         <p className={labelClass}>W jakim systemie rozliczasz energię?</p>
                         <div className="mt-3 grid gap-3 sm:grid-cols-3">
                           {[
-                            ["net_billing", "Tzw. nowe zasady (net-billing)"],
-                            ["net_metering", "Tzw. stare zasady (net-metering)"],
-                            ["unknown", "Nie wiem"],
-                          ].map(([value, label]) => (
+                            ["net_billing", "net-billing", "tzw. nowe zasady"],
+                            ["net_metering", "net-metering", "tzw. stare zasady"],
+                            ["unknown", "Nie wiem", "sprawdzimy to później"],
+                          ].map(([value, label, subtitle]) => (
                             <button
                               key={value}
                               type="button"
                               onPointerUp={() => selectSettlementSystem(value as SettlementSystem)}
                               className={`${optionButtonClass(settlementSystem === value, "compact")} font-semibold`}
                             >
-                              {label}
+                              <span className="block">{label}</span>
+                              {subtitle && (
+                                <span className={`mt-1 block text-xs font-normal ${isDarkMode ? "text-white/60" : "text-slate-500"}`}>
+                                  {subtitle}
+                                </span>
+                              )}
                             </button>
                           ))}
                         </div>
