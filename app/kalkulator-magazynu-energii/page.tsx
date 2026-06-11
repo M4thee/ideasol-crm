@@ -32,7 +32,9 @@ type RecommendationType = "recommended" | "consider" | "not_recommended";
 const ENERGY_PRICE_PER_KWH = 1.15;
 const NET_BILLING_EXPORT_PRICE_PER_KWH = 0.27;
 const NET_BILLING_BASE_AUTOCONSUMPTION_RATE = 0.2;
-const NET_METERING_BASE_AUTOCONSUMPTION_RATE = 0.3;
+const NET_METERING_BASE_AUTOCONSUMPTION_RATE = 0.25;
+const NET_METERING_SMALL_INSTALLATION_RETURN_RATE = 0.8;
+const NET_METERING_LARGE_INSTALLATION_RETURN_RATE = 0.7;
 const STORAGE_ROUND_TRIP_EFFICIENCY = 0.9;
 
 function formatMoney(value: number) {
@@ -144,6 +146,7 @@ function getAutoconsumptionRateWithStorageAndHems(storageKwh: number) {
   return 0.88;
 }
 
+
 function getNetBillingStorageSavingsRange(params: {
   pvProductionKwh: number;
   yearlyConsumptionKwh: number;
@@ -180,6 +183,50 @@ function getNetBillingStorageSavingsRange(params: {
   };
 }
 
+function getNetMeteringStorageSavingsRange(params: {
+  pvProductionKwh: number;
+  yearlyConsumptionKwh: number;
+  storageKwh: number;
+  currentPvPowerKw: number;
+}) {
+  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh, currentPvPowerKw } = params;
+
+  const returnRate =
+    currentPvPowerKw > 10
+      ? NET_METERING_LARGE_INSTALLATION_RETURN_RATE
+      : NET_METERING_SMALL_INSTALLATION_RETURN_RATE;
+
+  const baseAutoconsumedKwh = Math.min(
+    pvProductionKwh * NET_METERING_BASE_AUTOCONSUMPTION_RATE,
+    yearlyConsumptionKwh
+  );
+
+  const autoconsumptionRateWithStorage = getAutoconsumptionRateWithStorageAndHems(storageKwh);
+
+  const autoconsumedWithStorageKwh = Math.min(
+    pvProductionKwh * autoconsumptionRateWithStorage,
+    yearlyConsumptionKwh
+  );
+
+  const additionalAutoconsumedKwh = Math.max(
+    0,
+    (autoconsumedWithStorageKwh - baseAutoconsumedKwh) * STORAGE_ROUND_TRIP_EFFICIENCY
+  );
+
+  const valueDifferencePerKwh = ENERGY_PRICE_PER_KWH * (1 - returnRate);
+  const expectedSavings = additionalAutoconsumedKwh * valueDifferencePerKwh;
+
+  return {
+    baseAutoconsumptionRate: NET_METERING_BASE_AUTOCONSUMPTION_RATE,
+    autoconsumptionRateWithStorage,
+    additionalAutoconsumedKwh,
+    returnRate,
+    valueDifferencePerKwh,
+    low: expectedSavings * 0.85,
+    high: expectedSavings * 1.15,
+  };
+}
+
 function getSavingsRateRange(params: {
   hasPv: HasPv;
   settlementSystem: SettlementSystem;
@@ -199,8 +246,8 @@ function getSavingsRateRange(params: {
     }
 
     if (settlementSystem === "net_metering") {
-      low -= 0.08;
-      high -= 0.1;
+      low -= 0.03;
+      high -= 0.04;
     }
   }
 
@@ -730,12 +777,26 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
           })
         : null;
 
+    const netMeteringSavingsDetails =
+      hasPv === "yes" && settlementSystem === "net_metering" && estimatedPvProductionKwh > 0
+        ? getNetMeteringStorageSavingsRange({
+            pvProductionKwh: estimatedPvProductionKwh,
+            yearlyConsumptionKwh,
+            storageKwh: recommendedStorageKwh,
+            currentPvPowerKw,
+          })
+        : null;
+
     const yearlySavingsLow = netBillingSavingsDetails
       ? netBillingSavingsDetails.low
-      : yearlyBill * savingsRate.low;
+      : netMeteringSavingsDetails
+        ? netMeteringSavingsDetails.low
+        : yearlyBill * savingsRate.low;
     const yearlySavingsHigh = netBillingSavingsDetails
       ? netBillingSavingsDetails.high
-      : yearlyBill * savingsRate.high;
+      : netMeteringSavingsDetails
+        ? netMeteringSavingsDetails.high
+        : yearlyBill * savingsRate.high;
 
     const baseCalculatorPriceWithoutSellerMarkup =
       hasPv === "yes"
@@ -773,6 +834,7 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
       pvExpansionStorageKwh,
       pvExpansionPriceRange,
       netBillingSavingsDetails,
+      netMeteringSavingsDetails,
       yearlySavingsLow,
       yearlySavingsHigh,
       savingsRateLow: savingsRate.low,
@@ -871,6 +933,7 @@ const canSubmitLead = Boolean(
             yearlySavingsLow: result.yearlySavingsLow,
             yearlySavingsHigh: result.yearlySavingsHigh,
             netBillingSavingsDetails: result.netBillingSavingsDetails,
+            netMeteringSavingsDetails: result.netMeteringSavingsDetails,
             priceLow: result.priceLow,
             priceHigh: result.priceHigh,
             subsidyEstimate: result.subsidyEstimate,
@@ -1115,7 +1178,9 @@ const canSubmitLead = Boolean(
                       </p>
                     ) : (
                       <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        To nawet około {Math.round(result.savingsRateLow * 100)}–{Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.
+                        {result.netMeteringSavingsDetails
+  ? `Dla net-meteringu przyjęliśmy około ${Math.round(result.netMeteringSavingsDetails.baseAutoconsumptionRate * 100)}% autokonsumpcji bez magazynu energii oraz około ${Math.round(result.netMeteringSavingsDetails.autoconsumptionRateWithStorage * 100)}% autokonsumpcji z zastosowaniem magazynu energii i HEMS. W systemie opustów za każdą 1 kWh oddaną do sieci możesz odebrać około ${Math.round(result.netMeteringSavingsDetails.returnRate * 100)}% energii, dlatego magazyn poprawia wynik głównie przez ograniczenie tej straty i zwiększenie zużycia energii na miejscu.`
+  : `To nawet około ${Math.round(result.savingsRateLow * 100)}–${Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.`}
                       </p>
                     )}
                   </div>
