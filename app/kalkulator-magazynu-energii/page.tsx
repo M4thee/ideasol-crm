@@ -284,6 +284,7 @@ const [leadSubmitStatus, setLeadSubmitStatus] =
   useState<"idle" | "success" | "error">("idle");
 const [turnstileToken, setTurnstileToken] = useState("");
 const [honeypot, setHoneypot] = useState("");
+const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
   useEffect(() => {
     const savedThemeMode = window.localStorage.getItem("energyStorageCalculatorTheme") as ThemeMode | null;
@@ -1113,13 +1114,24 @@ const canSubmitLead = Boolean(
                   </div>
 
                   <div className="mt-4 flex justify-center">
-                    <div
-                      className="cf-turnstile"
-                      data-sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
-                      data-callback="onTurnstileSuccess"
-                      data-expired-callback="onTurnstileExpired"
-                    />
+                    {turnstileSiteKey ? (
+                      <div
+                        className="cf-turnstile"
+                        data-sitekey={turnstileSiteKey}
+                        data-callback="onTurnstileSuccess"
+                        data-expired-callback="onTurnstileExpired"
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                        Brak konfiguracji Turnstile (NEXT_PUBLIC_TURNSTILE_SITE_KEY).
+                      </div>
+                    )}
                   </div>
+                  {!turnstileToken && (
+                    <p className={`mt-3 text-center text-xs ${mutedTextClass}`}>
+                      Potwierdź zabezpieczenie antyspamowe, aby wysłać zgłoszenie.
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={submitLead}
