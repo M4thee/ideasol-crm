@@ -163,19 +163,11 @@ export default function OfferForm({
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [existingPvAnswer, setExistingPvAnswer] = useState<"yes" | "no" | "">("");
-  const [showAddClientModal, setShowAddClientModal] = useState(false);
-  const [newClientFullName, setNewClientFullName] = useState("");
-  const [newClientPhone, setNewClientPhone] = useState("");
-  const [newClientEmail, setNewClientEmail] = useState("");
-  const [newClientCity, setNewClientCity] = useState("");
-  const [newClientSaving, setNewClientSaving] = useState(false);
-  const [newClientError, setNewClientError] = useState("");
 
   const [additionalServices, setAdditionalServices] = useState<CatalogAdditionalService[]>([]);
   const [showAdditionalServices, setShowAdditionalServices] = useState(false);
   const [additionalServicesStatus, setAdditionalServicesStatus] = useState("");
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-  const [preferredInverterType, setPreferredInverterType] = useState<"ongrid" | "hybrid">("ongrid");
   useEffect(() => {
     async function loadAdditionalServices() {
       const { data, error } = await supabase
@@ -375,67 +367,6 @@ export default function OfferForm({
     setClientSearch("");
     setIsClientDropdownOpen(false);
     setResult(null);
-  }
-
-  function openAddClientModalFromSearch() {
-    setNewClientFullName(clientSearch || clientName || "");
-    setNewClientPhone("");
-    setNewClientEmail("");
-    setNewClientCity("");
-    setNewClientError("");
-    setShowAddClientModal(true);
-  }
-
-  async function createClientFromCalculator() {
-    const trimmedName = newClientFullName.trim();
-    const trimmedPhone = newClientPhone.trim();
-    const trimmedEmail = newClientEmail.trim();
-    const trimmedCity = newClientCity.trim();
-
-    if (!trimmedName && !trimmedPhone && !trimmedEmail) {
-      setNewClientError("Podaj przynajmniej nazwę klienta, telefon albo email.");
-      return;
-    }
-
-    setNewClientSaving(true);
-    setNewClientError("");
-
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      const { data: createdClient, error } = await supabase
-        .from("clients")
-        .insert({
-          full_name: trimmedName || null,
-          phone: trimmedPhone || null,
-          email: trimmedEmail || null,
-          city: trimmedCity || null,
-          status: user?.id ? "Przypisany" : "Nowy lead",
-          is_lead: true,
-          lead_source: "Kalkulator CRM",
-          assigned_user_id: user?.id || null,
-        })
-        .select(
-          "id, public_id, client_type, full_name, company_name, contact_person, email, phone, contact_phone, city, province"
-        )
-        .single();
-
-      if (error) {
-        console.error("OfferForm: błąd tworzenia klienta z kalkulatora", error);
-        setNewClientError(error.message || "Nie udało się dodać klienta.");
-        return;
-      }
-
-      const nextClient = createdClient as CrmClientOption;
-
-      setInternalCrmClients((currentClients) => [nextClient, ...currentClients]);
-      selectCrmClient(nextClient);
-      setShowAddClientModal(false);
-    } finally {
-      setNewClientSaving(false);
-    }
   }
 
   function isAdditionalServiceSelected(serviceId: number) {
@@ -702,37 +633,15 @@ export default function OfferForm({
                 ))}
               </div>
             ) : (
-              <div className="space-y-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                <div>
-                  {isLoadingClients
-                    ? "Pobieram klientów z CRM..."
-                    : clientSearch.trim()
-                      ? "Brak wyników w CRM. Możesz dodać nowego klienta."
-                      : "Brak klientów ze spotkaniami na dziś. Zacznij pisać, aby wyszukać innego klienta."}
-                </div>
-
-                {!isLoadingClients && clientSearch.trim() && (
-                  <button
-                    type="button"
-                    onClick={openAddClientModalFromSearch}
-                    className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition duration-150 hover:-translate-y-0.5 hover:bg-blue-500 hover:shadow-md active:translate-y-0 active:scale-[0.98]"
-                  >
-                    + Dodaj nowego klienta
-                  </button>
-                )}
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                {isLoadingClients
+                  ? "Pobieram klientów z CRM..."
+                  : clientSearch.trim()
+                    ? "Brak wyników. Możesz wpisać klienta ręcznie."
+                    : "Brak klientów ze spotkaniami na dziś. Zacznij pisać, aby wyszukać innego klienta."}
               </div>
             )}
           </div>
-        )}
-
-        {!isLoadingClients && clientSearch.trim() && clientSuggestions.length > 0 && (
-          <button
-            type="button"
-            onClick={openAddClientModalFromSearch}
-            className="mt-2 inline-flex w-full items-center justify-center rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 transition duration-150 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-100 hover:shadow-md active:translate-y-0 active:scale-[0.98]"
-          >
-            + Dodaj nowego klienta
-          </button>
         )}
 
         {selectedClient && (
@@ -1163,58 +1072,6 @@ export default function OfferForm({
       )}
       {(hasPvSelected || hasStorageSelected) && (
 <label className="block mb-5">
-        {hasPvSelected && !hasStorageSelected && (
-          <div className="mb-3">
-            <span className="text-sm text-slate-700">
-              Typ falownika dla instalacji PV
-            </span>
-
-            <div className="mt-2 grid gap-3 sm:grid-cols-2">
-              <label
-                className={`cursor-pointer rounded-xl border px-4 py-3 ${
-                  preferredInverterType === "ongrid"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-slate-200"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="preferredInverterType"
-                  checked={preferredInverterType === "ongrid"}
-                  onChange={() => {
-                    setPreferredInverterType("ongrid");
-                    setSelectedInverterName("auto");
-                    setResult(null);
-                  }}
-                  className="mr-2"
-                />
-                Falownik sieciowy
-              </label>
-
-              <label
-                className={`cursor-pointer rounded-xl border px-4 py-3 ${
-                  preferredInverterType === "hybrid"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-slate-200"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="preferredInverterType"
-                  checked={preferredInverterType === "hybrid"}
-                  onChange={() => {
-                    setPreferredInverterType("hybrid");
-                    setSelectedInverterName("auto");
-                    setResult(null);
-                  }}
-                  className="mr-2"
-                />
-                Falownik hybrydowy
-              </label>
-            </div>
-          </div>
-        )}
-
         <span className="text-sm text-slate-700">Falownik</span>
 
         <select
@@ -1237,13 +1094,8 @@ export default function OfferForm({
 
           {invertersToShow
             .filter((inverterItem) => {
-              if (hasStorageSelected) {
-                return inverterItem.type === "hybrid";
-              }
-
-              return preferredInverterType === "hybrid"
-                ? inverterItem.type === "hybrid"
-                : inverterItem.type !== "hybrid";
+              if (hasStorageSelected) return inverterItem.type === "hybrid";
+              return inverterItem.type !== "hybrid";
             })
             .map((inverterItem, index) => (
               <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
@@ -1384,100 +1236,6 @@ export default function OfferForm({
             ? "Oblicz ofertę"
             : "Wybierz PV lub ME"}
       </button>
-      {showAddClientModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-950">
-                  Dodaj nowego klienta
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Klient zostanie zapisany w CRM i od razu wybrany do oferty.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowAddClientModal(false)}
-                className="rounded-full px-3 py-1 text-xl font-bold text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Zamknij modal dodawania klienta"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">
-                  Imię i nazwisko / nazwa klienta
-                </span>
-                <input
-                  value={newClientFullName}
-                  onChange={(event) => setNewClientFullName(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  placeholder="Jan Kowalski"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Telefon</span>
-                <input
-                  value={newClientPhone}
-                  onChange={(event) => setNewClientPhone(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  placeholder="500 600 700"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Email</span>
-                <input
-                  value={newClientEmail}
-                  onChange={(event) => setNewClientEmail(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  placeholder="klient@email.pl"
-                />
-              </label>
-
-              <label className="block sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Miasto</span>
-                <input
-                  value={newClientCity}
-                  onChange={(event) => setNewClientCity(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  placeholder="Miejscowość"
-                />
-              </label>
-            </div>
-
-            {newClientError && (
-              <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {newClientError}
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setShowAddClientModal(false)}
-                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-              >
-                Anuluj
-              </button>
-
-              <button
-                type="button"
-                onClick={createClientFromCalculator}
-                disabled={newClientSaving}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {newClientSaving ? "Zapisywanie..." : "Dodaj klienta"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
