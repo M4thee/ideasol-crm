@@ -157,7 +157,7 @@ export default function CalendarPage() {
 
     const ids = await loadVisibleUserIds(user.id, role);
 
-    if (["seller", "cc"].includes(role)) {
+    if (role === "seller") {
       setCalendarOwners([
         {
           id: user.id,
@@ -203,9 +203,11 @@ export default function CalendarPage() {
       .not("event_at", "is", null)
       .order("event_at", { ascending: true });
 
+    const canSeeAllCalendarEvents = ["admin", "owner", "cc"].includes(currentUserRole);
+
     if (selectedOwnerIds.length > 0) {
       query = query.in("assigned_user_id", selectedOwnerIds);
-    } else if (visibleUserIds && visibleUserIds.length > 0) {
+    } else if (!canSeeAllCalendarEvents && visibleUserIds && visibleUserIds.length > 0) {
       query = query.in("assigned_user_id", visibleUserIds);
     }
 
@@ -694,6 +696,7 @@ async function createCalendarEventFromModal() {
 
   function getOwnerFilterLabel() {
     if (currentUserRole === "seller") return "Moje spotkania";
+    if (currentUserRole === "cc" && selectedOwnerIds.length === 0) return "Wszystkie spotkania";
     if (selectedOwnerIds.length === 0) return "Wszyscy użytkownicy";
     if (selectedOwnerIds.length === 1) {
       const owner = calendarOwners.find((item) => item.id === selectedOwnerIds[0]);
@@ -1036,7 +1039,7 @@ async function createCalendarEventFromModal() {
                   {getOwnerFilterLabel()}
                 </button>
 
-                {isOwnerFilterOpen && !["seller", "cc"].includes(currentUserRole) && (
+                {isOwnerFilterOpen && currentUserRole !== "seller" && (
                   <div className="absolute left-0 top-12 z-30 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
                     <div className="mb-2 flex gap-2">
                       <button
