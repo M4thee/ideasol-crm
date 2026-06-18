@@ -77,12 +77,20 @@ type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 
 const SALE_STATUSES = [
-  "Oczekiwanie na zaksięgowanie zaliczki",
-  "Umówione do montażu",
-  "Zamontowany",
-  "Oczekiwanie na pełną wpłatę",
-  "Zakończona",
+  "Oczekuje na sprawdzenie dokumentów",
+  "Oczekiwanie na zaliczkę",
+  "Oczekuje na umówienie montażu",
+  "Montaż umówiony",
+  "W trakcie montażu",
+  "Montaż zakończony - oczekiwanie na pełną wpłatę",
+  "Zakończony - procesowanie ZM",
+  "Zakończony - ZM wysłane",
+  "Zakończony - procesowanie dotacji",
+  "Zakończony",
   "Anulowana",
+  "Odstępienie - utrzymanie",
+  "Utrzymanie - nieuratowana",
+  "Utrzymanie - uratowana",
 ];
 
 const DOCUMENT_GROUPS = [
@@ -511,23 +519,24 @@ export default function SalePage() {
     try {
       setSavingStatus(true);
 
-      const { error } = await supabase
-        .from("sales")
-        .update({ status })
-        .eq("id", sale.id);
+      const { data: updatedSale, error } = await supabase.rpc("update_sale_status", {
+        p_sale_id: sale.id,
+        p_status: status,
+      });
 
       if (error) {
         console.error("Błąd zmiany statusu sprzedaży:", error);
-        alert("Nie udało się zmienić statusu sprzedaży.");
+        alert(`Nie udało się zmienić statusu sprzedaży: ${error.message}`);
         return;
       }
 
-      setSale({
+      setSale((updatedSale as Sale) || {
         ...sale,
         status,
       });
     } catch (error) {
       console.error("Nieoczekiwany błąd zmiany statusu:", error);
+      alert("Wystąpił nieoczekiwany błąd podczas zmiany statusu sprzedaży.");
     } finally {
       setSavingStatus(false);
     }
@@ -1122,14 +1131,13 @@ async function deleteSale() {
   if (!confirmed) return;
 
   try {
-    const { error } = await supabase
-      .from("sales")
-      .delete()
-      .eq("id", sale.id);
+    const { error } = await supabase.rpc("delete_sale", {
+      p_sale_id: sale.id,
+    });
 
     if (error) {
       console.error("Błąd usuwania sprzedaży:", error);
-      alert("Nie udało się usunąć sprzedaży.");
+      alert(`Nie udało się usunąć sprzedaży: ${error.message}`);
       return;
     }
 
@@ -2079,14 +2087,142 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               )}
 
               {activeTab === "financial" && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-600">
-                  Dane finansowe — widok tymczasowo uproszczony po naprawie pliku.
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">
+                      Dane finansowe
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Zakres danych finansowych zależy od roli użytkownika.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                      <p className="text-xs font-black uppercase tracking-wide text-slate-400">
+                        Wartość umowy
+                      </p>
+                      <p className="mt-2 text-xl font-black text-slate-950">
+                        {formatMoney(sale.contract_value)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                      <p className="text-xs font-black uppercase tracking-wide text-slate-400">
+                        Zaliczka
+                      </p>
+                      <p className="mt-2 text-xl font-black text-slate-950">
+                        {formatMoney(sale.deposit_amount)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {currentUserRole === "cc" && (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm font-bold text-red-700">
+                      Część danych finansowych jest ukryta dla konsultanta CC.
+                    </div>
+                  )}
+
+                  {financialBreakdown.length > 0 ? (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                      <p className="text-sm font-black text-slate-950">
+                        Więcej danych finansowych
+                      </p>
+
+                      <div className="mt-4 space-y-2">
+                        {financialBreakdown
+                          .filter((item: { label?: string | null }) => canShowFinancialBreakdownItem(item?.label))
+                          .map((item: { label?: string | null; value?: number | string | null }, index: number) => (
+                            <div
+                              key={`${item?.label || "item"}-${index}`}
+                              className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                            >
+                              <span className="text-sm font-semibold text-slate-700">
+                                {item?.label || "Pozycja"}
+                              </span>
+                              <span className="text-sm font-black text-slate-950">
+                                {formatMoney(item?.value)}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm font-semibold text-slate-500">
+                      Brak szczegółowych danych finansowych z oferty.
+                    </div>
+                  )}
+
+                  {canSeeFullFinancials && companyMargin !== null && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                      <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
+                        Marża firmy
+                      </p>
+                      <p className="mt-2 text-xl font-black text-emerald-950">
+                        {formatMoney(companyMargin)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {activeTab === "notes" && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-600">
-                  Notatki — widok tymczasowo uproszczony po naprawie pliku.
+{activeTab === "notes" && (
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">
+                      Notatki sprzedaży
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Notatki zapisywane są na sprzedaży, a przy przypisanym kliencie także na karcie klienta.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <textarea
+                      value={newSaleNote}
+                      onChange={(event) => setNewSaleNote(event.target.value)}
+                      rows={4}
+                      placeholder="Dodaj notatkę..."
+                      className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    />
+
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm font-semibold text-slate-500">
+                        {saleNoteStatus}
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={addSaleNote}
+                        disabled={savingSaleNote}
+                        className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                      >
+                        {savingSaleNote ? "Zapisywanie..." : "Dodaj notatkę"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {saleNotes.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">
+                        Brak notatek.
+                      </div>
+                    ) : (
+                      saleNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
+                          <p className="whitespace-pre-wrap text-sm font-medium text-slate-800">
+                            {note.content}
+                          </p>
+                          <p className="mt-2 text-xs text-slate-400">
+                            {new Date(note.created_at).toLocaleString("pl-PL")}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
             </div>

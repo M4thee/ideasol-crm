@@ -1572,7 +1572,7 @@ export default function OfferDetailsPage() {
       contract_value: offer.sale_price_gross || 0,
       margin_value: offer.seller_margin || 0,
       sold_items: buildSoldItemsFromOffer() || getOfferTypeLabel(offer.offer_type),
-      status: "Oczekiwanie na zaksięgowanie zaliczki",
+      status: "Oczekuje na sprawdzenie dokumentów",
       customer_type: saleForm.customerType,
       customer_data: {
         customer_type: saleForm.customerType,

@@ -34,6 +34,20 @@ type ActivityRow = {
   note?: string | null;
 };
 
+type CalendarEventRow = {
+  id?: string;
+  created_at?: string | null;
+  created_by?: string | null;
+  user_id?: string | null;
+  owner_id?: string | null;
+  assigned_user_id?: string | null;
+  source_activity_id?: string | null;
+  event_type?: string | null;
+  status?: string | null;
+  title?: string | null;
+  event_at?: string | null;
+};
+
 type ProfileRow = {
   id: string;
   display_name: string | null;
@@ -280,20 +294,44 @@ function isNotInterested(row: ActivityRow) {
   return status === "niezainteresowany" || status === "not_interested";
 }
 
+
 function getActivityOwnerId(row: ActivityRow) {
   return row.created_by || row.user_id || row.owner_id || row.assigned_user_id || "unknown";
 }
 
-function summarizeCcRows(rows: ActivityRow[], profileMap: Map<string, ProfileRow>): CcReportSummary {
+function getCalendarEventOwnerId(row: CalendarEventRow) {
+  return row.created_by || row.user_id || row.owner_id || row.assigned_user_id || "unknown";
+}
+
+function isMeetingCalendarEvent(row: CalendarEventRow) {
+  const eventType = normalizeText(row.event_type);
+  const title = normalizeText(row.title);
+
+  return eventType === "meeting" || eventType === "spotkanie" || title.includes("spotkanie");
+}
+
+function summarizeCcRows(
+  rows: ActivityRow[],
+  profileMap: Map<string, ProfileRow>,
+  calendarEvents: CalendarEventRow[] = []
+): CcReportSummary {
   const phoneRows = rows.filter(isPhoneActivity);
   const emailRows = rows.filter(isEmailActivity);
   const smsRows = rows.filter(isSmsActivity);
   const interactionRows = rows.filter((row) => isPhoneActivity(row) || isEmailActivity(row) || isSmsActivity(row));
 
+  const scheduledPhoneRows = phoneRows.filter(isMeetingScheduled);
+  const scheduledPhoneActivityIds = new Set(
+    scheduledPhoneRows.map((row) => row.id).filter(Boolean) as string[]
+  );
+  const meetingEventRows = calendarEvents
+    .filter(isMeetingCalendarEvent)
+    .filter((event) => !event.source_activity_id || !scheduledPhoneActivityIds.has(event.source_activity_id));
+
   const phoneCalls = phoneRows.length;
   const emails = emailRows.length;
   const sms = smsRows.length;
-  const meetingsScheduled = phoneRows.filter(isMeetingScheduled).length;
+  const meetingsScheduled = scheduledPhoneRows.length + meetingEventRows.length;
   const noAnswer = phoneRows.filter(isNoAnswer).length;
   const callBackRequests = phoneRows.filter(isCallBackRequest).length;
   const notInterested = phoneRows.filter(isNotInterested).length;
@@ -328,6 +366,27 @@ function summarizeCcRows(rows: ActivityRow[], profileMap: Map<string, ProfileRow
       current.sms += 1;
     }
 
+    current.conversionRate = current.phoneCalls > 0
+      ? Math.round((current.meetingsScheduled / current.phoneCalls) * 100)
+      : 0;
+
+    userMap.set(userId, current);
+  });
+
+  meetingEventRows.forEach((event) => {
+    const userId = getCalendarEventOwnerId(event);
+    const profile = profileMap.get(userId);
+    const current = userMap.get(userId) || {
+      userId,
+      name: profile?.display_name || profile?.email || "Nieznany użytkownik",
+      phoneCalls: 0,
+      emails: 0,
+      sms: 0,
+      meetingsScheduled: 0,
+      conversionRate: 0,
+    };
+
+    current.meetingsScheduled += 1;
     current.conversionRate = current.phoneCalls > 0
       ? Math.round((current.meetingsScheduled / current.phoneCalls) * 100)
       : 0;
@@ -654,6 +713,14 @@ export default function ReportsPage() {
         .lte("created_at", currentRange.endIso);
 
       if (activitiesError) throw activitiesError;
+
+      const { data: calendarEventRows, error: calendarEventsError } = await supabase
+        .from("calendar_events")
+        .select("id, created_at, created_by, user_id, owner_id, assigned_user_id, source_activity_id, event_type, status, title, event_at")
+        .gte("event_at", previousRange.fromIso)
+        .lte("event_at", currentRange.endIso);
+
+      if (calendarEventsError) throw calendarEventsError;
 
       const { data: profileRows, error: profilesError } = await supabase
         .from("profiles")

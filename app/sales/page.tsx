@@ -71,18 +71,34 @@ function isHiddenAssignmentUser(profile: {
 
 function getSaleStatusClass(status: string) {
   switch (status) {
-    case "Oczekiwanie na zaksięgowanie zaliczki":
-      return "bg-amber-100 text-amber-900 border-amber-200";
-    case "Umówione do montażu":
-      return "bg-sky-100 text-sky-900 border-sky-200";
-    case "Zamontowany":
-      return "bg-indigo-100 text-indigo-900 border-indigo-200";
-    case "Oczekiwanie na pełną wpłatę":
-      return "bg-orange-100 text-orange-900 border-orange-200";
-    case "Zakończona":
-      return "bg-emerald-100 text-emerald-900 border-emerald-200";
+    case "Oczekuje na sprawdzenie dokumentów":
+      return "bg-[#95FCFC] text-slate-950 border-[#95FCFC]";
+    case "Oczekiwanie na zaliczkę":
+      return "bg-[#FCE795] text-slate-950 border-[#FCE795]";
+    case "Oczekuje na umówienie montażu":
+      return "bg-[#F3D357] text-slate-950 border-[#F3D357]";
+    case "Montaż umówiony":
+      return "bg-[#D578FA] text-slate-950 border-[#D578FA]";
+    case "W trakcie montażu":
+      return "bg-[#C039F3] text-white border-[#C039F3]";
+    case "Montaż zakończony - oczekiwanie na pełną wpłatę":
+      return "bg-[#8B11B9] text-white border-[#8B11B9]";
+    case "Zakończony - procesowanie ZM":
+      return "bg-[#0AA906] text-white border-[#0AA906]";
+    case "Zakończony - ZM wysłane":
+      return "bg-[#0AA906] text-white border-[#0AA906]";
+    case "Zakończony - procesowanie dotacji":
+      return "bg-[#0BF3F5] text-slate-950 border-[#0BF3F5]";
+    case "Zakończony":
+      return "bg-[#0AA906] text-white border-[#0AA906]";
     case "Anulowana":
-      return "bg-red-100 text-red-900 border-red-200";
+      return "bg-[#F20E1C] text-white border-[#F20E1C]";
+    case "Odstępienie - utrzymanie":
+      return "bg-[#7C7374] text-white border-[#7C7374]";
+    case "Utrzymanie - nieuratowana":
+      return "bg-[#3D0309] text-white border-[#3D0309]";
+    case "Utrzymanie - uratowana":
+      return "bg-[#B9DAD9] text-slate-950 border-[#B9DAD9]";
     default:
       return "bg-slate-100 text-slate-700 border-slate-200";
   }
@@ -459,7 +475,7 @@ export default function SalesPage() {
               {currentUserRole === "seller" ? "Moje zakończone" : "Zakończone"}
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
-              {sales.filter((sale) => sale.status === "Zakończona").length}
+              {sales.filter((sale) => sale.status.startsWith("Zakończony")).length}
             </p>
           </div>
 
@@ -469,6 +485,7 @@ export default function SalesPage() {
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
               {sales
+                .filter((sale) => sale.status !== "Anulowana")
                 .reduce((sum, sale) => sum + (sale.contract_value || 0), 0)
                 .toLocaleString("pl-PL")} zł
             </p>
