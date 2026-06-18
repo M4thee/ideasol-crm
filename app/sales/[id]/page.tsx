@@ -85,15 +85,106 @@ const SALE_STATUSES = [
   "Anulowana",
 ];
 
-const DOCUMENT_TYPES = [
-  "Umowa",
-  "Zdjęcia",
-  "Potwierdzenie wpłaty",
-  "Umowa kredytowa",
-  "Protokół montażu",
-  "Dokumenty związane z dotacją",
-  "Inne",
-];
+const DOCUMENT_GROUPS = [
+  {
+    key: "contracts",
+    title: "Umowa wraz z załącznikami",
+    description:
+      "Umowa, załączniki do umowy, dokumenty podpisowe, potwierdzenia wpłat i dokumenty kredytowe.",
+    acceptedTypes: [
+      "Umowa",
+      "Umowa i załączniki",
+      "Umowa wraz z załącznikami",
+      "Potwierdzenie wpłaty",
+      "Umowa kredytowa",
+    ],
+    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 50,
+  },
+  {
+    key: "technical_audit",
+    title: "Audyt techniczny",
+    description:
+      "Audyt techniczny, protokoły, schematy, karty techniczne i dokumentacja techniczna montażu.",
+    acceptedTypes: ["Audyt techniczny", "Dokumenty techniczne", "Protokół montażu"],
+    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 20,
+  },
+  {
+    key: "photos",
+    title: "Zdjęcia",
+    description:
+      "Zdjęcia z audytu, montażu, miejsca instalacji i dokumentacji fotograficznej.",
+    acceptedTypes: ["Zdjęcia", "Zdjęcie", "Galeria zdjęć"],
+    accept: "image/*",
+    maxSizeMb: 30,
+  },
+  {
+    key: "osd_invoice",
+    title: "Faktura OSD",
+    description:
+      "Faktura OSD i dokumenty związane z operatorem sieci dystrybucyjnej.",
+    acceptedTypes: ["Faktura OSD"],
+    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 15,
+  },
+  {
+    key: "zm_power_of_attorney",
+    title: "Pełnomocnictwo ZM",
+    description:
+      "Pełnomocnictwo ZM oraz dokumenty do zgłoszenia mikroinstalacji.",
+    acceptedTypes: ["Pełnomocnictwo ZM"],
+    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 15,
+  },
+  {
+    key: "ppoz",
+    title: "PPOŻ",
+    description:
+      "Dokumenty PPOŻ, uzgodnienia i pełnomocnictwa związane ze strażą pożarną.",
+    acceptedTypes: ["PPOŻ", "PPOZ", "Pełnomocnictwo do straży pożarnej"],
+    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 15,
+  },
+  {
+    key: "pme_grant",
+    title: "Dotacja PME",
+    description:
+      "Dokumenty dotacyjne programu PME i materiały potrzebne do rozliczenia dotacji.",
+    acceptedTypes: ["Dotacja PME", "Dokumenty związane z dotacją"],
+    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 25,
+  },
+  {
+    key: "other",
+    title: "Inne",
+    description:
+      "Pozostałe dokumenty i pliki, których nie da się jednoznacznie przypisać do wcześniejszych kontenerów.",
+    acceptedTypes: ["Inne"],
+    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
+    maxSizeMb: 50,
+  },
+] as const;
+
+
+type DocumentGroupKey = (typeof DOCUMENT_GROUPS)[number]["key"];
+
+type DocumentContainerStatus = "draft" | "submitted" | "approved" | "rejected";
+
+type SaleDocumentContainer = {
+  id: string;
+  sale_id: string;
+  container_key: DocumentGroupKey;
+  status: DocumentContainerStatus;
+  submitted_by: string | null;
+  submitted_at: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 
 function formatMoney(value: number | string | null | undefined) {
   if (value === null || value === undefined || value === "") {
@@ -228,10 +319,19 @@ export default function SalePage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("sale");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [documents, setDocuments] = useState<SaleDocument[]>([]);
+  const [documentContainers, setDocumentContainers] = useState<SaleDocumentContainer[]>([]);
   const [documentDescription, setDocumentDescription] = useState("");
-  const [documentType, setDocumentType] = useState("Umowa");
+  const [documentType, setDocumentType] = useState("Umowa wraz z załącznikami");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentGroupKey, setDocumentGroupKey] = useState<DocumentGroupKey>("contracts");
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [documentPreviewUrls, setDocumentPreviewUrls] = useState<Record<string, string>>({});
+  const [photoPreviewDocuments, setPhotoPreviewDocuments] = useState<SaleDocument[]>([]);
+  const [photoPreviewIndex, setPhotoPreviewIndex] = useState<number | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [submittingDocuments, setSubmittingDocuments] = useState(false);
+  const [reviewingDocumentContainerKey, setReviewingDocumentContainerKey] = useState<DocumentGroupKey | null>(null);
   const [documentStatus, setDocumentStatus] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
 
@@ -243,6 +343,37 @@ export default function SalePage() {
   useEffect(() => {
     loadSale();
   }, [saleId]);
+
+  useEffect(() => {
+    async function loadPhotoPreviews() {
+      const photoDocuments = documents.filter(
+        (document) => getDocumentGroupKey(document) === "photos"
+      );
+
+      if (photoDocuments.length === 0) {
+        setDocumentPreviewUrls({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        photoDocuments.map(async (document) => {
+          const { data, error } = await supabase.storage
+            .from("sale-documents")
+            .createSignedUrl(document.file_path, 60 * 10);
+
+          if (error || !data?.signedUrl) {
+            return [document.id, ""] as const;
+          }
+
+          return [document.id, data.signedUrl] as const;
+        })
+      );
+
+      setDocumentPreviewUrls(Object.fromEntries(entries));
+    }
+
+    loadPhotoPreviews();
+  }, [documents]);
 
   async function loadSale() {
     setLoading(true);
@@ -348,6 +479,17 @@ export default function SalePage() {
 
     setDocuments((documentsData as SaleDocument[]) || []);
 
+    const { data: documentContainersData, error: documentContainersError } = await supabase
+      .from("sale_document_containers")
+      .select("*")
+      .eq("sale_id", saleData.id);
+
+    if (documentContainersError) {
+      console.error("Błąd ładowania statusów kontenerów dokumentów:", documentContainersError);
+    }
+
+    setDocumentContainers((documentContainersData as SaleDocumentContainer[]) || []);
+
     const { data: saleNotesData, error: saleNotesError } = await supabase
       .from("sale_notes")
       .select("*")
@@ -450,57 +592,102 @@ export default function SalePage() {
   }
 
   async function uploadSaleDocument() {
-    if (!sale || !documentFile || !currentUserId) {
-      setDocumentStatus("Wybierz plik dokumentu.");
+    const filesToUpload = documentFiles.length > 0
+      ? documentFiles
+      : documentFile
+        ? [documentFile]
+        : [];
+
+    if (!sale || filesToUpload.length === 0 || !currentUserId) {
+      setDocumentStatus("Wybierz co najmniej jeden plik.");
       return;
     }
+
+    const isAssignedSeller = Boolean(sale.seller_id && sale.seller_id === currentUserId);
+    const isAdmin = currentUserRole === "admin";
+
+    if (!isAdmin && !isAssignedSeller) {
+      setDocumentStatus("Dokumenty może wrzucać tylko osoba przypisana jako sprzedawca na tej sprzedaży albo admin.");
+      return;
+    }
+
+    const selectedGroup =
+      DOCUMENT_GROUPS.find((group) => group.key === documentGroupKey) ||
+      DOCUMENT_GROUPS.find((group) => group.title === documentType) ||
+      DOCUMENT_GROUPS[0];
+
+    const selectedFilesBytes = filesToUpload.reduce((sum, file) => sum + file.size, 0);
+    const usedBytes = getDocumentGroupUsedBytes(selectedGroup.key);
+    const maxBytes = selectedGroup.maxSizeMb * 1024 * 1024;
+
+    if (usedBytes + selectedFilesBytes > maxBytes) {
+      setDocumentStatus(
+        `Limit kontenera "${selectedGroup.title}" to ${selectedGroup.maxSizeMb} MB. Usuń część plików albo przenieś je do innego kontenera.`
+      );
+      return;
+    }
+
     try {
       setUploadingDocument(true);
       setDocumentStatus("");
 
-      const safeFileName = documentFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const filePath = `${sale.id}/${Date.now()}-${safeFileName}`;
+      const insertedDocuments: SaleDocument[] = [];
 
-      const { error: uploadError } = await supabase.storage
-        .from("sale-documents")
-        .upload(filePath, documentFile, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+      for (const file of filesToUpload) {
+        const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const filePath = `${sale.id}/${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}-${safeFileName}`;
 
-      if (uploadError) {
-        console.error("Błąd uploadu dokumentu:", uploadError);
-        setDocumentStatus(uploadError.message || "Nie udało się przesłać dokumentu.");
-        return;
+        const { error: uploadError } = await supabase.storage
+          .from("sale-documents")
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error("Błąd uploadu dokumentu:", uploadError);
+          setDocumentStatus(uploadError.message || "Nie udało się przesłać dokumentu.");
+          return;
+        }
+
+        const { data: insertedDocument, error: insertError } = await supabase
+          .from("sale_documents")
+          .insert({
+            sale_id: sale.id,
+            client_id: sale.client_id,
+            uploaded_by: currentUserId,
+            description: documentDescription.trim() || selectedGroup.title,
+            document_type: selectedGroup.title,
+            file_name: file.name,
+            file_path: filePath,
+            file_type: file.type || null,
+            file_size: file.size,
+          })
+          .select("*")
+          .single();
+
+        if (insertError || !insertedDocument) {
+          console.error("Błąd zapisu metadanych dokumentu:", insertError);
+          setDocumentStatus(insertError?.message || "Plik wysłany, ale nie zapisano danych dokumentu.");
+          return;
+        }
+
+        insertedDocuments.push(insertedDocument as SaleDocument);
       }
 
-      const { data: insertedDocument, error: insertError } = await supabase
-        .from("sale_documents")
-        .insert({
-          sale_id: sale.id,
-          client_id: sale.client_id,
-          uploaded_by: currentUserId,
-          description: documentDescription.trim() || documentType,
-          document_type: documentType,
-          file_name: documentFile.name,
-          file_path: filePath,
-          file_type: documentFile.type || null,
-          file_size: documentFile.size,
-        })
-        .select("*")
-        .single();
-
-      if (insertError || !insertedDocument) {
-        console.error("Błąd zapisu metadanych dokumentu:", insertError);
-        setDocumentStatus(insertError?.message || "Plik wysłany, ale nie zapisano danych dokumentu.");
-        return;
-      }
-
-      setDocuments((current) => [insertedDocument as SaleDocument, ...current]);
+      setDocuments((current) => [...insertedDocuments, ...current]);
       setDocumentDescription("");
-      setDocumentType("Umowa");
+      setDocumentType("Umowa wraz z załącznikami");
       setDocumentFile(null);
-      setDocumentStatus("Dokument został dodany.");
+      setDocumentGroupKey(selectedGroup.key);
+      setDocumentFiles([]);
+      setDocumentStatus(
+        insertedDocuments.length === 1
+          ? "Dokument został dodany."
+          : `Dodano dokumenty: ${insertedDocuments.length}.`
+      );
     } catch (error) {
       console.error("Nieoczekiwany błąd uploadu dokumentu:", error);
       setDocumentStatus("Wystąpił nieoczekiwany błąd podczas dodawania dokumentu.");
@@ -509,8 +696,327 @@ export default function SalePage() {
     }
   }
 
+  
+  async function submitDocumentContainersForReview() {
+    if (!sale) return;
+
+    const confirmed = window.confirm(
+      "Czy na pewno wysłać dokumenty tej sprzedaży do sprawdzenia? Po wysłaniu część akcji może zostać zablokowana."
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSubmittingDocuments(true);
+      setDocumentStatus("");
+
+      const { error } = await supabase.rpc("submit_sale_document_containers", {
+        p_sale_id: sale.id,
+      });
+
+      if (error) {
+        console.error("Błąd wysyłania dokumentów do sprawdzenia:", error);
+        setDocumentStatus(error.message || "Nie udało się wysłać dokumentów do sprawdzenia.");
+        return;
+      }
+
+      const { data: refreshedContainers, error: refreshError } = await supabase
+        .from("sale_document_containers")
+        .select("*")
+        .eq("sale_id", sale.id);
+
+      if (refreshError) {
+        console.error("Błąd odświeżania statusów kontenerów:", refreshError);
+      }
+
+      setDocumentContainers((refreshedContainers as SaleDocumentContainer[]) || []);
+      setDocumentStatus("Dokumenty zostały wysłane do sprawdzenia.");
+    } catch (error) {
+      console.error("Nieoczekiwany błąd wysyłania dokumentów do sprawdzenia:", error);
+      setDocumentStatus("Wystąpił nieoczekiwany błąd podczas wysyłania dokumentów do sprawdzenia.");
+    } finally {
+      setSubmittingDocuments(false);
+    }
+  }
+
+  async function reviewDocumentContainer(groupKey: DocumentGroupKey, nextStatus: "approved" | "rejected") {
+    if (!sale) return;
+
+    const group = DOCUMENT_GROUPS.find((item) => item.key === groupKey);
+    const groupTitle = group?.title || "kontener";
+    const actionLabel = nextStatus === "approved" ? "zatwierdzić" : "odrzucić";
+
+    const confirmed = window.confirm(
+      `Czy na pewno chcesz ${actionLabel} kontener "${groupTitle}"?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setReviewingDocumentContainerKey(groupKey);
+      setDocumentStatus("");
+
+      const { error } = await supabase.rpc("review_sale_document_container", {
+        p_sale_id: sale.id,
+        p_container_key: groupKey,
+        p_status: nextStatus,
+        p_review_note: null,
+      });
+
+      if (error) {
+        console.error("Błąd weryfikacji kontenera dokumentów:", error);
+        setDocumentStatus(error.message || "Nie udało się zmienić statusu kontenera dokumentów.");
+        return;
+      }
+
+      const { data: refreshedContainers, error: refreshError } = await supabase
+        .from("sale_document_containers")
+        .select("*")
+        .eq("sale_id", sale.id);
+
+      if (refreshError) {
+        console.error("Błąd odświeżania statusów kontenerów:", refreshError);
+      }
+
+      setDocumentContainers((refreshedContainers as SaleDocumentContainer[]) || []);
+      setDocumentStatus(
+        nextStatus === "approved"
+          ? `Kontener "${groupTitle}" został zatwierdzony.`
+          : `Kontener "${groupTitle}" został odrzucony.`
+      );
+    } catch (error) {
+      console.error("Nieoczekiwany błąd weryfikacji kontenera dokumentów:", error);
+      setDocumentStatus("Wystąpił nieoczekiwany błąd podczas weryfikacji kontenera dokumentów.");
+    } finally {
+      setReviewingDocumentContainerKey(null);
+    }
+  }
+
+  function addDocumentFiles(files: FileList | null, groupKey?: DocumentGroupKey) {
+    const nextFiles = Array.from(files || []);
+
+    if (nextFiles.length === 0) return;
+
+    const selectedGroup = groupKey
+      ? DOCUMENT_GROUPS.find((group) => group.key === groupKey)
+      : DOCUMENT_GROUPS.find((group) => group.key === documentGroupKey);
+
+    if (!selectedGroup) return;
+
+    const shouldReplaceQueue = selectedGroup.key !== documentGroupKey;
+    const queuedFiles = shouldReplaceQueue ? nextFiles : [...documentFiles, ...nextFiles];
+    const queuedBytes = queuedFiles.reduce((sum, file) => sum + file.size, 0);
+    const usedBytes = getDocumentGroupUsedBytes(selectedGroup.key);
+    const maxBytes = selectedGroup.maxSizeMb * 1024 * 1024;
+
+    setDocumentGroupKey(selectedGroup.key);
+    setDocumentType(selectedGroup.title);
+
+    if (usedBytes + queuedBytes > maxBytes) {
+      setDocumentStatus(
+        `Limit kontenera "${selectedGroup.title}" to ${selectedGroup.maxSizeMb} MB. Usuń część plików albo przenieś je do innego kontenera.`
+      );
+      return;
+    }
+
+    setDocumentStatus("");
+    setDocumentFile(queuedFiles[0] || null);
+    setDocumentFiles(queuedFiles);
+  }
+
+  function removeDocumentFile(indexToRemove: number) {
+    setDocumentFiles((current) =>
+      current.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+  function getDocumentGroupUsedBytes(groupKey: DocumentGroupKey) {
+    return documents
+      .filter((document) => getDocumentGroupKey(document) === groupKey)
+      .reduce((sum, document) => sum + (document.file_size || 0), 0);
+  }
+
+  function getDocumentContainer(groupKey: DocumentGroupKey) {
+    return documentContainers.find((container) => container.container_key === groupKey) || null;
+  }
+
+  function getDocumentContainerStatus(groupKey: DocumentGroupKey): DocumentContainerStatus {
+    return getDocumentContainer(groupKey)?.status || "draft";
+  }
+
+  function getDocumentContainerStatusLabel(status: DocumentContainerStatus) {
+    if (status === "approved") return "Zatwierdzone";
+    if (status === "rejected") return "Odrzucone";
+    if (status === "submitted") return "Do sprawdzenia";
+    return "Robocze";
+  }
+
+  function getDocumentContainerStatusClass(status: DocumentContainerStatus) {
+    if (status === "approved") {
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200";
+    }
+
+    if (status === "rejected") {
+      return "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-200";
+    }
+
+    if (status === "submitted") {
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200";
+    }
+
+    return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
+  }
+
+  function getDocumentContainerSectionClass(status: DocumentContainerStatus) {
+    const baseClass = "rounded-3xl border bg-white p-5 dark:bg-slate-900";
+
+    if (status === "approved") {
+      return `${baseClass} border-emerald-300 dark:border-emerald-500/50`;
+    }
+
+    if (status === "rejected") {
+      return `${baseClass} border-red-300 dark:border-red-500/50`;
+    }
+
+    if (status === "submitted") {
+      return `${baseClass} border-amber-300 dark:border-amber-500/50`;
+    }
+
+    return `${baseClass} border-slate-200 dark:border-slate-700`;
+  }
+
+  function canUploadToDocumentContainer(groupKey: DocumentGroupKey) {
+    const containerStatus = getDocumentContainerStatus(groupKey);
+
+    if (currentUserRole === "admin") return true;
+    if (!canUploadDocuments) return false;
+
+    return containerStatus !== "approved";
+  }
+
+  function canDeleteSaleDocument(document: SaleDocument) {
+    const containerStatus = getDocumentContainerStatus(getDocumentGroupKey(document));
+
+    if (currentUserRole === "admin" || currentUserRole === "owner") return true;
+    if (!canUploadDocuments) return false;
+
+    return containerStatus === "draft";
+  }
+
+  function getDocumentGroupKey(document: SaleDocument): DocumentGroupKey {
+    const normalizedType = String(document.document_type || "").trim().toLowerCase();
+    const normalizedName = String(document.file_name || "").trim().toLowerCase();
+    const normalizedFileType = String(document.file_type || "").trim().toLowerCase();
+    const searchableText = `${normalizedType} ${normalizedName}`;
+
+    if (
+      normalizedFileType.startsWith("image/") ||
+      searchableText.includes("zdję") ||
+      searchableText.includes("zdjec") ||
+      normalizedName.match(/\.(jpg|jpeg|png|webp|heic)$/)
+    ) {
+      return "photos";
+    }
+
+    if (
+      searchableText.includes("ppoż") ||
+      searchableText.includes("ppoz") ||
+      searchableText.includes("straż") ||
+      searchableText.includes("straz") ||
+      searchableText.includes("pożar") ||
+      searchableText.includes("pozar")
+    ) {
+      return "ppoz";
+    }
+
+    if (
+      searchableText.includes("faktura osd") ||
+      searchableText.includes("osd")
+    ) {
+      return "osd_invoice";
+    }
+
+    if (
+      searchableText.includes("pełnomocnictwo zm") ||
+      searchableText.includes("pelnomocnictwo zm") ||
+      searchableText.includes("zgłoszenie mikro") ||
+      searchableText.includes("zgloszenie mikro") ||
+      searchableText.includes(" zm ")
+    ) {
+      return "zm_power_of_attorney";
+    }
+
+    if (
+      searchableText.includes("dotac") ||
+      searchableText.includes("pme")
+    ) {
+      return "pme_grant";
+    }
+
+    if (
+      searchableText.includes("audyt") ||
+      searchableText.includes("techn") ||
+      searchableText.includes("protok") ||
+      searchableText.includes("schemat")
+    ) {
+      return "technical_audit";
+    }
+
+    return "other";
+  }
+
+  async function getSaleDocumentSignedUrl(document: SaleDocument) {
+    const { data, error } = await supabase.storage
+      .from("sale-documents")
+      .createSignedUrl(document.file_path, 60);
+
+    if (error || !data?.signedUrl) {
+      alert("Nie udało się otworzyć dokumentu.");
+      return null;
+    }
+
+    return data.signedUrl;
+  }
+
+  async function openSaleDocument(document: SaleDocument) {
+    const signedUrl = await getSaleDocumentSignedUrl(document);
+
+    if (!signedUrl) return;
+
+    window.open(signedUrl, "_blank");
+  }
+
+  async function openPhotoPreview(photoDocuments: SaleDocument[], index: number) {
+    const document = photoDocuments[index];
+    if (!document) return;
+
+    const signedUrl = await getSaleDocumentSignedUrl(document);
+    if (!signedUrl) return;
+
+    setPhotoPreviewDocuments(photoDocuments);
+    setPhotoPreviewIndex(index);
+    setPhotoPreviewUrl(signedUrl);
+  }
+
+  async function movePhotoPreview(direction: "previous" | "next") {
+    if (photoPreviewIndex === null || photoPreviewDocuments.length === 0) return;
+
+    const nextIndex = direction === "previous"
+      ? (photoPreviewIndex - 1 + photoPreviewDocuments.length) % photoPreviewDocuments.length
+      : (photoPreviewIndex + 1) % photoPreviewDocuments.length;
+
+    const document = photoPreviewDocuments[nextIndex];
+    if (!document) return;
+
+    const signedUrl = await getSaleDocumentSignedUrl(document);
+    if (!signedUrl) return;
+
+    setPhotoPreviewIndex(nextIndex);
+    setPhotoPreviewUrl(signedUrl);
+  }
+
   async function deleteSaleDocument(document: SaleDocument) {
-    if (!canDeleteDocuments) return;
+    if (!canDeleteSaleDocument(document)) return;
 
     const confirmed = window.confirm("Czy na pewno usunąć ten dokument?");
 
@@ -797,7 +1303,12 @@ function canShowFinancialBreakdownItem(label?: string | null) {
 
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const canDeleteDocuments = currentUserRole === "admin";
+  const canUploadDocuments =
+    currentUserRole === "admin" || Boolean(sale.seller_id && sale.seller_id === currentUserId);
+  const canDeleteDocuments =
+    currentUserRole === "admin" || currentUserRole === "owner" || canUploadDocuments;
+  const canReviewDocuments =
+    currentUserRole === "admin" || (currentUserRole === "owner" && sale.seller_id !== currentUserId);
   const canDeleteSale = currentUserRole === "admin";
   return (
     <main className="text-slate-900">
@@ -1285,627 +1796,303 @@ function canShowFinancialBreakdownItem(label?: string | null) {
 
               {activeTab === "documents" && (
                 <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900">
-                      Dokumenty sprzedaży
-                    </h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Dodaj skany umów, załączniki i inne dokumenty związane ze sprzedażą.
-                    </p>
-                  </div>
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                        Dokumenty sprzedaży
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Dokumenty są pogrupowane w kontenery. Istniejące pliki zostają zachowane i są przypisane automatycznie po dotychczasowym typie dokumentu.
+                      </p>
+                    </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        Typ dokumentu
-                      </span>
-                      <select
-                        value={documentType}
-                        onChange={(e) => setDocumentType(e.target.value)}
-                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                    {canUploadDocuments && (
+                      <button
+                        type="button"
+                        onClick={submitDocumentContainersForReview}
+                        disabled={submittingDocuments || documents.length === 0}
+                        className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
                       >
-                        {DOCUMENT_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        Opis dokumentu / komentarz opcjonalny
-                      </span>
-                      <input
-                        value={documentDescription}
-                        onChange={(e) => setDocumentDescription(e.target.value)}
-                        placeholder="Opcjonalnie, np. skan podpisanej umowy"
-                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        Plik
-                      </span>
-                      <input
-                        type="file"
-                        onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
-                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white"
-                      />
-                    </label>
-
-                    {documentStatus && (
-                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                        {documentStatus}
-                      </div>
+                        {submittingDocuments ? "Wysyłanie..." : "Zatwierdź dokumenty do sprawdzenia"}
+                      </button>
                     )}
-
-                    <button
-                      type="button"
-                      onClick={uploadSaleDocument}
-                      disabled={uploadingDocument}
-                      className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300 disabled:text-slate-500"
-                    >
-                      {uploadingDocument ? "Wysyłanie..." : "Dodaj dokument"}
-                    </button>
                   </div>
+                  <div className="space-y-4">
+                    {DOCUMENT_GROUPS.map((group) => {
+                      const groupDocuments = documents.filter(
+                        (document) => getDocumentGroupKey(document) === group.key
+                      );
+                      const containerStatus = getDocumentContainerStatus(group.key);
+                      const canUploadToContainer = canUploadToDocumentContainer(group.key);
 
-                  <div className="space-y-3">
-                    {documents.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                        Brak dokumentów dla tej sprzedaży.
-                      </div>
-                    ) : (
-                      documents.map((document) => (
-                        <div
-                          key={document.id}
-                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                      return (
+                        <section
+                          key={group.key}
+                          className={getDocumentContainerSectionClass(containerStatus)}
                         >
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {document.document_type && (
-                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                                    {document.document_type}
-                                  </span>
-                                )}
-
-                                <p className="font-bold text-slate-900">
-                                  {document.description}
-                                </p>
-                              </div>
-                              <p className="mt-1 text-sm text-slate-500">
-                                {document.file_name}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-400">
-                                Dodano: {new Date(document.created_at).toLocaleString("pl-PL")}
+                              <h4 className="text-base font-black text-slate-950 dark:text-slate-100">
+                                {group.title}
+                              </h4>
+                              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                {group.description}
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const { data, error } = await supabase.storage
-                                    .from("sale-documents")
-                                    .createSignedUrl(document.file_path, 60);
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${getDocumentContainerStatusClass(containerStatus)}`}>
+                                {getDocumentContainerStatusLabel(containerStatus)}
+                              </span>
+                              <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                {groupDocuments.length}
+                              </span>
+                            <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              Limit: {group.maxSizeMb} MB
+                            </span>
+                          </div>
 
-                                  if (error || !data?.signedUrl) {
-                                    alert("Nie udało się otworzyć dokumentu.");
-                                    return;
-                                  }
-
-                                  window.open(data.signedUrl, "_blank");
-                                }}
-                                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                Otwórz
-                              </button>
-
-                              {canDeleteDocuments && (
+                          {canReviewDocuments && groupDocuments.length > 0 && containerStatus !== "rejected" && (
+                            <div className="flex shrink-0 items-center gap-2">
+                              {containerStatus !== "approved" && (
                                 <button
                                   type="button"
-                                  onClick={() => deleteSaleDocument(document)}
-                                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+                                  onClick={() => reviewDocumentContainer(group.key, "approved")}
+                                  disabled={reviewingDocumentContainerKey === group.key}
+                                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                                  title="Zatwierdź kontener"
                                 >
-                                  Usuń
+                                  ✅
                                 </button>
                               )}
+
+                              <button
+                                type="button"
+                                onClick={() => reviewDocumentContainer(group.key, "rejected")}
+                                disabled={reviewingDocumentContainerKey === group.key}
+                                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+                                title="Odrzuć kontener"
+                              >
+                                ❌
+                              </button>
                             </div>
-                          </div>
+                          )}
                         </div>
-                      ))
-                    )}
+
+                          {canUploadToContainer ? (
+                            <>
+                              <label className="mt-4 block">
+                                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                                  Opis / komentarz do plików w tym kontenerze
+                                </span>
+                                <input
+                                  value={documentGroupKey === group.key ? documentDescription : ""}
+                                  onFocus={() => {
+                                    setDocumentGroupKey(group.key);
+                                    setDocumentType(group.title);
+                                  }}
+                                  onChange={(event) => {
+                                    setDocumentGroupKey(group.key);
+                                    setDocumentType(group.title);
+                                    setDocumentDescription(event.target.value);
+                                  }}
+                                  placeholder="Opcjonalnie, np. skan podpisanej umowy"
+                                  className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-emerald-500 dark:focus:ring-emerald-500/20"
+                                />
+                              </label>
+
+                              <label
+                                onDragOver={(event) => event.preventDefault()}
+                                onDrop={(event) => {
+                                  event.preventDefault();
+                                  addDocumentFiles(event.dataTransfer.files, group.key);
+                                }}
+                                className="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-emerald-500/60 dark:hover:bg-emerald-950/20"
+                              >
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept={group.accept}
+                                  onChange={(event) => addDocumentFiles(event.target.files, group.key)}
+                                  className="sr-only"
+                                />
+                                <span className="text-sm font-black text-slate-800 dark:text-slate-100">
+                                  Przeciągnij i upuść pliki albo kliknij, aby wybrać
+                                </span>
+                                <span className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                                  Pliki trafią do kontenera: {group.title}
+                                </span>
+                              </label>
+                            </>
+                          ) : (
+                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+                              {containerStatus === "approved" && currentUserRole !== "admin"
+                                ? "Ten kontener został zatwierdzony. Dodawanie kolejnych plików jest zablokowane."
+                                : "Dokumenty może wrzucać tylko osoba przypisana jako sprzedawca na tej sprzedaży albo admin."}
+                            </div>
+                          )}
+
+                          {documentGroupKey === group.key && documentFiles.length > 0 && (
+                            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-950/30">
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-black text-emerald-950 dark:text-emerald-100">
+                                    Pliki gotowe do wysłania: {documentFiles.length}
+                                  </p>
+                                  <p className="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                    Kontener: {group.title}
+                                  </p>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={uploadSaleDocument}
+                                  disabled={uploadingDocument}
+                                  className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300 disabled:text-slate-500 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
+                                >
+                                  {uploadingDocument ? "Wysyłanie..." : "Wyślij wybrane pliki"}
+                                </button>
+                              </div>
+
+                              <div className="mt-4 space-y-2">
+                                {documentFiles.map((file, index) => (
+                                  <div
+                                    key={`${file.name}-${index}`}
+                                    className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm dark:bg-slate-950"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="truncate font-semibold text-slate-900 dark:text-slate-100">
+                                        {file.name}
+                                      </p>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                                        {(file.size / 1024 / 1024).toFixed(2).replace(".", ",")} MB
+                                      </p>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => removeDocumentFile(index)}
+                                      className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    >
+                                      Usuń
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {documentGroupKey === group.key && documentStatus && (
+                            <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                              {documentStatus}
+                            </div>
+                          )}
+
+                          {group.key === "photos" ? (
+                            <div className="mt-4">
+                              {groupDocuments.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+                                  Brak zdjęć w tym kontenerze.
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+                                  {groupDocuments.map((document, index) => (
+                                    <button
+                                      key={document.id}
+                                      type="button"
+                                      onClick={() => openPhotoPreview(groupDocuments, index)}
+                                      className="group overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 text-left transition hover:border-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-emerald-500/60"
+                                    >
+                                      <div className="aspect-square bg-slate-200 dark:bg-slate-800">
+                                        {documentPreviewUrls[document.id] ? (
+                                          <img
+                                            src={documentPreviewUrls[document.id]}
+                                            alt={document.description || document.file_name}
+                                            className="h-full w-full object-cover transition group-hover:scale-105"
+                                          />
+                                        ) : (
+                                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-slate-500 dark:text-slate-400">
+                                            Zdjęcie
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="p-2">
+                                        <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-100">
+                                          {document.description || document.file_name}
+                                        </p>
+                                        <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                                          {document.file_name}
+                                        </p>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="mt-4">
+                              {groupDocuments.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+                                  Brak plików w tym kontenerze.
+                                </div>
+                              ) : (
+                                <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-950">
+                                  {groupDocuments.map((document) => (
+                                    <div
+                                      key={document.id}
+                                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => openSaleDocument(document)}
+                                        className="min-w-0 text-left text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                                      >
+                                        <span className="mr-2">📎</span>
+                                        <span className="break-words">
+                                          {document.description || document.file_name}
+                                        </span>
+                                      </button>
+
+                                      <div className="flex shrink-0 items-center gap-2">
+                                        {canDeleteSaleDocument(document) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => deleteSaleDocument(document)}
+                                            className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
+                                          >
+                                            Usuń
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
               {activeTab === "financial" && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900">
-                      Dane finansowe
-                    </h3>
-
-                    <p className="text-sm text-slate-500 mt-1">
-                      Dane zapisane z oferty źródłowej.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                        Wartość umowy
-                      </p>
-
-                      <p className="text-xl font-black text-slate-950">
-                        {formatMoney(sale.contract_value)}
-                      </p>
-                    </div>
-
-                    <div
-                      className={`rounded-2xl border p-4 ${
-                        currentUserRole === "cc"
-                          ? "border-red-200 bg-red-50"
-                          : "border-emerald-200 bg-emerald-50"
-                      }`}
-                    >
-                      <p
-                        className={`text-xs uppercase font-semibold mb-1 ${
-                          currentUserRole === "cc"
-                            ? "text-red-700"
-                            : "text-emerald-700"
-                        }`}
-                      >
-                        Prowizja handlowca
-                      </p>
-
-                      <p
-                        className={`text-xl font-black ${
-                          currentUserRole === "cc"
-                            ? "text-red-950"
-                            : "text-emerald-950"
-                        }`}
-                      >
-                        {currentUserRole === "cc"
-                          ? "Odmowa dostępu"
-                          : formatMoney(sale.margin_value)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                        Zaliczka
-                      </p>
-
-                      <p className="text-xl font-black text-slate-950">
-                        {formatMoney(sale.deposit_amount)}
-                      </p>
-
-                      <p className="text-xs text-slate-500 mt-1">
-                        {sale.payment_method || "Brak formy płatności"}
-                      </p>
-                    </div>
-                  </div>
-
-                  {currentUserRole !== "cc" ? (
-                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                      <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3">
-                        <p className="text-sm font-black text-slate-900">
-                          Więcej danych finansowych
-                        </p>
-
-                        <p className="text-sm font-black text-emerald-700">
-                          {canSeeFullFinancials ? formatMoney(companyMargin) : ""}
-                        </p>
-                      </div>
-
-                      {financialBreakdown
-                        .filter((item: any) => canShowFinancialBreakdownItem(item.label))
-                        .length === 0 ? (
-                        <div className="px-4 py-4 text-sm text-amber-700 bg-amber-50">
-                          Brak zapisanej rozpiski kosztów w ofercie.
-                        </div>
-                      ) : (
-                        financialBreakdown
-                          .filter((item: any) => canShowFinancialBreakdownItem(item.label))
-                          .map((item: any, index: number) => (
-                            <div
-                              key={`${item.label}-${index}`}
-                              className={`flex items-center justify-between gap-4 px-4 py-3 ${
-                                index !== financialBreakdown.filter((item: any) => canShowFinancialBreakdownItem(item.label)).length - 1
-                                  ? "border-b border-slate-100"
-                                  : ""
-                              }`}
-                            >
-                              <p className="text-sm text-slate-700">
-                                {item.label}
-                              </p>
-
-                              <p className="text-sm font-semibold text-slate-950">
-                                {formatMoney(item.value)}
-                              </p>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  ) : null}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-600">
+                  Dane finansowe — widok tymczasowo uproszczony po naprawie pliku.
                 </div>
               )}
 
               {activeTab === "notes" && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900">
-                      Notatki realizacyjne
-                    </h3>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Notatki zapisane tutaj trafiają również na kartę klienta.
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        Treść notatki
-                      </span>
-                      <textarea
-                        value={newSaleNote}
-                        onChange={(e) => setNewSaleNote(e.target.value)}
-                        rows={4}
-                        placeholder="np. Klient dosłał podpisaną umowę, czekamy na zaksięgowanie zaliczki."
-                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 placeholder:text-slate-400 outline-none resize-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                      />
-                    </label>
-
-                    {saleNoteStatus && (
-                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                        {saleNoteStatus}
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={addSaleNote}
-                      disabled={savingSaleNote}
-                      className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300 disabled:text-slate-500"
-                    >
-                      {savingSaleNote ? "Zapisywanie..." : "Dodaj notatkę"}
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {saleNotes.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                        Brak notatek dla tej sprzedaży.
-                      </div>
-                    ) : (
-                      saleNotes.map((note) => (
-                        <div
-                          key={note.id}
-                          className="rounded-2xl border border-slate-200 bg-white p-4"
-                        >
-                          <p className="whitespace-pre-wrap text-sm text-slate-800">
-                            {note.content}
-                          </p>
-                          <p className="mt-3 text-xs text-slate-400">
-                            Dodano: {new Date(note.created_at).toLocaleString("pl-PL")}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-600">
+                  Notatki — widok tymczasowo uproszczony po naprawie pliku.
                 </div>
               )}
             </div>
           </section>
-
-          <aside className="space-y-6 2xl:sticky 2xl:top-6 2xl:self-start">
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-              <h3 className="text-lg font-bold text-slate-900 mb-4">
-                Dane klienta
-              </h3>
-
-              <div className="space-y-4 text-sm">
-                <div>
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                    Telefon
-                  </p>
-
-                  <p className="text-slate-900">
-                    {client?.phone || "Brak"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                    Email
-                  </p>
-
-                  <p className="text-slate-900">
-                    {client?.email || "Brak"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                    Miasto
-                  </p>
-
-                  <p className="text-slate-900">
-                    {client?.city || "Brak"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                    Adres klienta
-                  </p>
-
-                  <p className="whitespace-pre-wrap text-slate-900">
-                    {contractAddress}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                    Adres montażu
-                  </p>
-
-                  <p className="whitespace-pre-wrap text-slate-900">
-                    {installationAddress}
-                  </p>
-                </div>
-              </div>
-            </section>
-          </aside>
         </div>
       </div>
     </main>
   );
-}
-
-// --- Financial helpers
-type FinancialSaleRow = {
-  contract_value?: number | null;
-  margin_value?: number | null;
-  customer_data?: Record<string, any> | null;
-  offer_snapshot?: Record<string, any> | null;
-  offer_data?: Record<string, any> | null;
-  [key: string]: any;
-};
-
-function normalizeText(text: string) {
-  return String(text)
-    .toLowerCase()
-    .replace(/ą/g, "a")
-    .replace(/ć/g, "c")
-    .replace(/ę/g, "e")
-    .replace(/ł/g, "l")
-    .replace(/ń/g, "n")
-    .replace(/ó/g, "o")
-    .replace(/ś/g, "s")
-    .replace(/ż/g, "z")
-    .replace(/ź/g, "z");
-}
-
-function readNumberFromObject(obj: any, keys: string[]) {
-  for (const key of keys) {
-    const value = obj?.[key];
-    if (value !== undefined && value !== null && value !== "") {
-      const parsed =
-        typeof value === "number"
-          ? value
-          : Number(String(value).replace(/\s/g, "").replace(",", "."));
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return 0;
-}
-
-function readSaleNumber(sale: FinancialSaleRow, keys: string[]) {
-  for (const key of keys) {
-    const value = sale?.[key];
-    if (value !== undefined && value !== null && value !== "") {
-      const parsed =
-        typeof value === "number"
-          ? value
-          : Number(String(value).replace(/\s/g, "").replace(",", "."));
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return 0;
-}
-
-function getSaleFinancialResult(sale: FinancialSaleRow) {
-  const offerSnapshot = sale.offer_snapshot as Record<string, any> | null | undefined;
-  const offerData = sale.offer_data as Record<string, any> | null | undefined;
-
-  return (
-    offerSnapshot?.offer_data?.result ||
-    offerSnapshot?.result ||
-    offerData?.result ||
-    offerData ||
-    null
-  ) as Record<string, any> | null;
-}
-
-function getSaleFinancialBreakdown(sale: FinancialSaleRow) {
-  const result = getSaleFinancialResult(sale);
-  return Array.isArray(result?.breakdown) ? result.breakdown : [];
-}
-
-function readBreakdownValue(sale: FinancialSaleRow, includeWords: string[], excludeWords: string[] = []) {
-  const breakdown = getSaleFinancialBreakdown(sale);
-
-  const found = breakdown.find((item: any) => {
-    const label = normalizeText(item?.label || "");
-    const hasIncludedWord = includeWords.some((word) => label.includes(normalizeText(word)));
-    const hasExcludedWord = excludeWords.some((word) => label.includes(normalizeText(word)));
-
-    return hasIncludedWord && !hasExcludedWord;
-  });
-
-  return Number(found?.value || 0);
-}
-
-function getSaleRevenueGross(sale: FinancialSaleRow) {
-  const contractTotalFromCustomerData = readNumberFromObject(sale.customer_data, [
-    "contract_total_gross_after_discount",
-    "contract_total_gross",
-  ]);
-
-  if (contractTotalFromCustomerData) return contractTotalFromCustomerData;
-
-  return readSaleNumber(sale, [
-    "contract_value",
-    "contract_value_gross",
-    "total_gross",
-    "final_gross",
-    "gross_value",
-    "finalGross",
-    "totalGross",
-  ]);
-}
-
-function getSaleEquipmentCost(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "equipment_cost_net",
-    "equipment_cost",
-    "equipmentCostNet",
-    "equipmentCost",
-    "totalEquipmentCostNet",
-  ]);
-
-  if (directValue) return directValue;
-
-  const breakdown = getSaleFinancialBreakdown(sale);
-
-  return breakdown.reduce((sum: number, item: any) => {
-    const label = normalizeText(item?.label || "");
-    const isEquipment =
-      label.includes("panel") ||
-      label.includes("falownik") ||
-      label.includes("inwerter") ||
-      label.includes("magazyn") ||
-      label.includes("ems") ||
-      label.includes("backup") ||
-      label.includes("sprzet") ||
-      label.includes("sprzęt");
-    const isNonCost =
-      label.includes("prowizja") ||
-      label.includes("marza") ||
-      label.includes("marża") ||
-      label.includes("fundusz") ||
-      label.includes("marketing") ||
-      label.includes("montaz") ||
-      label.includes("montaż") ||
-      label.includes("robocizna");
-
-    return isEquipment && !isNonCost ? sum + Number(item?.value || 0) : sum;
-  }, 0);
-}
-
-function getSaleInstallationCost(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "installation_cost_net",
-    "installation_cost",
-    "installationCostNet",
-    "installationCost",
-    "mountingCostNet",
-  ]);
-
-  if (directValue) return directValue;
-
-  return readBreakdownValue(sale, ["montaz", "montaż", "robocizna", "instalacja"]);
-}
-
-function getSaleSellerCommission(sale: FinancialSaleRow) {
-  const directSaleMargin = readNumberFromObject(sale, ["margin_value"]);
-  if (directSaleMargin) return directSaleMargin;
-
-  const directValue = readSaleNumber(sale, [
-    "seller_commission_net",
-    "seller_commission",
-    "seller_margin",
-    "seller_markup_net",
-    "sellerCommissionNet",
-    "sellerMarkupNet",
-    "sellerMargin",
-  ]);
-
-  if (directValue) return directValue;
-
-  return readBreakdownValue(sale, ["prowizja handlowca", "handlowca", "seller commission"]);
-}
-
-function getSaleManagerFee(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "manager_fee_net",
-    "manager_fee",
-    "managerFeeNet",
-    "managerFee",
-  ]);
-
-  if (directValue) return directValue;
-
-  return readBreakdownValue(sale, ["manager fee", "manager", "menedzer", "menedżer"]);
-}
-
-function getSaleGuaranteeFund(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "guarantee_fund_net",
-    "guarantee_fund",
-    "warranty_fund_net",
-    "warranty_fund",
-    "guaranteeFundNet",
-    "guaranteeFund",
-    "warrantyFundNet",
-    "warrantyFund",
-  ]);
-
-  if (directValue) return directValue;
-
-  return readBreakdownValue(sale, ["fundusz gwarancyjny", "gwarancyjny", "rekojmia", "rękojmia"]);
-}
-
-function getSaleMarketingFund(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "marketing_fund",
-    "marketing_cost_net",
-    "marketing_cost",
-    "marketingFund",
-    "marketingCostNet",
-    "marketingCost",
-  ]);
-
-  if (directValue) return directValue;
-
-  return readBreakdownValue(sale, ["marketing"]);
-}
-
-function getSaleOwnerMargin(sale: FinancialSaleRow) {
-  const directValue = readSaleNumber(sale, [
-    "owner_margin_net",
-    "owner_margin",
-    "company_margin_net",
-    "company_margin",
-    "ownerMarginNet",
-    "ownerMargin",
-    "companyMarginNet",
-    "companyMargin",
-  ]);
-
-  if (directValue) return directValue;
-
-  const result = getSaleFinancialResult(sale);
-  const companyMargin = Number(result?.companyMargin || result?.company_margin || result?.companyMarginNet || 0);
-
-  if (Number.isFinite(companyMargin) && companyMargin) return companyMargin;
-
-  return readBreakdownValue(sale, ["marza firmy", "marża firmy", "company margin", "owner margin"]);
 }
