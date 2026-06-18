@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
@@ -211,6 +211,26 @@ export default function OfferResult({
   const [showClientRequiredModal, setShowClientRequiredModal] = useState(false);
   const [clientSearchQuery, setClientSearchQuery] = useState("");
   const [modalSelectedClientId, setModalSelectedClientId] = useState(selectedClientId || "");
+
+  const selectedCrmClient = crmClients.find((client) => client.id === selectedClientId);
+  const selectedCrmClientEmail = selectedCrmClient?.email?.trim() || "";
+  const normalizedClientEmail = clientEmail.trim();
+  const hasSelectedCrmClient = Boolean(selectedClientId);
+  const hasSelectedCrmClientEmail = Boolean(selectedCrmClientEmail);
+  const canSendOfferEmail = hasSelectedCrmClient && Boolean(normalizedClientEmail);
+
+  useEffect(() => {
+    if (!selectedClientId) {
+      if (clientEmail) {
+        setClientEmail("");
+      }
+      return;
+    }
+
+    if (selectedCrmClientEmail && clientEmail !== selectedCrmClientEmail) {
+      setClientEmail(selectedCrmClientEmail);
+    }
+  }, [selectedClientId, selectedCrmClientEmail, clientEmail, setClientEmail]);
 
   const canSeeMarginSummary = canSeeTechnicalView;
 
@@ -478,12 +498,12 @@ export default function OfferResult({
         };
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50 sm:p-6">
+    <section className="relative overflow-hidden rounded-3xl border border-emerald-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30 dark:ring-slate-800 sm:p-6">
       <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-emerald-500 via-lime-400 to-teal-400" />
-      <div className="mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 sm:flex-row sm:items-center">
+      <div className="mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Krok 2</p>
-          <h2 className="text-lg font-bold text-slate-950 sm:text-xl">Oferta dla klienta</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">Krok 2</p>
+          <h2 className="text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">Oferta dla klienta</h2>
         </div>
 
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
@@ -494,7 +514,7 @@ export default function OfferResult({
               setCopied(false);
               setEmailStatus("");
             }}
-            className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-200"
+            className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Edytuj
           </button>
@@ -502,7 +522,7 @@ export default function OfferResult({
           <button
             type="button"
             onClick={resetForm}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
             Wyczyść
           </button>
@@ -511,34 +531,34 @@ export default function OfferResult({
 
       <div className="space-y-4">
         {result.offerType !== "storage" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
-            <p className="text-slate-500 text-sm">Moc instalacji</p>
-            <p className="text-xl font-bold text-slate-950 sm:text-2xl">{result.pvPowerKw} kWp</p>
-            <p className="text-xs text-slate-500 mt-1">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Moc instalacji</p>
+            <p className="text-xl font-bold text-slate-950 dark:text-slate-100 sm:text-2xl">{result.pvPowerKw} kWp</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               {panelCount} paneli × {panelPowerWp} Wp
             </p>
           </div>
         )}
 
         {result.inverter !== "Brak" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
-            <p className="text-slate-500 text-sm">Falownik</p>
-            <p className="break-words text-lg font-bold text-slate-950 sm:text-xl">{result.inverter}</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Falownik</p>
+            <p className="break-words text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">{result.inverter}</p>
           </div>
         )}
 
         {result.energyStorage !== "Brak" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
-            <p className="text-slate-500 text-sm">Magazyn energii</p>
-            <p className="break-words text-lg font-bold text-slate-950 sm:text-xl">{result.energyStorage}</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Magazyn energii</p>
+            <p className="break-words text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">{result.energyStorage}</p>
           </div>
         )}
 
         {additionalServices.length > 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-slate-500 text-sm">Usługi dodatkowe</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Usługi dodatkowe</p>
                 <div className="mt-2 space-y-2">
                   {additionalServices.map((service) => (
                     <div
@@ -570,14 +590,14 @@ export default function OfferResult({
           </div>
         )}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100">
-          <p className="text-slate-500 text-sm">Cena netto</p>
-          <p className="text-xl font-bold text-slate-950 sm:text-2xl">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Cena netto</p>
+          <p className="text-xl font-bold text-slate-950 dark:text-slate-100 sm:text-2xl">
             {result.finalNet.toLocaleString("pl-PL")} zł
           </p>
         </div>
 
-        <div className="rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-500 p-4 text-white shadow-xl shadow-emerald-200 sm:p-5">
+        <div className="rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-500 p-4 text-white shadow-xl shadow-emerald-200 dark:shadow-black/30 sm:p-5">
           <p className="text-sm font-semibold">Cena brutto {result.vatRate}%</p>
           <p className="break-words text-2xl font-black text-white sm:text-3xl">
             {result.finalGross.toLocaleString("pl-PL")} zł
@@ -586,11 +606,11 @@ export default function OfferResult({
 
 
         {saveOfferToCrm && (
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 shadow-sm">
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-950/25">
             {savedOfferId ? (
               <Link
                 href={`/offers/${savedOfferId}?createSale=1`}
-                className="inline-flex w-full items-center justify-center rounded-2xl bg-[#F54927] px-4 py-4 text-sm font-bold text-white shadow-md shadow-orange-100 transition hover:bg-[#d93f20] sm:text-base"
+               className="inline-flex w-full items-center justify-center rounded-2xl bg-[#F54927] px-4 py-4 text-sm font-bold text-white shadow-md shadow-orange-100 transition hover:bg-[#d93f20] dark:shadow-black/30 sm:text-base"
               >
                 Wygeneruj sprzedaż
               </Link>
@@ -599,7 +619,7 @@ export default function OfferResult({
                 type="button"
                 onClick={handleSaveOfferToCrm}
                 disabled={savingOffer || showSaveAnimation || !selectedClientId}
-                className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                className="w-full rounded-2xl bg-emerald-600 px-4 py-4 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:shadow-black/30 dark:disabled:bg-slate-700 dark:disabled:text-slate-400 sm:text-base"
               >
                 {savingOffer || showSaveAnimation ? (
                   <span className="inline-flex items-center justify-center gap-2">
@@ -613,13 +633,13 @@ export default function OfferResult({
             )}
 
             {!selectedClientId && !savedOfferId && (
-              <p className="mt-2 text-xs font-medium text-amber-700">
+              <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
                 Wybierz klienta w formularzu, żeby zapisać ofertę na jego karcie.
               </p>
             )}
 
             {saveOfferStatus && (
-              <p className="mt-2 text-sm font-medium text-slate-700">
+              <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 {saveOfferStatus}
               </p>
             )}
@@ -632,106 +652,139 @@ export default function OfferResult({
               type="button"
               onClick={downloadOfferPdf}
               disabled={isGeneratingPdf}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5 disabled:border-slate-200 disabled:text-slate-300"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5 disabled:border-slate-200 disabled:text-slate-300 dark:bg-slate-950 dark:hover:bg-emerald-950/30 dark:disabled:border-slate-700 dark:disabled:text-slate-600"
               aria-label="Pobierz PDF"
               title="Pobierz PDF"
             >
               <FileTextIcon />
               <span className="sr-only">Pobierz PDF</span>
             </button>
-            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Pobierz PDF</span>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500 dark:text-slate-400">Pobierz PDF</span>
           </div>
 
           <div className="flex flex-col items-center gap-1">
             <button
               type="button"
               onClick={() => setIsMailPanelOpen((current) => !current)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5 dark:bg-slate-950 dark:hover:bg-emerald-950/30"
               aria-expanded={isMailPanelOpen}
               aria-label="Pokaż wysyłkę mailem"
               title="Wyślij mailem"
             >
               <MailIcon />
             </button>
-            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Wyślij e-mail</span>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500 dark:text-slate-400">Wyślij e-mail</span>
           </div>
 
           <div className="flex flex-col items-center gap-1">
             <button
               type="button"
               onClick={copyOffer}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[#00AB87]/30 bg-white text-[#00AB87] shadow-none transition hover:border-[#00AB87] hover:bg-[#00AB87]/5 dark:bg-slate-950 dark:hover:bg-emerald-950/30"
               aria-label="Kopiuj treść maila"
               title="Kopiuj treść maila"
             >
               <CopyIcon />
             </button>
-            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500">Kopiuj treść do schowka</span>
+            <span className="max-w-[90px] text-center text-[10px] font-medium leading-tight text-slate-500 dark:text-slate-400">Kopiuj treść do schowka</span>
           </div>
 
           {isGeneratingPdf && (
-            <span className="text-sm font-medium text-slate-500">Generowanie PDF...</span>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Generowanie PDF...</span>
           )}
         </div>
 
         {copied && (
-          <p className="text-sm text-slate-600">Skopiowano treść maila do schowka.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Skopiowano treść maila do schowka.</p>
         )}
 
         {pdfStatus && (
-          <p className="text-sm text-slate-600">{pdfStatus}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">{pdfStatus}</p>
         )}
 
 
         {isMailPanelOpen && (
-          <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
-          <label className="block">
-            <span className="text-sm text-slate-700">E-mail klienta</span>
-            <input
-              className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 sm:text-base"
-              type="email"
-              placeholder="klient@example.com"
-              value={clientEmail}
-              onChange={(e) => setClientEmail(e.target.value)}
-            />
-          </label>
+          <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm dark:border-blue-500/30 dark:bg-blue-950/25">
+            <label className="block">
+              <span className="text-sm text-slate-700 dark:text-slate-200">E-mail klienta</span>
+              <input
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:ring-blue-500/20 dark:disabled:bg-slate-800 dark:disabled:text-slate-500 sm:text-base"
+                type="email"
+                placeholder={selectedClientId ? "Wpisz e-mail klienta" : "Najpierw wybierz klienta CRM"}
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                disabled={!selectedClientId}
+              />
+            </label>
 
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
+            {!hasSelectedCrmClient && (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                Najpierw wybierz klienta z CRM w formularzu kalkulatora. Wysyłka maila bez klienta CRM jest zablokowana.
+              </p>
+            )}
+
+            {hasSelectedCrmClient && !hasSelectedCrmClientEmail && (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                Ten klient nie ma adresu e-mail na karcie CRM. Wpisany tutaj adres zostanie automatycznie zapisany na karcie klienta. Zmienić go lub usunąć może tylko administrator.
+              </p>
+            )}
+
+            {hasSelectedCrmClient && hasSelectedCrmClientEmail && (
+              <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                E-mail został pobrany z karty klienta CRM.
+              </p>
+            )}
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSendMode("anonymous")}
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
+                    sendMode === "anonymous"
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  }`}
+                >
+                  Anonimowo
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSendMode("public")}
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
+                    sendMode === "public"
+                      ? "border-emerald-600 bg-emerald-600 text-white"
+                      : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  }`}
+                >
+                  Jawnie
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={() => setSendMode("anonymous")}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
-                  sendMode === "anonymous"
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
+                onClick={() => {
+                  if (!hasSelectedCrmClient) {
+                    setEmailStatus(
+                      "Wybierz klienta z CRM przed wysłaniem oferty mailowej."
+                    );
+                    return;
+                  }
+                  if (!normalizedClientEmail) {
+                    setEmailStatus(
+                      "Brakuje adresu e-mail klienta."
+                    );
+                    return;
+                  }
+                  setShowSendConfirm(true);
+                }}
+                disabled={sendingEmail || !canSendOfferEmail}
+                className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-bold text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:shadow-black/30 dark:disabled:bg-slate-700 dark:disabled:text-slate-400 sm:text-base"
               >
-                Anonimowo
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSendMode("public")}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
-                  sendMode === "public"
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                Jawnie
+                {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
               </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setShowSendConfirm(true)}
-              disabled={sendingEmail || !clientEmail}
-              className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-bold sm:text-base text-white shadow-md shadow-blue-100 transition hover:bg-blue-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-            >
-              {sendingEmail ? "Wysyłanie..." : "Wyślij ofertę mailem"}
-            </button>
-          </div>
           </div>
         )}
 
@@ -752,17 +805,17 @@ export default function OfferResult({
         )}
 
         {canSeeMarginSummary && (
-          <div className="mt-6 border-t border-slate-200 pt-4">
+          <div className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-700">
             <button
               type="button"
               onClick={() => setShowMarginSummary((current) => !current)}
-              className="w-full flex items-center justify-between rounded-2xl bg-white border border-slate-200 px-4 py-3 text-left hover:bg-slate-50 transition"
+              className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
             >
               <>
-                <span className="font-medium text-slate-500">
+                <span className="font-medium text-slate-500 dark:text-slate-300">
                   Zaawansowane dane finansowe
                 </span>
-                <span className="text-slate-400">
+                <span className="text-slate-400 dark:text-slate-500">
                   {showMarginSummary ? "Zwiń" : "Rozwiń"}
                 </span>
               </>
@@ -770,7 +823,7 @@ export default function OfferResult({
 
             {showMarginSummary && (
               <div className="mt-4 space-y-3">
-                <div className="flex justify-between text-sm text-slate-600 mb-4 font-semibold">
+                <div className="mb-4 flex justify-between text-sm font-semibold text-slate-600 dark:text-slate-300">
                   <span>Realna marża firmy</span>
                   <span>{result.companyMargin.toLocaleString("pl-PL")} zł</span>
                 </div>
@@ -781,7 +834,7 @@ export default function OfferResult({
                     : []).map((item) => (
                     <div
                       key={item.label}
-                      className="flex items-start justify-between gap-3 text-sm text-slate-700"
+                      className="flex items-start justify-between gap-3 text-sm text-slate-700 dark:text-slate-300"
                     >
                       <span className="min-w-0 break-words">{item.label}</span>
                       <span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span>
@@ -796,29 +849,29 @@ export default function OfferResult({
 
       {showClientRequiredModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
-            <h3 className="mb-2 text-lg font-bold text-slate-950">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl dark:border dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/60">
+            <h3 className="mb-2 text-lg font-bold text-slate-950 dark:text-slate-100">
               Najpierw wybierz klienta z CRM
             </h3>
 
-            <p className="mb-5 text-sm leading-6 text-slate-600">
+            <p className="mb-5 text-sm leading-6 text-slate-600 dark:text-slate-300">
               Żeby wygenerować PDF, oferta zostanie najpierw zapisana na karcie klienta w CRM. Wybierz klienta, a potem kliknij OK.
             </p>
 
             <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Wyszukaj klienta</span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Wyszukaj klienta</span>
               <input
                 type="text"
                 value={clientSearchQuery}
                 onChange={(event) => setClientSearchQuery(event.target.value)}
                 placeholder="Wpisz imię, nazwisko, firmę, telefon, e-mail albo LeadID"
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-emerald-500 dark:focus:ring-emerald-500/20"
               />
             </label>
 
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
               {!normalizedClientSearchQuery ? (
-                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
                   Zacznij wpisywać, żeby wyszukać klienta.
                 </p>
               ) : filteredCrmClients.length > 0 ? (
@@ -832,19 +885,19 @@ export default function OfferResult({
                       onClick={() => setModalSelectedClientId(client.id)}
                       className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                         isSelected
-                          ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100"
-                          : "border-slate-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40"
+                          ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100 dark:bg-emerald-950/30 dark:ring-emerald-500/20"
+                          : "border-slate-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-950/20"
                       }`}
                     >
-                      <span className="block font-semibold text-slate-950">{getClientDisplayName(client)}</span>
+                      <span className="block font-semibold text-slate-950 dark:text-slate-100">{getClientDisplayName(client)}</span>
                       {getClientDisplayMeta(client) && (
-                        <span className="mt-1 block text-xs text-slate-500">{getClientDisplayMeta(client)}</span>
+                        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{getClientDisplayMeta(client)}</span>
                       )}
                     </button>
                   );
                 })
               ) : (
-                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
                   Brak klientów pasujących do wyszukiwania.
                 </p>
               )}
@@ -854,7 +907,7 @@ export default function OfferResult({
               <button
                 type="button"
                 onClick={() => setShowClientRequiredModal(false)}
-                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Anuluj
               </button>
@@ -868,7 +921,7 @@ export default function OfferResult({
                   setShowClientRequiredModal(false);
                   await generatePdfAfterCrmSave(modalSelectedClientId);
                 }}
-                className="rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400"
+                className="rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-700 dark:disabled:text-slate-400"
               >
                 {isGeneratingPdf ? "Zapisywanie..." : "OK"}
               </button>
@@ -879,12 +932,12 @@ export default function OfferResult({
 
       {showSendConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-950 mb-3">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl dark:border dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/60">
+            <h3 className="mb-3 text-lg font-bold text-slate-950 dark:text-slate-100">
               {confirmationText.title}
             </h3>
 
-            <p className="text-sm text-slate-600 leading-6 mb-6">
+            <p className="mb-6 text-sm leading-6 text-slate-600 dark:text-slate-300">
               {confirmationText.body}
             </p>
 
@@ -892,7 +945,7 @@ export default function OfferResult({
               <button
                 type="button"
                 onClick={() => setShowSendConfirm(false)}
-                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700"
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
               >
                 Nie, wróć
               </button>
@@ -900,10 +953,18 @@ export default function OfferResult({
               <button
                 type="button"
                 onClick={() => {
+                  if (!canSendOfferEmail) {
+                    setShowSendConfirm(false);
+                    setEmailStatus(
+                      "Oferta nie została wysłana. Wybierz klienta CRM i podaj adres e-mail."
+                    );
+                    return;
+                  }
+
                   setShowSendConfirm(false);
                   sendOfferEmail(sendMode);
                 }}
-                className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white"
+                className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-500"
               >
                 {confirmationText.confirm}
               </button>

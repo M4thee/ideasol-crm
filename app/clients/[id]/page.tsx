@@ -400,6 +400,13 @@ export default function ClientPage() {
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
 
+    console.log("Client notes loaded:", {
+      clientId,
+      count: notesData?.length || 0,
+      notesData,
+      notesError,
+    });
+
     if (notesError) {
       console.error("Błąd ładowania notatek klienta:", notesError);
       setNotes([]);
@@ -487,21 +494,6 @@ export default function ClientPage() {
       });
 
       setActivities(activitiesWithAuthors as ClientActivity[]);
-      if (status === "Niezainteresowany" && client) {
-  const { error: clientStatusError } = await supabase
-    .from("clients")
-    .update({ status: "Niezainteresowany" })
-    .eq("id", client.id);
-
-  if (clientStatusError) {
-    console.error("Błąd aktualizacji statusu klienta na niezainteresowany:", clientStatusError);
-  } else {
-    setClient({
-      ...client,
-      status: "Niezainteresowany",
-    });
-  }
-}
     }
     setLoading(false);
   }
@@ -553,6 +545,16 @@ export default function ClientPage() {
     if (tag.color === "emerald") return "bg-emerald-100 text-emerald-800 border-emerald-200";
     if (tag.color === "purple") return "bg-purple-100 text-purple-800 border-purple-200";
     return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+
+  function getTagStyle(tag: ClientTag): React.CSSProperties | undefined {
+    if (!tag.color?.startsWith("#")) return undefined;
+
+    return {
+      backgroundColor: `${tag.color}1A`,
+      borderColor: `${tag.color}66`,
+      color: tag.color,
+    };
   }
 
   async function addTagToClient(tag: ClientTag) {
@@ -682,6 +684,26 @@ export default function ClientPage() {
 
   function getAdvisorName() {
     return client?.assigned_user?.display_name || client?.assigned_user?.email || "Brak";
+  }
+
+  function getPhoneHref(phone: string | null, countryCode?: string | null) {
+    const cleanPhone = String(phone || "").trim();
+    const cleanCountryCode = String(countryCode || "").trim();
+
+    if (!cleanPhone) return "";
+
+    const phoneWithCountryCode = cleanPhone.startsWith("+")
+      ? cleanPhone
+      : `${cleanCountryCode}${cleanPhone}`;
+    const normalizedPhone = phoneWithCountryCode.replace(/[^+\d]/g, "");
+
+    return normalizedPhone ? `tel:${normalizedPhone}` : "";
+  }
+
+  function getEmailHref(email: string | null) {
+    const cleanEmail = String(email || "").trim();
+
+    return cleanEmail ? `mailto:${cleanEmail}` : "";
   }
 
   function getLeadCreatorName() {
@@ -929,11 +951,9 @@ export default function ClientPage() {
 
     console.log("Tworzenie powiadomienia z karty klienta:", notificationPayload);
 
-    const { data: notificationData, error: notificationError } = await supabase
+    const { error: notificationError } = await supabase
       .from("notifications")
-      .insert(notificationPayload)
-      .select("id, user_id, title, body, client_id, is_read, created_at")
-      .single();
+      .insert(notificationPayload);
 
     if (notificationError) {
       console.error("Błąd tworzenia powiadomienia z karty klienta:", {
@@ -945,7 +965,7 @@ export default function ClientPage() {
         clientId: client.id,
       });
     } else {
-      console.log("Powiadomienie utworzone z karty klienta:", notificationData);
+      console.log("Powiadomienie utworzone z karty klienta dla użytkownika:", selectedUserId);
       window.dispatchEvent(new Event("ideasol-notifications-refresh"));
     }
 
@@ -1198,7 +1218,7 @@ export default function ClientPage() {
 
   if (loading) {
     return (
-      <main className="text-slate-900">
+      <main className="text-slate-900 dark:text-slate-100">
         <p className="text-slate-500">Ładowanie karty klienta...</p>
       </main>
     );
@@ -1206,7 +1226,7 @@ export default function ClientPage() {
 
   if (accessDenied) {
     return (
-      <main className="text-slate-900">
+      <main className="text-slate-900 dark:text-slate-100">
         <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700">
           Nie masz uprawnień do przeglądania tego profilu.
         </div>
@@ -1223,7 +1243,7 @@ export default function ClientPage() {
 
   if (!client) {
     return (
-      <main className="text-slate-900">
+      <main className="text-slate-900 dark:text-slate-100">
         <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <h1 className="text-2xl font-bold text-slate-900">Nie znaleziono klienta</h1>
           <p className="text-slate-500 mt-2 break-all">Szukane ID: {clientId}</p>
@@ -1250,7 +1270,7 @@ export default function ClientPage() {
   const meetings = events.filter((event) => event.event_type === "meeting");
   const reminders = events.filter((event) => event.event_type === "reminder");
   const visibleActivities = activities;
-const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
+  const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
 
   function isReminderDone(status: string | null) {
     return status === "done" || status?.startsWith("Zakończone");
@@ -1301,10 +1321,10 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
   }
 
   return (
-    <main className="text-slate-900">
+    <main className="text-slate-900 dark:text-slate-100">
       <div className="space-y-6">
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="bg-[#C7EAF0] px-6 py-6 flex items-start justify-between gap-4 flex-wrap">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-wrap items-start justify-between gap-4 bg-[#C7EAF0] px-6 py-6 dark:bg-slate-900">
             <div>
               <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <p className="text-sm font-semibold text-slate-600">{visibleLeadId}</p>
@@ -1313,7 +1333,17 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                 </p>
               </div>
 
+
               <h1 className="text-3xl font-bold text-slate-900">{clientName}</h1>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href={`/calculator?clientId=${client.id}`}
+                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-500"
+                >
+                  Przygotuj ofertę
+                </Link>
+              </div>
 
               <div className="mt-1 space-y-0.5 text-xs font-medium text-slate-400">
   <p>
@@ -1345,6 +1375,7 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                       onClick={() => removeTagFromClient(tag)}
                       disabled={savingTag}
                       title="Kliknij, aby usunąć tag z klienta"
+                      style={getTagStyle(tag)}
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold transition hover:opacity-80 disabled:opacity-50 ${getTagClass(tag)}`}
                     >
                       {tag.name}
@@ -1353,6 +1384,7 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                   ) : (
                     <span
                       key={tag.id}
+                      style={getTagStyle(tag)}
                       className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold ${getTagClass(tag)}`}
                     >
                       {tag.name}
@@ -1398,7 +1430,7 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
             </div>
           </div>
 
-          <div className="border-t border-slate-200 bg-[#EBF8FA] px-6 py-5">
+          <div className="border-t border-slate-200 bg-[#EBF8FA] px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
             <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
               <div className="space-y-5">
                 <div>
@@ -1466,7 +1498,18 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
 
                       <div>
                         <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Telefon osoby kontaktowej</p>
-                        <p className="mt-1 font-semibold text-slate-900">{client.contact_phone || "Brak"}</p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {client.contact_phone ? (
+                            <a
+                              href={getPhoneHref(client.contact_phone)}
+                              className="text-[#119182] hover:underline"
+                            >
+                              {client.contact_phone}
+                            </a>
+                          ) : (
+                            "Brak"
+                          )}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1482,14 +1525,32 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Telefon</p>
                     <p className="mt-1 text-lg font-bold text-slate-900">
-                      {client.phone || "Brak"}
+                      {client.phone ? (
+                        <a
+                          href={getPhoneHref(client.phone, client.phone_country_code)}
+                          className="text-[#119182] hover:underline"
+                        >
+                          {client.phone}
+                        </a>
+                      ) : (
+                        "Brak"
+                      )}
                     </p>
                   </div>
 
                   <div className="mt-4 border-t border-slate-200 pt-4">
                     <p className="text-xs font-bold uppercase tracking-wide text-slate-400">E-mail</p>
                     <p className="mt-1 break-all text-sm font-semibold text-slate-900">
-                      {client.email || "Brak"}
+                      {client.email ? (
+                        <a
+                          href={getEmailHref(client.email)}
+                          className="text-[#119182] hover:underline"
+                        >
+                          {client.email}
+                        </a>
+                      ) : (
+                        "Brak"
+                      )}
                     </p>
                   </div>
                 </div>
@@ -1498,8 +1559,8 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
           </div>
         </section>
 
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-6 py-4 flex items-center gap-3 overflow-x-auto">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex items-center gap-3 overflow-x-auto border-b border-slate-200 px-6 py-4 dark:border-slate-700">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -1671,21 +1732,21 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                         notes.map((note) => (
                           <div
                             key={note.id}
-                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-[#119182] hover:shadow-[0_10px_22px_rgba(17,145,130,0.10)]"
+                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-[#119182] hover:shadow-[0_10px_22px_rgba(17,145,130,0.10)] dark:border-slate-700 dark:bg-slate-950"
                           >
-                            <div className="flex flex-col gap-1 border-b border-[#9EECEF] bg-[#BDF6F9] px-3 py-1.5 transition-colors duration-200 group-hover:border-[#119182]/40 group-hover:bg-[#9FECEF] sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-col gap-1 border-b border-[#9EECEF] bg-[#BDF6F9] px-3 py-1.5 transition-colors duration-200 group-hover:border-[#119182]/40 group-hover:bg-[#9FECEF] dark:border-slate-700 dark:bg-slate-800 dark:group-hover:border-slate-600 dark:group-hover:bg-slate-800 sm:flex-row sm:items-center sm:justify-between">
                               <div>
-                                <p className="text-xs font-semibold text-slate-900">
+                                <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                                   {note.author_name || "Nieznany użytkownik"}
                                 </p>
                               </div>
 
-                              <p className="text-[11px] font-medium text-slate-500">
+                              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                                 {new Date(note.created_at).toLocaleString("pl-PL")}
                               </p>
                             </div>
 
-                            <div className="bg-slate-100 p-3 text-[13px] leading-6 text-slate-800 whitespace-pre-line transition-colors duration-200 group-hover:bg-slate-200">
+                            <div className="whitespace-pre-line bg-slate-100 p-3 text-[13px] leading-6 text-slate-800 transition-colors duration-200 group-hover:bg-slate-200 dark:bg-slate-950 dark:text-slate-100 dark:group-hover:bg-slate-900">
                               {note.content}
                             </div>
                           </div>
@@ -1896,7 +1957,10 @@ const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
                       disabled={savingTag}
                       className="flex w-full items-center justify-between border-b border-slate-100 px-5 py-4 text-left text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:opacity-50"
                     >
-                      <span className={`rounded-full border px-3 py-1 ${getTagClass(tag)}`}>
+                      <span
+                        style={getTagStyle(tag)}
+                        className={`rounded-full border px-3 py-1 ${getTagClass(tag)}`}
+                      >
                         {tag.name}
                       </span>
                       <span className="text-slate-400">Dodaj</span>

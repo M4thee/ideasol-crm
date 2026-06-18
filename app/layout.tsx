@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+
 export const metadata: Metadata = {
   title: "IdeaSol CRM",
   description: "",
@@ -23,6 +24,22 @@ export const metadata: Metadata = {
   },
 };
 
+const themeInitScript = `
+  (function () {
+    try {
+      var savedTheme = window.localStorage.getItem("ideasol_theme") || "auto";
+      var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var shouldUseDark = savedTheme === "dark" || (savedTheme === "auto" && prefersDark);
+
+      document.documentElement.classList.toggle("dark", shouldUseDark);
+      document.documentElement.dataset.theme = savedTheme;
+    } catch (error) {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.dataset.theme = "light";
+    }
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -31,9 +48,13 @@ export default function RootLayout({
   return (
     <html
       lang="pl"
-      className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-slate-100 antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-slate-100 antialiased dark:bg-slate-950`}
     >
-      <body className="min-h-screen w-full bg-slate-100 text-slate-900">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="min-h-screen w-full bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         <AppShell>{children}</AppShell>
       </body>
     </html>

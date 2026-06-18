@@ -197,6 +197,7 @@ const DEFAULT_PRICING_OVERRIDES = {
 };
 
 export default function Home() {
+  const [clientIdFromUrl, setClientIdFromUrl] = useState("");
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
@@ -265,6 +266,62 @@ export default function Home() {
     return selectedPanel?.display_name || selectedPanel?.name || model;
   }
 
+  function getClientDisplayName(client: CrmClientOption) {
+    return (
+      client.full_name ||
+      client.name ||
+      client.company_name ||
+      client.contact_person ||
+      [client.first_name, client.last_name].filter(Boolean).join(" ") ||
+      "Klient CRM"
+    );
+  }
+
+  function getSelectedInverterType(inverterDisplayName: string) {
+    if (!inverterDisplayName || inverterDisplayName === "Brak") {
+      return null;
+    }
+
+    const selectedInverter =
+      selectedInverterName !== "auto"
+        ? inverters.find((inverter) => inverter.name === selectedInverterName)
+        : inverters.find(
+            (inverter) =>
+              inverter.name === inverterDisplayName ||
+              inverter.display_name === inverterDisplayName
+          );
+
+    return selectedInverter?.type || null;
+  }
+
+  function getInverterLabel(inverterDisplayName: string) {
+    const inverterType = getSelectedInverterType(inverterDisplayName);
+    const normalizedType = String(inverterType || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    if (["hybrid", "hybrydowy", "hybryda", "hybrid_inverter"].includes(normalizedType)) {
+      return "falownik hybrydowy";
+    }
+
+    if (
+      [
+        "grid",
+        "on_grid",
+        "ongrid",
+        "sieciowy",
+        "network",
+        "network_inverter",
+        "grid_tied",
+      ].includes(normalizedType)
+    ) {
+      return "falownik sieciowy";
+    }
+
+    return "falownik";
+  }
+
   function calculateNearestPanelCount(powerKwText: string, model: string) {
     const powerKw = Number(powerKwText.replace(",", "."));
 
@@ -275,7 +332,6 @@ export default function Home() {
 
     setPanelCount(nearestPanelCount);
   }
-
 
   useEffect(() => {
     async function loadCurrentUserProfile() {
@@ -321,7 +377,6 @@ export default function Home() {
 
       return user;
     }
-
 
     async function loadPricingSettings() {
       const { data, error } = await supabase
@@ -461,6 +516,27 @@ export default function Home() {
 
     loadCalculatorData();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setClientIdFromUrl(params.get("clientId") || "");
+  }, []);
+
+  useEffect(() => {
+    if (!clientIdFromUrl || selectedClientId || crmClients.length === 0) {
+      return;
+    }
+
+    const clientFromUrl = crmClients.find((client) => client.id === clientIdFromUrl);
+
+    if (!clientFromUrl) {
+      return;
+    }
+
+    setSelectedClientId(clientFromUrl.id);
+    setClientName(getClientDisplayName(clientFromUrl));
+    setClientEmail(clientFromUrl.email?.trim() || "");
+  }, [clientIdFromUrl, selectedClientId, crmClients]);
 
 
   function updatePricingValue(path: string[], value: string) {
@@ -634,13 +710,20 @@ export default function Home() {
     setSavingOffer(true);
     setSaveOfferStatus("Zapisywanie oferty w CRM...");
 
+    // Use clientEmail from CRM or typed in the input
+    const selectedClientForOffer = crmClients.find(
+      (client) => client.id === clientIdForSave
+    );
+    const selectedClientEmailForOffer =
+      selectedClientForOffer?.email?.trim() || clientEmail.trim();
+
     const offerPayload = {
       client_id: clientIdForSave,
       created_by: userProfile.id,
       offer_type: result.offerType,
       status: "draft",
       client_name: clientName || null,
-      client_email: clientEmail || null,
+      client_email: selectedClientEmailForOffer || null,
       sale_price_net: result.finalNet,
       sale_price_gross: result.finalGross,
       vat_rate: result.vatRate,
@@ -744,7 +827,9 @@ export default function Home() {
         : "przesyłam wstępną ofertę instalacji fotowoltaicznej.";
 
     const pvLine = isStorageOnly ? "" : `- instalacja PV: ${result.pvPowerKw} kWp\n`;
-    const inverterLine = hasInverter ? `- falownik: ${result.inverter}\n` : "";
+    const inverterLine = hasInverter
+      ? `- ${getInverterLabel(result.inverter)}: ${result.inverter}\n`
+      : "";
     const storageLine = hasStorage ? `- magazyn energii: ${result.energyStorage}\n` : "";
 
     return `Dzień dobry,
@@ -775,17 +860,81 @@ IdeaSol`;
   async function sendOfferEmail(mode: "anonymous" | "public" = "anonymous") {
     if (!result) return;
 
+    const selectedClient = crmClients.find(
+      (client) => client.id === selectedClientId
+    );
+
+    if (!selectedClientId || !selectedClient) {
+      setEmailStatus(
+        "Wybierz klienta z CRM przed wysłaniem oferty mailowej."
+      );
+      return;
+    }
+
+    const selectedClientEmail = String(selectedClient.email || "").trim();
+    const typedClientEmail = clientEmail.trim();
+    const emailForSend = selectedClientEmail || typedClientEmail;
+
+    if (!emailForSend) {
+      setEmailStatus(
+        "Podaj adres e-mail klienta przed wysyłką oferty."
+      );
+      return;
+    }
+
+    if (!emailForSend.includes("@")) {
+      setEmailStatus("Podaj poprawny adres e-mail klienta.");
+      return;
+    }
+
+    setClientEmail(emailForSend);
     setSendingEmail(true);
     setEmailStatus("");
 
+    if (!selectedClientEmail && typedClientEmail) {
+      const { error: updateClientEmailError } = await supabase
+        .from("clients")
+        .update({ email: typedClientEmail })
+        .eq("id", selectedClientId);
+
+      if (updateClientEmailError) {
+        console.error("Nie udało się zapisać e-maila na karcie klienta:", {
+          message: updateClientEmailError.message,
+          details: updateClientEmailError.details,
+          hint: updateClientEmailError.hint,
+          code: updateClientEmailError.code,
+        });
+
+        setSendingEmail(false);
+        setEmailStatus(
+          `Nie udało się zapisać e-maila na karcie klienta: ${updateClientEmailError.message}`
+        );
+        return;
+      }
+
+      setCrmClients((currentClients) =>
+        currentClients.map((client) =>
+          client.id === selectedClientId
+            ? { ...client, email: typedClientEmail }
+            : client
+        )
+      );
+    }
+
     try {
+      const savedOfferId = await saveOfferToCrm(selectedClientId);
+
+      if (!savedOfferId) {
+        throw new Error("Nie udało się zapisać oferty w CRM");
+      }
+
       const res = await fetch("/api/send-offer", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          clientEmail,
+          clientEmail: emailForSend,
           sendMode: mode,
           advisor: {
             id: userProfile?.id || null,
@@ -804,6 +953,7 @@ IdeaSol`;
           panelCount,
           panelPowerWp: getPanelPowerWp(panelModel),
           inverter: result.inverter,
+          inverterType: getSelectedInverterType(result.inverter),
           energyStorage: result.energyStorage,
           finalNet: result.finalNet,
           finalGross: result.finalGross,
@@ -817,9 +967,49 @@ IdeaSol`;
         throw new Error("Nie udało się wysłać maila");
       }
 
-      setEmailStatus("Mail został wysłany");
+      const mailActivityDescription = [
+        `Wysłano ofertę mailową z kalkulatora.`,
+        savedOfferId ? `OfferID: ${savedOfferId}` : null,
+        `Odbiorca: ${emailForSend}`,
+        !selectedClientEmail && typedClientEmail
+          ? "E-mail został automatycznie zapisany na karcie klienta."
+          : null,
+        "",
+        buildOfferText(result),
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const { error: activityError } = await supabase
+        .from("client_activities")
+        .insert({
+          client_id: selectedClientId,
+          created_by: userProfile?.id || null,
+          activity_type: "email",
+          status: "wyslano",
+          description: mailActivityDescription,
+        });
+
+      if (activityError) {
+        console.error("Mail wysłany, ale nie udało się zapisać aktywności CRM:", {
+          message: activityError.message,
+          details: activityError.details,
+          hint: activityError.hint,
+          code: activityError.code,
+        });
+
+        setEmailStatus(
+          `Mail został wysłany, ale nie udało się zapisać aktywności w CRM: ${activityError.message}`
+        );
+        return;
+      }
+
+      setEmailStatus("Mail został wysłany i zapisany w CRM");
     } catch (error) {
-      setEmailStatus("Błąd wysyłki maila");
+      console.error("Błąd wysyłki oferty mailowej z kalkulatora:", error);
+      setEmailStatus(
+        error instanceof Error ? error.message : "Błąd wysyłki maila"
+      );
     } finally {
       setSendingEmail(false);
     }
@@ -828,7 +1018,7 @@ IdeaSol`;
 
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 px-4 py-6 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
 
 
@@ -837,7 +1027,7 @@ IdeaSol`;
             <button
               type="button"
               onClick={() => setShowAdminPanel((current) => !current)}
-              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 hover:shadow-md"
+              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:text-blue-300"
             >
               {showAdminPanel ? "Ukryj panel cen" : "Panel cen admina"}
             </button>
@@ -845,7 +1035,7 @@ IdeaSol`;
         )}
 
         {canSeePricingPanel && showAdminPanel && (
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
             <AdminPanel
               adminStatus={adminStatus}
               pricingOverrides={pricingOverrides}
@@ -856,7 +1046,7 @@ IdeaSol`;
           </section>
         )}
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
           <div className="space-y-8">
             <OfferForm
               offerType={offerType}

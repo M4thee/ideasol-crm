@@ -346,6 +346,17 @@ export default function OfferForm({
     [safeCrmClients, selectedClientId]
   );
 
+  useEffect(() => {
+    if (!setClientEmail) return;
+
+    if (!selectedClientId) {
+      setClientEmail("");
+      return;
+    }
+
+    setClientEmail(selectedClient?.email?.trim() || "");
+  }, [selectedClientId, selectedClient?.email, setClientEmail]);
+
   const clientSuggestions = useMemo(() => {
     const normalizedSearch = clientSearch.trim().toLowerCase();
 
@@ -359,14 +370,19 @@ export default function OfferForm({
   }, [clientSearch, safeCrmClients, safeTodayMeetingClients]);
 
   function selectCrmClient(client: CrmClientOption) {
+    const clientEmail = client.email?.trim() || "";
+
     setSelectedClientId(client.id);
     setClientName(getClientDisplayName(client));
-    if (client.email) {
-      setClientEmail?.(client.email);
-    }
+    setClientEmail?.(clientEmail);
     setClientSearch("");
     setIsClientDropdownOpen(false);
     setResult(null);
+    setEmailStatus(
+      clientEmail
+        ? ""
+        : "Wybrany klient nie ma adresu e-mail na karcie CRM. Możesz wpisać go ręcznie przy wysyłce oferty — zostanie zapisany na karcie klienta."
+    );
   }
 
   function isAdditionalServiceSelected(serviceId: number) {
@@ -492,16 +508,16 @@ export default function OfferForm({
   }
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50 sm:p-6">
+    <section className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30 dark:ring-slate-800 sm:p-6">
       <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-blue-500 via-emerald-400 to-cyan-400" />
-      <div className="relative mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center">
+      <div className="relative mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-sm font-black text-white shadow-md shadow-blue-100">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-sm font-black text-white shadow-md shadow-blue-100 dark:shadow-none">
             1
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Krok 1</p>
-            <h2 className="text-lg font-bold text-slate-950 sm:text-xl">Konfiguracja</h2>
+            <h2 className="text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">Konfiguracja</h2>
           </div>
 
           <button
@@ -515,14 +531,14 @@ export default function OfferForm({
         </div>
 
         {showSettings && (
-          <div className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-10 w-full rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-200/70 sm:left-auto sm:right-0 sm:w-72">
+          <div className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-10 w-full rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40 sm:left-auto sm:right-0 sm:w-72">
             <label className="block">
-              <span className="text-sm text-slate-700">
+              <span className="text-sm text-slate-700 dark:text-slate-200">
                 Narzut handlowca netto
               </span>
 
               <input
-                className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
                 type="number"
                 min="0"
                 value={sellerMarkup}
@@ -533,14 +549,14 @@ export default function OfferForm({
               />
             </label>
 
-            <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+            <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
               To ustawienie jest ukryte z głównego formularza, ale nadal wpływa na cenę oferty.
             </p>
 
             <button
               type="button"
               onClick={() => setShowSettings(false)}
-              className="w-full mt-4 rounded-2xl bg-emerald-600 p-3 font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500"
+              className="mt-4 w-full rounded-2xl bg-emerald-600 p-3 font-bold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-500 dark:shadow-black/30"
             >
               ✓ Zapisz
             </button>
@@ -548,16 +564,16 @@ export default function OfferForm({
         )}
       </div>
       {/* CRM CLIENT SELECTOR */}
-      <div className="relative mb-5 min-w-0 rounded-3xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-md shadow-blue-100/70">
+      <div className="relative mb-5 min-w-0 rounded-3xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-md shadow-blue-100/70 dark:border-blue-500/40 dark:from-slate-900 dark:via-slate-950 dark:to-emerald-950/30 dark:shadow-black/30">
         <label className="block">
           <span className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-blue-700">
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs text-white">1</span>
             Wyszukaj klienta
-            <span className="normal-case tracking-normal text-slate-500">lub wpisz ręcznie</span>
+            <span className="normal-case tracking-normal text-slate-500 dark:text-slate-400">wymagany do wysyłki maila</span>
           </span>
 
           <input
-            className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
             type="text"
             placeholder="Kliknij, aby zobaczyć dzisiejsze spotkania albo wyszukaj klienta"
             value={
@@ -577,15 +593,21 @@ export default function OfferForm({
               setClientSearch(value);
               setClientName(value);
               setSelectedClientId("");
+              setClientEmail?.("");
               setIsClientDropdownOpen(true);
               setResult(null);
+              setEmailStatus(
+                value.trim()
+                  ? "Ręcznie wpisany klient nie jest powiązany z CRM. Wysyłka maila będzie zablokowana do czasu wyboru klienta z CRM."
+                  : ""
+              );
             }}
           />
         </label>
 
         {isClientDropdownOpen && (
-          <div className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/70">
-            <div className="mb-2 flex items-center justify-between px-3 py-2 text-xs text-slate-500">
+          <div className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40">
+            <div className="mb-2 flex items-center justify-between px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
               <span>
                 {isLoadingClients
                   ? "Ładowanie klientów..."
@@ -596,7 +618,7 @@ export default function OfferForm({
               <button
                 type="button"
                 onClick={() => setIsClientDropdownOpen(false)}
-                className="text-slate-400 transition hover:text-slate-700"
+                className="text-slate-400 transition hover:text-slate-700 dark:hover:text-slate-200"
               >
                 Zamknij
               </button>
@@ -609,22 +631,27 @@ export default function OfferForm({
                     key={client.id}
                     type="button"
                     onClick={() => selectCrmClient(client)}
-                    className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                    className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-blue-500/50 dark:hover:bg-slate-800"
                   >
                     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-start">
                       <div className="min-w-0">
-                        <div className="break-words font-semibold text-slate-950">
+                        <div className="break-words font-semibold text-slate-950 dark:text-slate-100">
                           {getClientDisplayName(client)}
                         </div>
-                        <div className="mt-1 break-words text-xs text-slate-500">
+                        <div className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">
                           {[client.phone || client.contact_phone, client.email, client.city]
                             .filter(Boolean)
                             .join(" • ") || "Brak danych kontaktowych"}
                         </div>
+                        {!client.email && (
+                          <div className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                            Brak e-maila — będzie można wpisać go ręcznie przy wysyłce oferty
+                          </div>
+                        )}
                       </div>
 
                       {client.public_id && (
-                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-100">
+                        <span className="shrink-0 rounded-full bg-white px-2 py-1 text-xs font-semibold text-blue-600 ring-1 ring-blue-100 dark:bg-slate-950 dark:text-blue-300 dark:ring-blue-500/40">
                           LeadID {client.public_id}
                         </span>
                       )}
@@ -633,7 +660,7 @@ export default function OfferForm({
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
                 {isLoadingClients
                   ? "Pobieram klientów z CRM..."
                   : clientSearch.trim()
@@ -645,21 +672,33 @@ export default function OfferForm({
         )}
 
         {selectedClient && (
-          <div className="mt-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            Wybrany klient CRM: <strong>{getClientDisplayName(selectedClient)}</strong>
-            {selectedClient.public_id ? ` • LeadID ${selectedClient.public_id}` : ""}
+          <div className="mt-2 space-y-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <div>
+              Wybrany klient CRM: <strong>{getClientDisplayName(selectedClient)}</strong>
+              {selectedClient.public_id ? ` • LeadID ${selectedClient.public_id}` : ""}
+            </div>
+
+            {selectedClient.email ? (
+              <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-200">
+                E-mail do wysyłki: {selectedClient.email}
+              </div>
+            ) : (
+              <div className="text-xs font-semibold text-amber-700 dark:text-amber-200">
+                Brak e-maila na karcie klienta — wpiszesz go przy wysyłce oferty, a system zapisze go automatycznie w CRM.
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <div className="mb-5 rounded-3xl border-2 border-emerald-200 bg-emerald-50/70 p-4 shadow-sm shadow-emerald-100">
+      <div className="mb-5 rounded-3xl border-2 border-emerald-200 bg-emerald-50/70 p-4 shadow-sm shadow-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-950/25 dark:shadow-black/20">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-700">
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">2</span>
               Czy klient posiada fotowoltaikę?
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
               To pole wpływa na warunek dotacji PME: pojemność magazynu musi wynosić minimum dwukrotność łącznej mocy PV klienta.
             </p>
           </div>
@@ -675,8 +714,8 @@ export default function OfferForm({
               }}
               className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
                 existingPvAnswer === "yes"
-                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100"
-                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300"
+                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
+                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
               }`}
             >
               TAK
@@ -693,8 +732,8 @@ export default function OfferForm({
               }}
               className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
                 existingPvAnswer === "no"
-                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100"
-                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300"
+                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
+                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
               }`}
             >
               NIE
@@ -704,9 +743,9 @@ export default function OfferForm({
 
         {existingPvAnswer === "yes" && (
           <label className="mt-4 block max-w-md">
-            <span className="text-sm font-semibold text-slate-700">Moc obecnej instalacji PV klienta</span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Moc obecnej instalacji PV klienta</span>
             <input
-              className="mt-2 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-emerald-100/40 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+              className="mt-2 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-emerald-100/40 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-emerald-500/40 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-emerald-500 dark:focus:ring-emerald-500/20"
               type="text"
               inputMode="decimal"
               placeholder="np. 6,44"
@@ -718,7 +757,7 @@ export default function OfferForm({
                 setEmailStatus("");
               }}
             />
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               Po wpisaniu mocy odblokujemy wybór PV / ME w kalkulatorze.
             </p>
           </label>
@@ -737,8 +776,8 @@ export default function OfferForm({
           <div
             className={`rounded-2xl border p-4 transition ${
               hasPvSelected
-                ? "border-blue-500 bg-blue-50 shadow-sm"
-                : "border-slate-200 bg-slate-50"
+                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
+                : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
             }`}
           >
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -753,7 +792,7 @@ export default function OfferForm({
                   className="h-5 w-5"
                 />
 
-                <div className="font-semibold text-slate-900">Fotowoltaika</div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Fotowoltaika</div>
               </label>
 
             </div>
@@ -761,10 +800,10 @@ export default function OfferForm({
             {hasPvSelected && (
               <div className="mt-4 grid gap-4 lg:grid-cols-3">
                 <label className="block lg:col-span-1">
-                  <span className="text-sm text-slate-700">Model panelu</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-200">Model panelu</span>
 
                   <select
-                    className="h-[50px] w-full mt-2 rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="mt-2 h-[50px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
                     value={panelModel}
                     onChange={(e) => {
                       const nextPanelModel = e.target.value;
@@ -784,10 +823,10 @@ export default function OfferForm({
                 </label>
 
                 <label className="block">
-                  <span className="text-sm text-slate-700">Moc instalacji</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-200">Moc instalacji</span>
 
                   <input
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
                     type="text"
                     inputMode="decimal"
                     placeholder="np. 10"
@@ -804,10 +843,10 @@ export default function OfferForm({
                 </label>
 
                 <label className="block">
-                  <span className="text-sm text-slate-700">Liczba paneli</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-200">Liczba paneli</span>
 
                   <input
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
                     type="number"
                     min="1"
                     value={panelCount}
@@ -821,7 +860,7 @@ export default function OfferForm({
                 </label>
 
                 <div className="block lg:col-span-3">
-                  <span className="text-sm text-slate-700">Rodzaj montażu</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-200">Rodzaj montażu</span>
 
                   <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {[
@@ -834,8 +873,8 @@ export default function OfferForm({
                         key={option.value}
                         className={`cursor-pointer rounded-[18px] border px-4 py-3 transition ${
                           roofType === option.value
-                            ? "border-blue-500 bg-white shadow-sm ring-1 ring-blue-100"
-                            : "border-slate-200 bg-white/70 hover:border-blue-200 hover:bg-white"
+                            ? "border-blue-500 bg-white shadow-sm ring-1 ring-blue-100 dark:bg-blue-950/30 dark:ring-blue-500/20"
+                            : "border-slate-200 bg-white/70 hover:border-blue-200 hover:bg-white dark:border-slate-700 dark:bg-slate-950 dark:hover:border-blue-500/40 dark:hover:bg-slate-900"
                         }`}
                       >
                         <div className="flex items-center gap-3">
@@ -850,7 +889,7 @@ export default function OfferForm({
                             className="h-4 w-4"
                           />
 
-                          <span className="text-sm font-semibold text-slate-900">
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                             {option.label}
                           </span>
                         </div>
@@ -865,8 +904,8 @@ export default function OfferForm({
           <div
             className={`rounded-2xl border p-4 transition ${
               hasStorageSelected
-                ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                : "border-slate-200 bg-slate-50"
+                ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-950/30"
+                : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
             }`}
           >
             <label className="flex cursor-pointer items-start gap-3">
@@ -881,8 +920,8 @@ export default function OfferForm({
               />
 
               <div>
-                <div className="font-semibold text-slate-900">Magazyn Energii</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Magazyn Energii</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 
                 </div>
               </div>
@@ -894,7 +933,7 @@ export default function OfferForm({
                   
 
                   <select
-                    className="h-[104px] w-full mt-2 rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="mt-2 h-[104px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
                     value={storage}
                     onChange={(e) => {
                       setStorage(e.target.value);
@@ -910,7 +949,7 @@ export default function OfferForm({
                   </select>
                 </label>
 
-                <label className="flex min-h-[104px] items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4">
+                <label className="flex min-h-[104px] items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-950">
                   <input
                     type="checkbox"
                     checked={withEms}
@@ -922,11 +961,11 @@ export default function OfferForm({
                   />
 
                   <div>
-                    <div className="font-semibold text-slate-900">
+                    <div className="font-semibold text-slate-900 dark:text-slate-100">
                       EMS / HEMS
                     </div>
 
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
                       Dolicz system zarządzania energią.
                     </div>
                   </div>
@@ -937,31 +976,31 @@ export default function OfferForm({
         </div>
       </div>
       {(hasPvSelected || hasStorageSelected) && (
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setShowAdvancedOptions((current) => !current)}
             className="flex w-full items-center justify-between gap-4 text-left"
           >
             <div>
-              <div className="font-semibold text-slate-900">Opcje zaawansowane</div>
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="font-semibold text-slate-900 dark:text-slate-100">Opcje zaawansowane</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Ilość identycznych zestawów: {identicalSetCount || 1}
               </div>
             </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
               {showAdvancedOptions ? "Ukryj" : "Pokaż"}
             </span>
           </button>
 
           {showAdvancedOptions && (
-            <div className="mt-4 rounded-2xl border border-white bg-white p-4 shadow-sm">
+            <div className="mt-4 rounded-2xl border border-white bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950">
               <label className="block max-w-xs">
-                <span className="text-sm font-semibold text-slate-700">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Ilość identycznych zestawów / instalacji
                 </span>
                 <input
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/20"
                   type="number"
                   min="1"
                   step="1"
@@ -972,7 +1011,7 @@ export default function OfferForm({
                     setResult(null);
                   }}
                 />
-                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                   Użyj, gdy klient kupuje kilka identycznych zestawów. Docelowo ta ilość trafi do tabeli oferty PDF i przemnoży wartości zestawu.
                 </p>
               </label>
@@ -981,21 +1020,21 @@ export default function OfferForm({
         </div>
       )}
       {(hasPvSelected || hasStorageSelected) && (
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setShowAdditionalServices((current) => !current)}
             className="flex w-full items-center justify-between gap-4 text-left"
           >
             <div>
-              <div className="font-semibold text-slate-900">Usługi dodatkowe</div>
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="font-semibold text-slate-900 dark:text-slate-100">Usługi dodatkowe</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {selectedAdditionalServices.length > 0
                   ? `Wybrano: ${selectedAdditionalServices.length}`
                   : "Opcjonalne dodatki do oferty"}
               </div>
             </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
               {showAdditionalServices ? "Ukryj" : "Pokaż"}
             </span>
           </button>
@@ -1009,7 +1048,7 @@ export default function OfferForm({
               )}
 
               {additionalServices.length === 0 && !additionalServicesStatus && (
-                <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                <div className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:ring-slate-700">
                   Brak aktywnych usług dodatkowych w panelu admina.
                 </div>
               )}
@@ -1022,7 +1061,7 @@ export default function OfferForm({
                 return (
                   <div
                     key={service.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950"
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <label className="flex cursor-pointer items-start gap-3">
@@ -1033,8 +1072,8 @@ export default function OfferForm({
                           className="mt-1 h-5 w-5"
                         />
                         <div>
-                          <div className="font-semibold text-slate-900">{service.name}</div>
-                          <div className="mt-1 text-xs text-slate-500">
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">{service.name}</div>
+                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                             {Number(service.price_net || 0).toLocaleString("pl-PL", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
@@ -1046,9 +1085,9 @@ export default function OfferForm({
 
                       {selectedService && service.allows_quantity && (
                         <label className="block sm:w-32">
-                          <span className="text-xs font-semibold text-slate-500">Ilość szt.</span>
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Ilość szt.</span>
                           <input
-                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/20"
                             type="number"
                             min="1"
                             step="1"
@@ -1071,11 +1110,11 @@ export default function OfferForm({
         </div>
       )}
       {(hasPvSelected || hasStorageSelected) && (
-<label className="block mb-5">
-        <span className="text-sm text-slate-700">Falownik</span>
+<label className="mb-5 block">
+        <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
 
         <select
-          className="h-[50px] w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+          className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
           value={selectedInverterName}
           onChange={(e) => {
             setSelectedInverterName(e.target.value);
@@ -1104,14 +1143,14 @@ export default function OfferForm({
             ))}
         </select>
 
-        <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
+        <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
           Funkcja automatyczna dobiera falownik po mocyinstalacji. Ręczny wybór pozwala zmienić model i typ falownika np. sieciowy na hybrydowy.”.
         </p>
       </label>
       )}
 
       {hasStorageSelected && (
-        <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+        <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-500/30 dark:bg-blue-950/25">
           <div className="mb-4 flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">4</span>
             <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Czy uwzględnić dotację?</span>
@@ -1129,10 +1168,10 @@ export default function OfferForm({
             />
 
             <div>
-              <div className="font-semibold text-slate-900">
+              <div className="font-semibold text-slate-900 dark:text-slate-100">
                 Uwzględnij dotację PME
               </div>
-              <div className="mt-1 text-xs leading-relaxed text-slate-500">
+              <div className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 Dotacja będzie liczona tylko wtedy, gdy magazyn energii spełnia warunki programu, w tym minimalną pojemność oraz relację pojemności ME do mocy PV.
               </div>
             </div>
@@ -1151,8 +1190,8 @@ export default function OfferForm({
           <label
             className={`cursor-pointer rounded-2xl border p-4 transition ${
               billingSystem === "net_billing"
-                ? "border-blue-500 bg-blue-50 shadow-sm"
-                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50"
+                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
+                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
             }`}
           >
             <div className="flex items-start gap-3">
@@ -1168,8 +1207,8 @@ export default function OfferForm({
               />
 
               <div>
-                <div className="font-semibold text-slate-900">Net Billing</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Net Billing</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Limit dotacji magazynu: 16 000 zł.
                 </div>
               </div>
@@ -1179,8 +1218,8 @@ export default function OfferForm({
           <label
             className={`cursor-pointer rounded-2xl border p-4 transition ${
               billingSystem === "net_metering"
-                ? "border-blue-500 bg-blue-50 shadow-sm"
-                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50"
+                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
+                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
             }`}
           >
             <div className="flex items-start gap-3">
@@ -1196,8 +1235,8 @@ export default function OfferForm({
               />
 
               <div>
-                <div className="font-semibold text-slate-900">Net Metering</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="font-semibold text-slate-900 dark:text-slate-100">Net Metering</div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Limit dotacji magazynu: 8 000 zł.
                 </div>
               </div>
@@ -1208,11 +1247,11 @@ export default function OfferForm({
       )}
 
       {(hasPvSelected || hasStorageSelected) && (
-        <label className="block mb-6">
-          <span className="text-sm text-slate-700">VAT klienta</span>
+        <label className="mb-6 block">
+          <span className="text-sm text-slate-700 dark:text-slate-200">VAT klienta</span>
 
           <select
-            className="h-[50px] w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
             value={vatRate}
             onChange={(e) => {
               setVatRate(Number(e.target.value));
@@ -1228,7 +1267,7 @@ export default function OfferForm({
       <button
         onClick={calculate}
         disabled={!canConfigureOffer || (!hasPvSelected && !hasStorageSelected)}
-        className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:text-slate-500 disabled:shadow-none sm:text-base"
+        className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:text-slate-500 disabled:shadow-none dark:shadow-black/30 dark:disabled:from-slate-700 dark:disabled:to-slate-700 dark:disabled:text-slate-400 sm:text-base"
       >
         {!canConfigureOffer
           ? "Uzupełnij informację o obecnej PV klienta"

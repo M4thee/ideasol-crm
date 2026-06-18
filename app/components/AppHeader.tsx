@@ -30,6 +30,7 @@ const navItems = [
   { href: "/calculator", label: "Kalkulator" },
 ];
 
+
 const roleLabels: Record<string, string> = {
   owner: "Właściciel",
   admin: "Administrator",
@@ -37,6 +38,14 @@ const roleLabels: Record<string, string> = {
   cc: "Konsultant CC",
   seller: "Doradca Techniczny",
 };
+
+type ThemeMode = "light" | "dark" | "auto";
+
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: "light", label: "Dzień" },
+  { value: "dark", label: "Noc" },
+  { value: "auto", label: "Auto" },
+];
 
 
 type HeaderProfile = {
@@ -132,6 +141,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
   const [toastNotification, setToastNotification] = useState<HeaderNotification | null>(null);
   const [maintenanceBarVisible, setMaintenanceBarVisible] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
   const lastNotificationSoundRef = useRef<number>(0);
@@ -141,6 +151,55 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const unreadNotificationsCount = notifications.filter(
     (notification) => !notification.is_read
   ).length;
+
+  const activeThemeLabel =
+    themeOptions.find((option) => option.value === themeMode)?.label || "Auto";
+
+  function applyThemeMode(mode: ThemeMode) {
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const shouldUseDark = mode === "dark" || (mode === "auto" && prefersDark);
+
+    document.documentElement.classList.toggle("dark", shouldUseDark);
+    document.documentElement.dataset.theme = mode;
+  }
+
+  function changeThemeMode(mode: ThemeMode) {
+    setThemeMode(mode);
+    window.localStorage.setItem("ideasol_theme", mode);
+    applyThemeMode(mode);
+  }
+
+  function cycleThemeMode() {
+    const nextTheme: ThemeMode =
+      themeMode === "light" ? "dark" : themeMode === "dark" ? "auto" : "light";
+
+    changeThemeMode(nextTheme);
+  }
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("ideasol_theme");
+    const initialTheme: ThemeMode =
+      savedTheme === "light" || savedTheme === "dark" || savedTheme === "auto"
+        ? savedTheme
+        : "auto";
+
+    setThemeMode(initialTheme);
+    applyThemeMode(initialTheme);
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleSystemThemeChange = () => {
+      const currentTheme = window.localStorage.getItem("ideasol_theme") || "auto";
+
+      if (currentTheme === "auto") {
+        applyThemeMode("auto");
+      }
+    };
+
+    mediaQuery.addEventListener("change", handleSystemThemeChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleSystemThemeChange);
+    };
+  }, []);
 
   function playNotificationSound() {
     try {
@@ -758,7 +817,7 @@ const canManageUsers = profile?.role === "admin";
               />
 
               {showResults && trimmedSearch.length >= 2 && (
-                <div className="absolute top-full right-0 mt-2 min-w-[320px] bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden z-50">
+                <div className="absolute right-0 top-full z-50 mt-2 min-w-[320px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
                   {searching ? (
                     <div className="px-4 py-4 text-sm text-slate-500">
                       Wyszukiwanie...
@@ -887,6 +946,19 @@ const canManageUsers = profile?.role === "admin";
               );
             })}
 
+            <button
+              type="button"
+              onClick={cycleThemeMode}
+              title={`Motyw: ${activeThemeLabel}. Kliknij, aby zmienić.`}
+              aria-label={`Motyw: ${activeThemeLabel}. Kliknij, aby zmienić.`}
+              className="ml-1 inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-bold text-slate-700 transition hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500 text-[12px] leading-none text-white">
+                {themeMode === "light" ? "☀️" : themeMode === "dark" ? "🌙" : "◐"}
+              </span>
+              <span>{activeThemeLabel}</span>
+            </button>
+
             <a
               href="https://outlook.cloud.microsoft/mail/"
               target="_blank"
@@ -939,7 +1011,7 @@ const canManageUsers = profile?.role === "admin";
               </button>
 
               {notificationsOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+                <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
                   <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                     <div>
                       <p className="text-sm font-bold text-slate-900">Powiadomienia</p>
@@ -1037,7 +1109,7 @@ const canManageUsers = profile?.role === "admin";
 
               {profileMenuOpen && (
                 <div
-                  className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/70"
+                  className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900"
                   onMouseEnter={() => setProfileMenuOpen(true)}
                   onMouseLeave={() => setProfileMenuOpen(false)}
                 >
@@ -1120,7 +1192,7 @@ const canManageUsers = profile?.role === "admin";
             />
 
             {showResults && trimmedSearch.length >= 2 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900">
                 {searching ? (
                   <div className="px-4 py-4 text-sm text-slate-500">
                     Wyszukiwanie...
@@ -1205,6 +1277,31 @@ const canManageUsers = profile?.role === "admin";
             >
               Poczta
             </a>
+            <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                Motyw
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {themeOptions.map((option) => {
+                  const isSelected = themeMode === option.value;
+
+                  return (
+                    <button
+                      key={`mobile-theme-${option.value}`}
+                      type="button"
+                      onClick={() => changeThemeMode(option.value)}
+                      className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                        isSelected
+                          ? "bg-emerald-500 text-white shadow-sm"
+                          : "bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="rounded-xl bg-slate-50 p-3">
               <button
                 type="button"

@@ -149,13 +149,13 @@ System rozliczeń: net-billing / net-metering`;
 
     return (
       <div className="md:col-span-2">
-        <label className="mb-2 block text-sm font-semibold text-slate-700">
+        <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
           {label}
         </label>
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900">
           <div className="mt-1 flex items-end gap-3">
             <div className="min-w-0 flex-1">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Data
               </label>
               <input
@@ -166,11 +166,11 @@ System rozliczeń: net-billing / net-metering`;
                   const nextDate = event.target.value;
                   onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-700/50"
               />
             </div>
             <div className="w-24">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Godzina
               </label>
               <select
@@ -179,7 +179,7 @@ System rozliczeń: net-billing / net-metering`;
                   const nextDate = selectedDate || minimumDateTime.slice(0, 10);
                   onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-700/50"
               >
                 {hourOptions.map((hour) => (
                   <option key={hour} value={hour}>
@@ -189,7 +189,7 @@ System rozliczeń: net-billing / net-metering`;
               </select>
             </div>
             <div className="w-24">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Minuty
               </label>
               <select
@@ -198,7 +198,7 @@ System rozliczeń: net-billing / net-metering`;
                   const nextDate = selectedDate || minimumDateTime.slice(0, 10);
                   onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-700/50"
               >
                 {minuteOptions.map((minute) => (
                   <option key={minute} value={minute}>
@@ -218,25 +218,25 @@ System rozliczeń: net-billing / net-metering`;
       value: "phone",
       label: "Telefon",
       activeClass: "border-[#C93200] bg-[#C93200] text-white shadow-sm",
-      inactiveClass: "border-[#C93200] bg-white text-[#C93200] hover:bg-[#C93200] hover:text-white",
+      inactiveClass: "border-[#C93200] bg-white text-[#C93200] hover:bg-[#C93200] hover:text-white dark:bg-slate-950 dark:text-red-300 dark:hover:bg-[#C93200] dark:hover:text-white",
     },
     {
       value: "sms",
       label: "SMS",
       activeClass: "border-[#910049] bg-[#910049] text-white shadow-sm",
-      inactiveClass: "border-[#910049] bg-white text-[#910049] hover:bg-[#910049] hover:text-white",
+      inactiveClass: "border-[#910049] bg-white text-[#910049] hover:bg-[#910049] hover:text-white dark:bg-slate-950 dark:text-pink-300 dark:hover:bg-[#910049] dark:hover:text-white",
     },
     {
       value: "email",
       label: "E-mail",
       activeClass: "border-[#187B96] bg-[#187B96] text-white shadow-sm",
-      inactiveClass: "border-[#187B96] bg-white text-[#187B96] hover:bg-[#187B96] hover:text-white",
+      inactiveClass: "border-[#187B96] bg-white text-[#187B96] hover:bg-[#187B96] hover:text-white dark:bg-slate-950 dark:text-cyan-300 dark:hover:bg-[#187B96] dark:hover:text-white",
     },
     {
       value: "meeting",
       label: "Spotkanie",
       activeClass: "border-[#3A752A] bg-[#3A752A] text-white shadow-sm",
-      inactiveClass: "border-[#3A752A] bg-white text-[#3A752A] hover:bg-[#3A752A] hover:text-white",
+      inactiveClass: "border-[#3A752A] bg-white text-[#3A752A] hover:bg-[#3A752A] hover:text-white dark:bg-slate-950 dark:text-green-300 dark:hover:bg-[#3A752A] dark:hover:text-white",
     },
   ] as const;
 
@@ -311,7 +311,7 @@ System rozliczeń: net-billing / net-metering`;
       onSubmit={handleSubmit}
       className="space-y-4"
     >
-      <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+      <h3 className="text-xs font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
         DODAJ KONTAKT
       </h3>
 
@@ -351,7 +351,7 @@ System rozliczeń: net-billing / net-metering`;
 
         {contactMethod === "phone" && (
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
+            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
               Typ kontaktu
             </label>
             <select
@@ -366,7 +366,7 @@ System rozliczeń: net-billing / net-metering`;
                 setAdvisorId("");
                 setAdvisorSearch("");
               }}
-              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-[#119182]/20"
             >
               <option value="marketing">Kontakt marketingowy</option>
               <option value="relationship">Kontakt relacyjny</option>
@@ -377,7 +377,7 @@ System rozliczeń: net-billing / net-metering`;
 
         {contactMethod === "phone" && phoneContactType !== "relationship" && (
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
+            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
               Efekt / status
             </label>
             <select
@@ -399,7 +399,7 @@ System rozliczeń: net-billing / net-metering`;
                 }
                 setPhoneStatus(nextStatus);
               }}
-              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+              className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-[#119182]/20"
             >
               <option value="">Wybierz status</option>
               {statuses.map((status) => (
@@ -428,9 +428,9 @@ System rozliczeń: net-billing / net-metering`;
         )}
 
         {requiresMeeting && (
-          <div className="md:col-span-2 rounded-2xl border border-[#E7D49A] bg-[#F7EAC1] p-4">
-            <span className="text-sm font-bold text-slate-900">Wybierz doradcę</span>
-            <p className="mt-1 text-xs text-slate-600">
+          <div className="rounded-2xl border border-[#E7D49A] bg-[#F7EAC1] p-4 dark:border-slate-700 dark:bg-slate-900 md:col-span-2">
+            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Wybierz doradcę</span>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
               Spotkanie zostanie zapisane w kalendarzu tego doradcy.
             </p>
 
@@ -442,14 +442,14 @@ System rozliczeń: net-billing / net-metering`;
                   setAdvisorSearch(event.target.value);
                   setAdvisorId("");
                 }}
-                className="w-full rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="w-full rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-700/50"
                 placeholder="Wyszukaj doradcę po imieniu, nazwisku, e-mailu lub roli..."
               />
 
               {selectedAdvisor && (
-                <div className="mt-2 rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900">
+                <div className="mt-2 rounded-xl border border-[#E7D49A] bg-white px-4 py-3 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
                   <span className="font-bold">Wybrano:</span> {selectedAdvisor?.display_name || selectedAdvisor?.email || "Doradca"}
-                  <span className="ml-2 text-xs font-semibold text-slate-600">
+                  <span className="ml-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
                     {getRoleLabel(selectedAdvisor?.role || null)}
                   </span>
                   <button
@@ -458,7 +458,7 @@ System rozliczeń: net-billing / net-metering`;
                       setAdvisorId("");
                       setAdvisorSearch("");
                     }}
-                    className="ml-3 font-bold text-slate-700 underline underline-offset-2"
+                    className="ml-3 font-bold text-slate-700 underline underline-offset-2 dark:text-slate-200"
                   >
                     zmień
                   </button>
@@ -466,13 +466,13 @@ System rozliczeń: net-billing / net-metering`;
               )}
 
               {!selectedAdvisor && (
-                <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-[#E7D49A] bg-white shadow-sm">
+                <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-[#E7D49A] bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
                   {advisorSearch.trim().length < 2 ? (
-                    <div className="px-4 py-3 text-sm text-slate-400">
+                    <div className="px-4 py-3 text-sm text-slate-400 dark:text-slate-500">
                       Wpisz minimum 2 znaki, aby wyszukać doradcę.
                     </div>
                   ) : filteredAdvisors.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-slate-400">
+                    <div className="px-4 py-3 text-sm text-slate-400 dark:text-slate-500">
                       Brak doradców pasujących do wyszukiwania.
                     </div>
                   ) : (
@@ -484,12 +484,12 @@ System rozliczeń: net-billing / net-metering`;
                           setAdvisorId(advisor.id);
                           setAdvisorSearch(advisor.display_name || advisor.email || "Doradca");
                         }}
-                        className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-[#F7EAC1]/60"
+                        className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-[#F7EAC1]/60 dark:border-slate-800 dark:hover:bg-slate-800"
                       >
-                        <span className="block font-bold text-slate-900">
+                        <span className="block font-bold text-slate-900 dark:text-slate-100">
                           {advisor.display_name || "Doradca bez nazwy"}
                         </span>
-                        <span className="mt-1 block text-xs text-slate-500">
+                        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
                           {[advisor.email, getRoleLabel(advisor.role)].filter(Boolean).join(" • ")}
                         </span>
                       </button>
@@ -503,7 +503,7 @@ System rozliczeń: net-billing / net-metering`;
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium text-slate-700">
+        <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">
           Opis
         </label>
         <textarea
@@ -511,7 +511,7 @@ System rozliczeń: net-billing / net-metering`;
           onChange={(e) => setDescription(e.target.value)}
           rows={4}
           placeholder={requiresMeeting ? meetingDescriptionTemplate : "Opisz rozmowę, ustalenia, pytania klienta albo powód ponownego kontaktu..."}
-          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
         />
       </div>
 
