@@ -450,7 +450,24 @@ export default function Home() {
   }
 
   function isEventDone(status: string | null) {
-    return status === "done" || status?.startsWith("Zakończone");
+    const normalizedStatus = (status || "").trim().toLowerCase();
+
+    return (
+      normalizedStatus === "done" ||
+      normalizedStatus === "completed" ||
+      normalizedStatus === "complete" ||
+      normalizedStatus === "finished" ||
+      normalizedStatus === "closed" ||
+      normalizedStatus === "resolved" ||
+      normalizedStatus === "zrobione" ||
+      normalizedStatus === "wykonane" ||
+      normalizedStatus === "zamknięte" ||
+      normalizedStatus === "zamkniete" ||
+      normalizedStatus.startsWith("zakończone") ||
+      normalizedStatus.startsWith("zakonczone") ||
+      normalizedStatus.startsWith("zakończony") ||
+      normalizedStatus.startsWith("zakonczony") 
+    );
   }
 
   function parseMaybeJson(value: unknown): unknown {
