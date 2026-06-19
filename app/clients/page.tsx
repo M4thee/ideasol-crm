@@ -31,6 +31,7 @@ type Client = {
   contact_phone?: string | null;
   city: string | null;
   status: string | null;
+  lead_source?: string | null;
   last_contact_status?: string | null;
   last_contact_at?: string | null;
   contact_followup_status?: "active" | "overdue" | null;
@@ -42,6 +43,7 @@ type Client = {
     role: string | null;
   } | null;
   tags?: ClientTag[];
+  tag_ids?: string[];
   created_at: string;
 };
 
@@ -71,6 +73,18 @@ type ClientTagLink = {
   client_id: string;
   tag_id: string;
 };
+
+const CLIENTS_FILTERS_STORAGE_KEY = "ideasol_clients_filters_v1";
+
+function readPersistedString(value: unknown, fallback: string) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readPersistedStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
 
 
 type ClientActivitySummary = {
@@ -183,12 +197,14 @@ const countryPhoneCodes = [
 function ClientsPageContent() {
   const filtersPanelRef = useRef<HTMLDivElement | null>(null);
   const loadingMoreClientsRef = useRef(false);
+  const filtersHydratedRef = useRef(false);
   const searchParams = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("Wszystkie");
   const [subStatusFilter, setSubStatusFilter] = useState<string>("Wszystkie");
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
   const [selectedAdvisorIds, setSelectedAdvisorIds] = useState<string[]>([]);
   const [selectedClientTypes, setSelectedClientTypes] = useState<string[]>([]);
   const [selectedProvinces, setSelectedProvinces] = useState<string[]>([]);
@@ -233,6 +249,62 @@ function ClientsPageContent() {
   useEffect(() => {
     initializePage();
   }, []);
+
+  useEffect(() => {
+    if (filtersHydratedRef.current) return;
+
+    filtersHydratedRef.current = true;
+
+    try {
+      const savedFilters = window.localStorage.getItem(CLIENTS_FILTERS_STORAGE_KEY);
+
+      if (!savedFilters) {
+        setFiltersHydrated(true);
+        return;
+      }
+
+      const parsedFilters = JSON.parse(savedFilters) as Record<string, unknown>;
+
+      setStatusFilter(readPersistedString(parsedFilters.statusFilter, "Wszystkie"));
+      setSubStatusFilter(readPersistedString(parsedFilters.subStatusFilter, "Wszystkie"));
+      setSelectedAdvisorIds(readPersistedStringArray(parsedFilters.selectedAdvisorIds));
+      setSelectedClientTypes(readPersistedStringArray(parsedFilters.selectedClientTypes));
+      setSelectedProvinces(readPersistedStringArray(parsedFilters.selectedProvinces));
+      setSelectedCities(readPersistedStringArray(parsedFilters.selectedCities));
+      setSelectedTagIds(readPersistedStringArray(parsedFilters.selectedTagIds));
+    } catch (error) {
+      console.error("Błąd odczytu zapisanych filtrów klientów:", error);
+      window.localStorage.removeItem(CLIENTS_FILTERS_STORAGE_KEY);
+    }
+
+    setFiltersHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+
+    window.localStorage.setItem(
+      CLIENTS_FILTERS_STORAGE_KEY,
+      JSON.stringify({
+        statusFilter,
+        subStatusFilter,
+        selectedAdvisorIds,
+        selectedClientTypes,
+        selectedProvinces,
+        selectedCities,
+        selectedTagIds,
+      })
+    );
+  }, [
+    filtersHydrated,
+    statusFilter,
+    subStatusFilter,
+    selectedAdvisorIds,
+    selectedClientTypes,
+    selectedProvinces,
+    selectedCities,
+    selectedTagIds,
+  ]);
 
   useEffect(() => {
     if (searchParams.get("addClient") === "1") {
@@ -347,6 +419,12 @@ function ClientsPageContent() {
     return currentUserRole === "admin";
   }
 
+  function canOpenImportPage() {
+    return ["seller", "cc", "manager", "owner", "admin"].includes(
+      currentUserRole || ""
+    );
+  }
+
   function maskClientName(value: string | null) {
     const cleanValue = String(value || "").trim();
 
@@ -362,10 +440,63 @@ function ClientsPageContent() {
       .join(" ");
   }
 
+
   function getAdvisorName(client: Client) {
     return client.assigned_user?.display_name || client.assigned_user?.email || "Brak";
   }
 
+  function normalizeTagFilterValue(value: string | null | undefined) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+  function clientMatchesSelectedTags(client: Client) {
+  if (selectedTagIds.length === 0) return true;
+
+  const normalizedSelectedTagIds = selectedTagIds.map((tagId) => tagId.trim());
+
+  const selectedTagNames = availableTags
+    .filter((tag) => normalizedSelectedTagIds.includes(tag.id))
+    .map((tag) => normalizeTagFilterValue(tag.name))
+    .filter(Boolean);
+
+  const clientTagIds = [
+    ...(client.tag_ids || []),
+    ...(client.tags || []).map((tag) => tag.id),
+  ].map((tagId) => tagId.trim());
+
+  const clientTagNames = (client.tags || [])
+    .map((tag) => normalizeTagFilterValue(tag.name))
+    .filter(Boolean);
+
+  const clientLeadSource = normalizeTagFilterValue(client.lead_source);
+
+  const matchesLinkedTag = normalizedSelectedTagIds.some((selectedTagId) =>
+    clientTagIds.includes(selectedTagId)
+  );
+
+  const matchesTagName = selectedTagNames.some((selectedTagName) =>
+    clientTagNames.some(
+      (clientTagName) =>
+        selectedTagName === clientTagName ||
+        clientTagName.includes(selectedTagName) ||
+        selectedTagName.includes(clientTagName)
+    )
+  );
+
+  const matchesLeadSource =
+    clientLeadSource.length > 0 &&
+    selectedTagNames.some(
+      (selectedTagName) =>
+        selectedTagName === clientLeadSource ||
+        clientLeadSource.includes(selectedTagName) ||
+        selectedTagName.includes(clientLeadSource)
+    );
+
+  return matchesLinkedTag || matchesTagName || matchesLeadSource;
+}
   function getClientTypeLabel(client: Client) {
     return client.client_type || (client.company_name ? "B2B" : "B2C");
   }
@@ -435,9 +566,10 @@ function ClientsPageContent() {
     let query = supabase
       .from("clients")
       .select(
-        "id, public_id, full_name, company_name, client_type, phone, email, city, province, status, assigned_user_id, created_at"
+        "id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at"
       )
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     if (role === "seller" && userId) {
       query = query.eq("assigned_user_id", userId);
@@ -471,8 +603,20 @@ function ClientsPageContent() {
 
     const clientIds = clientsWithoutAssignedUsers.map((client) => client.id);
     let tagsByClientId: Record<string, ClientTag[]> = {};
+    let tagIdsByClientId: Record<string, string[]> = {};
 
     let lastActivityByClientId: Record<string, ClientActivitySummary> = {};
+    const activityRangeStart = new Date();
+    activityRangeStart.setDate(activityRangeStart.getDate() - 180);
+    activityRangeStart.setHours(0, 0, 0, 0);
+
+    const followUpRangeStart = new Date();
+    followUpRangeStart.setDate(followUpRangeStart.getDate() - 90);
+    followUpRangeStart.setHours(0, 0, 0, 0);
+
+    const followUpRangeEnd = new Date();
+    followUpRangeEnd.setDate(followUpRangeEnd.getDate() + 365);
+    followUpRangeEnd.setHours(23, 59, 59, 999);
     const contactFollowUpStatusByClientId: Record<string, "active" | "overdue"> = {};
 
     if (clientIds.length > 0) {
@@ -480,7 +624,9 @@ function ClientsPageContent() {
         .from("client_activities")
         .select("client_id, status, created_at")
         .in("client_id", clientIds)
-        .order("created_at", { ascending: false });
+        .gte("created_at", activityRangeStart.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1000);
 
       if (activitiesError) {
         console.error("Błąd ładowania ostatnich aktywności klientów:", activitiesError);
@@ -500,7 +646,10 @@ function ClientsPageContent() {
       const { data: calendarEventsData, error: calendarEventsError } = await supabase
         .from("calendar_events")
         .select("client_id, title, event_type, event_at, status")
-        .in("client_id", clientIds);
+        .in("client_id", clientIds)
+        .gte("event_at", followUpRangeStart.toISOString())
+        .lte("event_at", followUpRangeEnd.toISOString())
+        .limit(1000);
 
       if (calendarEventsError) {
         console.error("Błąd ładowania statusów kontaktu klientów:", calendarEventsError);
@@ -558,6 +707,14 @@ function ClientsPageContent() {
       }
 
       const clientTagLinks = (clientTagLinksData || []) as ClientTagLink[];
+      tagIdsByClientId = clientTagLinks.reduce((accumulator, link) => {
+        accumulator[link.client_id] = [
+          ...(accumulator[link.client_id] || []),
+          link.tag_id,
+        ];
+        return accumulator;
+      }, {} as Record<string, string[]>);
+
       const tagIds = Array.from(new Set(clientTagLinks.map((link) => link.tag_id)));
 
       if (tagIds.length > 0) {
@@ -630,6 +787,7 @@ function ClientsPageContent() {
           ? assignedUsersById[client.assigned_user_id] || null
           : null,
         tags: tagsByClientId[client.id] || [],
+        tag_ids: tagIdsByClientId[client.id] || [],
         last_contact_status: lastActivity?.status || null,
         last_contact_at: lastActivity?.created_at || null,
         contact_followup_status: contactFollowUpStatusByClientId[client.id] || null,
@@ -893,6 +1051,18 @@ function ClientsPageContent() {
       return;
     }
 
+    const { data: verifyClient, error: verifyError } = await supabase
+      .from("clients")
+      .select("id, assigned_user_id")
+      .eq("id", assigningClient.id)
+      .single();
+
+    console.log("Weryfikacja przypisania klienta:", {
+      selectedSellerId,
+      verifyClient,
+      verifyError,
+    });
+
     const clientName =
       assigningClient.full_name || assigningClient.company_name || "Nowy klient";
     const clientCity = assigningClient.city || "Brak miejscowości";
@@ -919,20 +1089,7 @@ function ClientsPageContent() {
       window.dispatchEvent(new Event("ideasol-notifications-refresh"));
     }
 
-    const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId) || null;
-
-    setClients((currentClients) =>
-      currentClients.map((client) =>
-        client.id === assigningClient.id
-          ? {
-              ...client,
-              assigned_user_id: selectedSellerId,
-              assigned_user: selectedSeller,
-              status: "Przypisany",
-            }
-          : client
-      )
-    );
+    await loadClients(currentUserId, currentUserRole);
 
     setSavingAssignment(false);
     closeAssignModal();
@@ -1027,6 +1184,7 @@ function ClientsPageContent() {
 
     setBulkTagId("");
     setSelectedClientIds([]);
+    await loadClients(currentUserId, currentUserRole);
     setBulkActionLoading(false);
     alert(`Dodano tag "${selectedTagName}" do zaznaczonych klientów.`);
   }
@@ -1068,6 +1226,7 @@ function ClientsPageContent() {
 
     setBulkTagId("");
     setSelectedClientIds([]);
+    await loadClients(currentUserId, currentUserRole);
     setBulkActionLoading(false);
     alert(`Usunięto tag "${selectedTagName}" z zaznaczonych klientów.`);
   }
@@ -1249,10 +1408,7 @@ function ClientsPageContent() {
       selectedCities.length === 0 ||
       (client.city && selectedCities.includes(client.city));
 
-    const matchesTags =
-      selectedTagIds.length === 0 ||
-      (client.tags || []).some((tag) => selectedTagIds.includes(tag.id));
-
+    const matchesTags = clientMatchesSelectedTags(client);
     return (
       matchesStatus &&
       matchesSubStatus &&
@@ -1319,13 +1475,24 @@ function ClientsPageContent() {
               <h1 className="text-3xl font-bold text-slate-900">Klienci CRM</h1>
             </div>
 
-            <button
-              type="button"
-              onClick={openAddClientModal}
-              className="inline-flex w-full justify-center rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-400 sm:w-auto"
-            >
-              + Dodaj klienta
-            </button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {canOpenImportPage() && (
+                <Link
+                  href="/clients/import"
+                  className="inline-flex w-full justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 shadow-sm transition duration-150 hover:-translate-y-0.5 hover:border-[#73C7BA] hover:shadow-md active:translate-y-0 active:scale-[0.98] sm:w-auto"
+                >
+                  Import
+                </Link>
+              )}
+
+              <button
+                type="button"
+                onClick={openAddClientModal}
+                className="inline-flex w-full justify-center rounded-xl bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-400 sm:w-auto"
+              >
+                + Dodaj klienta
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:flex sm:flex-wrap">
@@ -1351,7 +1518,7 @@ function ClientsPageContent() {
           </div>
         </header>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="relative z-40 overflow-visible rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-end gap-4">
             <div className="min-w-0 flex-1">
               <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
@@ -1411,7 +1578,7 @@ function ClientsPageContent() {
               </div>
             </div>
 
-            <div ref={filtersPanelRef} className="relative w-full sm:w-[280px]">
+            <div ref={filtersPanelRef} className="relative z-50 w-full sm:w-[280px]">
               <label className="mb-2 block text-xs font-semibold uppercase text-slate-400">
                 Filtry dodatkowe
               </label>
@@ -1427,7 +1594,7 @@ function ClientsPageContent() {
               </button>
 
               {showFiltersPanel && (
-                <div className="absolute right-0 top-full z-40 mt-2 max-h-[520px] w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:w-[360px]">
+                <div className="absolute right-0 top-full z-[999] mt-2 max-h-[calc(100vh-220px)] w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:w-[360px]">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <p className="text-sm font-bold text-slate-900">Filtry klientów</p>
                     <button
@@ -1656,7 +1823,7 @@ function ClientsPageContent() {
             </div>
           </section>
         )}
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="relative z-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {loading ? (
             <div className="p-6 text-slate-500">Ładowanie klientów...</div>
           ) : filteredClients.length === 0 ? (
@@ -1731,18 +1898,6 @@ function ClientsPageContent() {
                               {client.full_name || client.company_name || "Brak nazwy"}
                             </div>
 
-                            {client.tags && client.tags.length > 0 && (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {client.tags.slice(0, 3).map((tag) => (
-                                  <span
-                                    key={tag.id}
-                                    className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600"
-                                  >
-                                    {tag.name}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </div>
                       </td>
@@ -1782,6 +1937,7 @@ function ClientsPageContent() {
                         {getAdvisorName(client)}
                       </td>
 
+
                       <td className="truncate px-4 py-2.5 text-slate-700">
                         {client.city || "—"}
                       </td>
@@ -1814,7 +1970,9 @@ function ClientsPageContent() {
 
                           <Link
                             href={`/clients/${client.id}`}
-                            className="inline-flex rounded-lg bg-emerald-500 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-400"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
                           >
                             Otwórz
                           </Link>

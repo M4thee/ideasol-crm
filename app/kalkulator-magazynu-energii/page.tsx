@@ -20,10 +20,10 @@ declare global {
 }
 
 type HasPv = "yes" | "no" | null;
-type Tariff = "G11" | "G12" | "G13" | "other" | "unknown";
+type Tariff = "G11" | "G12" | "G13" | "other_unknown" | null;
 type BillMode = "monthly" | "yearly";
 
-type SettlementSystem = "net_billing" | "net_metering" | "unknown";
+type SettlementSystem = "net_billing" | "net_metering" | "unknown" | null;
 
 type ThemeMode = "auto" | "light" | "dark";
 
@@ -36,6 +36,7 @@ const NET_METERING_BASE_AUTOCONSUMPTION_RATE = 0.25;
 const NET_METERING_SMALL_INSTALLATION_RETURN_RATE = 0.8;
 const NET_METERING_LARGE_INSTALLATION_RETURN_RATE = 0.7;
 const STORAGE_ROUND_TRIP_EFFICIENCY = 0.9;
+const PV_PRODUCTION_PER_KWP = 1005;
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("pl-PL", {
@@ -122,6 +123,7 @@ function getPvStorageMarketingPriceRange(pvKw: number, storageKwh: number) {
   return [62600, 69900] as const;
 }
 
+
 function getOnlyStorageBasePriceWithoutSellerMarkup(storageKwh: number) {
   if (storageKwh <= 10) return 19000;
   if (storageKwh <= 16) return 25000;
@@ -139,6 +141,7 @@ function getPvStorageBasePriceWithoutSellerMarkup(pvKw: number, storageKwh: numb
   return 52900;
 }
 
+
 function getAutoconsumptionRateWithStorageAndHems(storageKwh: number) {
   if (storageKwh <= 10) return 0.7;
   if (storageKwh <= 16) return 0.78;
@@ -146,16 +149,33 @@ function getAutoconsumptionRateWithStorageAndHems(storageKwh: number) {
   return 0.88;
 }
 
+function getBaseAutoconsumptionRate(params: {
+  pvProductionKwh: number;
+  yearlyConsumptionKwh: number;
+}) {
+  const { pvProductionKwh, yearlyConsumptionKwh } = params;
+
+  if (pvProductionKwh <= 0 || yearlyConsumptionKwh <= 0) return NET_BILLING_BASE_AUTOCONSUMPTION_RATE;
+
+  const coverageRatio = pvProductionKwh / yearlyConsumptionKwh;
+
+  if (coverageRatio <= 0.6) return 0.3;
+  if (coverageRatio <= 1) return 0.25;
+  if (coverageRatio <= 1.5) return 0.22;
+  return 0.2;
+}
+
 
 function getNetBillingStorageSavingsRange(params: {
   pvProductionKwh: number;
   yearlyConsumptionKwh: number;
   storageKwh: number;
+  baseAutoconsumptionRate: number;
 }) {
-  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh } = params;
+  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh, baseAutoconsumptionRate } = params;
 
   const baseAutoconsumedKwh = Math.min(
-    pvProductionKwh * NET_BILLING_BASE_AUTOCONSUMPTION_RATE,
+    pvProductionKwh * baseAutoconsumptionRate,
     yearlyConsumptionKwh
   );
 
@@ -174,7 +194,7 @@ function getNetBillingStorageSavingsRange(params: {
   const expectedSavings = additionalAutoconsumedKwh * valueDifferencePerKwh;
 
   return {
-    baseAutoconsumptionRate: NET_BILLING_BASE_AUTOCONSUMPTION_RATE,
+    baseAutoconsumptionRate,
     autoconsumptionRateWithStorage,
     additionalAutoconsumedKwh,
     valueDifferencePerKwh,
@@ -188,8 +208,9 @@ function getNetMeteringStorageSavingsRange(params: {
   yearlyConsumptionKwh: number;
   storageKwh: number;
   currentPvPowerKw: number;
+  baseAutoconsumptionRate: number;
 }) {
-  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh, currentPvPowerKw } = params;
+  const { pvProductionKwh, yearlyConsumptionKwh, storageKwh, currentPvPowerKw, baseAutoconsumptionRate } = params;
 
   const returnRate =
     currentPvPowerKw > 10
@@ -197,7 +218,7 @@ function getNetMeteringStorageSavingsRange(params: {
       : NET_METERING_SMALL_INSTALLATION_RETURN_RATE;
 
   const baseAutoconsumedKwh = Math.min(
-    pvProductionKwh * NET_METERING_BASE_AUTOCONSUMPTION_RATE,
+    pvProductionKwh * baseAutoconsumptionRate,
     yearlyConsumptionKwh
   );
 
@@ -217,7 +238,7 @@ function getNetMeteringStorageSavingsRange(params: {
   const expectedSavings = additionalAutoconsumedKwh * valueDifferencePerKwh;
 
   return {
-    baseAutoconsumptionRate: NET_METERING_BASE_AUTOCONSUMPTION_RATE,
+    baseAutoconsumptionRate,
     autoconsumptionRateWithStorage,
     additionalAutoconsumedKwh,
     returnRate,
@@ -292,32 +313,32 @@ function getRecommendation(params: {
   const paybackYearsForRecommendation = paybackYearsLow;
   const caresAboutSavings = priorities.includes("Niższe rachunki");
   const caresAboutBackup = priorities.includes("Awaryjne zasilanie domu w razie awarii");
-  const caresAboutEfficiency = priorities.includes("Zwiększenie wydajności mojej instalacji (mniej wyłączeń)");
+  const caresAboutEfficiency = priorities.includes("Zwiększenie produktywności mojej instalacji fotowoltaicznej (zapobieganie wyłączeniom)");
 
-  if (paybackYearsForRecommendation <= 6) {
+  if (paybackYearsForRecommendation <= 7) {
     return {
       type: "recommended",
-      title: "Rekomendujemy to rozwiązanie",
+      title: "Magazyn energii wygląda na dobrą inwestycję",
       description:
-        "Na podstawie podanych danych magazyn energii może być dla Ciebie bardzo dobrym rozwiązaniem. Prognozowany okres zwrotu jest relatywnie krótki, a dodatkowo zyskujesz większą niezależność energetyczną i lepsze wykorzystanie energii z instalacji fotowoltaicznej.",
+        "Szacowany okres zwrotu jest korzystny, a magazyn może zwiększyć wykorzystanie energii z fotowoltaiki i ograniczyć rachunki za prąd.",
     };
   }
 
-  if (paybackYearsForRecommendation >= 7 && paybackYearsForRecommendation <= 9) {
+  if (paybackYearsForRecommendation >= 8 && paybackYearsForRecommendation <= 11) {
     return {
       type: "consider",
-      title: "Warto rozważyć magazyn energii",
+      title: "Magazyn energii warto rozważyć",
       description:
-        "Magazyn energii może mieć sens, ale nie jest to jednoznaczna decyzja wyłącznie ekonomiczna. Ostateczna opłacalność będzie zależeć między innymi od przyszłych cen energii, profilu zużycia, taryfy oraz sposobu pracy instalacji.",
+        "Opłacalność nie jest jednoznaczna i zależy m.in. od sposobu zużycia energii, przyszłych cen prądu oraz możliwości uzyskania dotacji.",
     };
   }
 
   if (caresAboutBackup) {
     return {
       type: "consider",
-      title: "Finansowo ostrożnie, ale backup może mieć sens",
+      title: "Warto rozważyć magazyn energii ze względu na zasilanie awaryjne",
       description:
-        "Pod względem samego obniżenia rachunków okres zwrotu może być długi. Jeżeli jednak zależy Ci na bezpieczeństwie energetycznym, magazyn energii z funkcją zasilania awaryjnego może nadal być bardzo rozsądnym rozwiązaniem dla domu.",
+        "Jeżeli zależy Ci na zasilaniu awaryjnym podczas przerw w dostawie prądu, magazyn energii może dać realny komfort i większe bezpieczeństwo pracy domu.",
     };
   }
 
@@ -326,16 +347,16 @@ function getRecommendation(params: {
       type: "consider",
       title: "Warto sprawdzić problem wyłączeń instalacji",
       description:
-        "Największą korzyścią może być poprawa wykorzystania istniejącej instalacji fotowoltaicznej. Jeżeli instalacja okresowo ogranicza produkcję przez wysokie napięcie w sieci, magazyn energii może pomóc ograniczyć część strat i zwiększyć autokonsumpcję.",
+        "Jeżeli instalacja okresowo ogranicza produkcję lub wyłącza się przy wysokim napięciu, magazyn może pomóc wykorzystać większą część wyprodukowanej energii.",
     };
   }
 
   if (caresAboutSavings) {
     return {
       type: "not_recommended",
-      title: "Raczej nie rekomendujemy wyłącznie dla oszczędności",
+      title: "Magazyn energii ma ograniczoną opłacalność",
       description:
-        "Na podstawie podanych danych zakup magazynu energii może nie być obecnie najlepszym rozwiązaniem, jeśli głównym celem są wyłącznie niższe rachunki. Prognozowany okres zwrotu jest stosunkowo długi. Jeżeli mimo wszystko chcesz porozmawiać z doradcą, chętnie oddzwonimy.",
+        "Przy obecnych założeniach inwestycja może zwracać się stosunkowo długo. Warto porozmawiać z doradcą o innych możliwościach obniżenia kosztów energii.",
     };
   }
 
@@ -343,7 +364,7 @@ function getRecommendation(params: {
     type: "consider",
     title: "Wymaga dokładniejszej analizy",
     description:
-      "Na podstawie podanych danych magazyn energii nie daje jednoznacznej odpowiedzi ekonomicznej. Warto sprawdzić profil zużycia, taryfę, pracę instalacji oraz możliwość uzyskania dotacji.",
+      "Wynik nie daje jednoznacznej odpowiedzi. Warto sprawdzić profil zużycia, taryfę, pracę instalacji oraz możliwość uzyskania dotacji.",
   };
 }
 
@@ -361,7 +382,7 @@ function getRecommendationBoxClass(type: RecommendationType) {
 
 function getRecommendationBadge(type: RecommendationType) {
   if (type === "recommended") return "✅ Rekomendacja pozytywna";
-  if (type === "not_recommended") return "⚠️ Ostrożna rekomendacja";
+  if (type === "not_recommended") return "🛑 NIE REKOMENDUJEMY";
   return "🟡 Warto rozważyć";
 }
 
@@ -371,10 +392,10 @@ export default function EnergyStorageCalculatorPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [hasPv, setHasPv] = useState<HasPv>(null);
   const [pvPower, setPvPower] = useState("");
-  const [settlementSystem, setSettlementSystem] = useState<SettlementSystem>("unknown");
+  const [settlementSystem, setSettlementSystem] = useState<SettlementSystem>(null);
   const [billMode, setBillMode] = useState<BillMode>("monthly");
   const [billAmount, setBillAmount] = useState("");
-  const [tariff, setTariff] = useState<Tariff>("unknown");
+  const [tariff, setTariff] = useState<Tariff>(null);
   const [wantsBackup, setWantsBackup] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -382,6 +403,8 @@ export default function EnergyStorageCalculatorPage() {
 
 const [step, setStep] = useState(2);
 const [priorities, setPriorities] = useState<string[]>([]);
+const [expandedResultDetails, setExpandedResultDetails] = useState<Record<string, boolean>>({});
+const [showDetailedResult, setShowDetailedResult] = useState(false);
 
 const [contactFirstName, setContactFirstName] = useState("");
 const [contactLastName, setContactLastName] = useState("");
@@ -453,6 +476,7 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
   const step4Ref = useRef<HTMLDivElement | null>(null);
   const step5Ref = useRef<HTMLDivElement | null>(null);
   const step6Ref = useRef<HTMLButtonElement | null>(null);
+  const detailedReportRef = useRef<HTMLDivElement | null>(null);
 
   const analysisSteps = [
     "Analiza zużycia energii",
@@ -480,10 +504,12 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
     : "space-y-6 rounded-[28px] border border-slate-200 bg-white p-6 text-slate-950 shadow-xl shadow-slate-950/10 sm:p-8";
 
   const resultCardClass = isDarkMode
-    ? "rounded-[24px] border border-white/10 bg-white/10 p-5 text-white backdrop-blur"
-    : "rounded-[24px] border border-slate-200 bg-slate-50 p-5";
+    ? "border-b border-white/10 py-4 text-white"
+    : "border-b border-slate-200 py-4";
 
   const mutedTextClass = isDarkMode ? "text-[#D8CEC7]" : "text-slate-500";
+
+  const eyebrowTextClass = isDarkMode ? "text-cyan-300" : "text-cyan-700";
 
   const secondaryButtonClass = isDarkMode
     ? "rounded-2xl border border-white/15 bg-white/10 px-5 py-3 font-bold text-white transition hover:bg-white/15"
@@ -541,8 +567,8 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
     : "w-full rounded-2xl bg-slate-950 px-5 py-3 font-bold text-white shadow-lg shadow-slate-950/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:shadow-none";
 
   const contactPanelClass = isDarkMode
-    ? "rounded-[24px] border border-white/10 bg-white/5 p-5 text-white shadow-xl shadow-black/10"
-    : "rounded-[24px] border border-slate-200 bg-slate-50 p-5 text-slate-950 shadow-xl shadow-slate-950/5";
+    ? "rounded-[24px] border border-lime-300/20 bg-gradient-to-br from-lime-300/10 to-white/5 p-5 text-white shadow-2xl shadow-lime-950/20"
+    : "rounded-[24px] border border-lime-200 bg-gradient-to-br from-lime-50 to-white p-5 text-slate-950 shadow-2xl shadow-lime-100";
 
   const contactLabelClass = isDarkMode ? "text-sm font-semibold text-white/75" : "text-sm font-semibold text-slate-700";
 
@@ -558,11 +584,10 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
     G11: "Taryfa G11 nie wykorzystuje w pełni potencjału magazynów energii. Zalecane są taryfy G12/G13 lub taryfy dynamiczne. Nasz doradca pomoże wybrać Ci najlepsze rozwiązanie.",
     G12: "Taryfa G12 może dobrze współpracować z magazynem energii, szczególnie gdy część zużycia przesuwamy na tańsze godziny i lepiej zarządzamy energią w domu.",
     G13: "Taryfa G13 daje więcej możliwości optymalizacji pracy magazynu energii, bo pozwala lepiej dopasować ładowanie i zużycie do różnych stref cenowych.",
-    other: "Przy mniej typowej taryfie warto sprawdzić profil zużycia i godziny poboru energii. Doradca może pomóc ocenić, czy zmiana taryfy zwiększy opłacalność magazynu.",
-    unknown: "Nie musisz znać taryfy na tym etapie. Podczas analizy doradca może sprawdzić, czy obecna taryfa jest korzystna dla magazynu energii.",
-  } satisfies Record<Tariff, string>;
+    other_unknown: "Jeżeli nie znasz taryfy albo masz mniej typową umowę, wybierz tę opcję. Doradca może później sprawdzić, czy obecna taryfa jest korzystna dla magazynu energii.",
+  } satisfies Record<Exclude<Tariff, null>, string>;
 
-  const settlementSystemHint: Record<SettlementSystem, string> = {
+  const settlementSystemHint: Record<Exclude<SettlementSystem, null>, string> = {
     net_metering:
       'System tzw. opustów, który obowiązuje dla instalacji założonych i zgłoszonych do 31.03.2022 roku. Polegał na tym, że operator sieci dystrybucyjnej przechowuje w "wirtualnym magazynie" od 70 do 80% nadwyżek przesłanej do sieci energii, w zależności od mocy instalacji fotowoltaicznej, umożliwiając jej późniejszy odbiór w kolejnych okresach rozliczeniowych.',
     net_billing:
@@ -576,7 +601,7 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
       "Jedna z podstawowych ról magazynu energii to zwiększenie zużycia własnego prądu z fotowoltaiki. Dobrze skonfigurowany system sterowania może też wspierać sprzedaż energii w korzystniejszych godzinach, zamiast oddawania jej do sieci za bardzo niskie stawki.",
     "Awaryjne zasilanie domu w razie awarii":
       "Magazyn energii wyposażony w funkcję automatycznego zasilania awaryjnego może zasilać wybrane obwody domu podczas awarii sieci energetycznej. W prawidłowo dobranym systemie przełączenie na zasilanie z magazynu trwa zwykle mniej niż sekundę i jest praktycznie nieodczuwalne.",
-    "Zwiększenie wydajności mojej instalacji (mniej wyłączeń)":
+    "Zwiększenie produktywności mojej instalacji fotowoltaicznej (zapobieganie wyłączeniom)":
       "W okresach wysokiej produkcji część instalacji fotowoltaicznych ogranicza pracę albo wyłącza się przez zbyt wysokie napięcie w sieci. To realna strata energii, szczególnie latem. Magazyn energii może stabilizować pracę instalacji i ograniczać straty wynikające z nadprodukcji oraz przeciążeń sieci.",
   };
 
@@ -639,11 +664,11 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
     scrollToElement(formRef.current);
   }
 
-  function selectSettlementSystem(value: SettlementSystem) {
+  function selectSettlementSystem(value: Exclude<SettlementSystem, null>) {
     setSettlementSystem(value);
   }
 
-  function selectTariff(value: Tariff) {
+  function selectTariff(value: Exclude<Tariff, null>) {
     setTariff(value);
     setShowResult(false);
   }
@@ -654,23 +679,32 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
     );
   }
 
+  function toggleResultDetail(key: string) {
+    setExpandedResultDetails((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
   function editAnswers() {
     setShowResult(false);
     setIsAnalyzing(false);
     setAnalysisStep(0);
+    setShowDetailedResult(false);
     scrollToElement(formRef.current);
   }
 
   function restartCalculator() {
     setHasPv(null);
     setPvPower("");
-    setSettlementSystem("unknown");
+    setSettlementSystem(null);
     setBillMode("monthly");
     setBillAmount("");
-    setTariff("unknown");
+    setTariff(null);
     setShowResult(false);
     setIsAnalyzing(false);
     setAnalysisStep(0);
+    setShowDetailedResult(false);
     setStep(2);
     setPriorities([]);
     setContactFirstName("");
@@ -702,154 +736,181 @@ const [isTurnstileLoaded, setIsTurnstileLoaded] = useState(false);
   const yearlyBill = billMode === "monthly" ? billValue * 12 : billValue;
   const currentPvPowerKw = parseDecimal(pvPower);
   const estimatedGridConsumptionKwh = yearlyBill > 0 ? yearlyBill / ENERGY_PRICE_PER_KWH : 0;
-  const estimatedPvProductionKwh = hasPv === "yes" && currentPvPowerKw > 0 ? currentPvPowerKw * 1000 : 0;
+  const estimatedPvProductionKwh = hasPv === "yes" && currentPvPowerKw > 0 ? currentPvPowerKw * PV_PRODUCTION_PER_KWP : 0;
+  const preliminaryYearlyConsumptionKwh = estimatedGridConsumptionKwh + estimatedPvProductionKwh * NET_BILLING_BASE_AUTOCONSUMPTION_RATE;
   const baseAutoconsumptionRate =
-    settlementSystem === "net_metering"
-      ? NET_METERING_BASE_AUTOCONSUMPTION_RATE
+    hasPv === "yes"
+      ? getBaseAutoconsumptionRate({
+          pvProductionKwh: estimatedPvProductionKwh,
+          yearlyConsumptionKwh: preliminaryYearlyConsumptionKwh,
+        })
       : NET_BILLING_BASE_AUTOCONSUMPTION_RATE;
   const estimatedSelfConsumedPvKwh =
     hasPv === "yes" ? estimatedPvProductionKwh * baseAutoconsumptionRate : 0;
   const estimatedExportedPvKwh =
     hasPv === "yes" ? Math.max(0, estimatedPvProductionKwh - estimatedSelfConsumedPvKwh) : 0;
+
+  const netMeteringReturnRate = currentPvPowerKw > 10 ? 0.7 : 0.8;
+
+  const estimatedReturnedFromNetMeteringKwh =
+    hasPv === "yes" && settlementSystem === "net_metering"
+      ? estimatedExportedPvKwh * netMeteringReturnRate
+      : 0;
+
   const yearlyConsumptionKwh =
     hasPv === "yes"
-      ? estimatedGridConsumptionKwh + estimatedSelfConsumedPvKwh
+      ? settlementSystem === "net_metering"
+        ? estimatedGridConsumptionKwh +
+          estimatedSelfConsumedPvKwh +
+          estimatedReturnedFromNetMeteringKwh
+        : estimatedGridConsumptionKwh + estimatedSelfConsumedPvKwh
       : estimatedGridConsumptionKwh;
 
     const result = useMemo(() => {
-    if (!hasPv || yearlyBill <= 0) return null;
+      if (!hasPv || yearlyBill <= 0) return null;
 
-    const storageFromConsumption = getStorageFromConsumption(yearlyConsumptionKwh);
-    const storageFromPv =
-      hasPv === "yes" && currentPvPowerKw > 0
-        ? pickStorageVariant(currentPvPowerKw * 2)
-        : 0;
-    const recommendedStorageKwh =
-      hasPv === "yes"
-        ? Math.max(storageFromConsumption, storageFromPv)
-        : pickStorageVariant(getSuggestedPvKw(yearlyConsumptionKwh) * 2);
-    let suggestedPvKw = getSuggestedPvKw(yearlyConsumptionKwh);
+      const storageFromConsumption = getStorageFromConsumption(yearlyConsumptionKwh);
+      const storageFromPv =
+        hasPv === "yes" && currentPvPowerKw > 0
+          ? pickStorageVariant(currentPvPowerKw * 2)
+          : 0;
+      const recommendedStorageKwh =
+        hasPv === "yes"
+          ? Math.max(storageFromConsumption, storageFromPv)
+          : pickStorageVariant(getSuggestedPvKw(yearlyConsumptionKwh) * 2);
+      let suggestedPvKw = getSuggestedPvKw(yearlyConsumptionKwh);
 
-    if (
-      hasPv === "yes" &&
-      settlementSystem === "net_metering" &&
-      currentPvPowerKw > 0 &&
-      currentPvPowerKw < 10 &&
-      suggestedPvKw > 10
-    ) {
-      const productionAt10Kw = 10000;
-      const usableAt10Kw = productionAt10Kw * 0.8;
+      if (
+        hasPv === "yes" &&
+        settlementSystem === "net_metering" &&
+        currentPvPowerKw > 0 &&
+        currentPvPowerKw < 10 &&
+        suggestedPvKw > 10
+      ) {
+        const productionAt10Kw = 10 * PV_PRODUCTION_PER_KWP;
+        const usableAt10Kw = productionAt10Kw * 0.8;
 
-      const productionAtSuggestedKw = suggestedPvKw * 1000;
-      const usableAtSuggestedKw = productionAtSuggestedKw * 0.7;
+        const productionAtSuggestedKw = suggestedPvKw * PV_PRODUCTION_PER_KWP;
+        const usableAtSuggestedKw = productionAtSuggestedKw * 0.7;
 
-      const gainAfterCrossingThreshold = usableAtSuggestedKw - usableAt10Kw;
+        const gainAfterCrossingThreshold = usableAtSuggestedKw - usableAt10Kw;
 
-      if (gainAfterCrossingThreshold < 1500) {
-        suggestedPvKw = 10;
-      } else if (yearlyConsumptionKwh > 14000) {
-        suggestedPvKw = Math.max(suggestedPvKw, 12);
+        if (gainAfterCrossingThreshold < 1500) {
+          suggestedPvKw = 10;
+        } else if (yearlyConsumptionKwh > 14000) {
+          suggestedPvKw = Math.max(suggestedPvKw, 12);
+        }
       }
-    }
 
-    const coveragePercent =
-      hasPv === "yes" && yearlyConsumptionKwh > 0
-        ? Math.round((estimatedPvProductionKwh / yearlyConsumptionKwh) * 100)
-        : 100;
-    const shouldRecommendPvExpansion = hasPv === "yes" && coveragePercent < 70;
-    const pvExpansionStorageKwh = pickStorageVariant(suggestedPvKw * 2);
-    const pvExpansionPriceRange = getPvStorageMarketingPriceRange(suggestedPvKw, pvExpansionStorageKwh);
+      const coveragePercent =
+        hasPv === "yes" && yearlyConsumptionKwh > 0
+          ? Math.round((estimatedPvProductionKwh / yearlyConsumptionKwh) * 100)
+          : 100;
+      const shouldRecommendPvExpansion = hasPv === "yes" && coveragePercent < 70;
+      const pvExpansionStorageKwh = pickStorageVariant(suggestedPvKw * 2);
+      const pvExpansionPriceRange = getPvStorageMarketingPriceRange(suggestedPvKw, pvExpansionStorageKwh);
 
-    const savingsRate = getSavingsRateRange({
-      hasPv,
-      settlementSystem,
-      tariff,
-      yearlyBill,
-      recommendedStorageKwh,
-    });
+      const savingsRate = getSavingsRateRange({
+        hasPv,
+        settlementSystem,
+        tariff,
+        yearlyBill,
+        recommendedStorageKwh,
+      });
 
-    const netBillingSavingsDetails =
-      hasPv === "yes" && settlementSystem === "net_billing" && estimatedPvProductionKwh > 0
-        ? getNetBillingStorageSavingsRange({
-            pvProductionKwh: estimatedPvProductionKwh,
-            yearlyConsumptionKwh,
-            storageKwh: recommendedStorageKwh,
-          })
-        : null;
+      const netBillingSavingsDetails =
+        hasPv === "yes" && settlementSystem === "net_billing" && estimatedPvProductionKwh > 0
+          ? getNetBillingStorageSavingsRange({
+              pvProductionKwh: estimatedPvProductionKwh,
+              yearlyConsumptionKwh,
+              storageKwh: recommendedStorageKwh,
+              baseAutoconsumptionRate,
+            })
+          : null;
 
-    const netMeteringSavingsDetails =
-      hasPv === "yes" && settlementSystem === "net_metering" && estimatedPvProductionKwh > 0
-        ? getNetMeteringStorageSavingsRange({
-            pvProductionKwh: estimatedPvProductionKwh,
-            yearlyConsumptionKwh,
-            storageKwh: recommendedStorageKwh,
-            currentPvPowerKw,
-          })
-        : null;
+      const netMeteringSavingsDetails =
+        hasPv === "yes" && settlementSystem === "net_metering" && estimatedPvProductionKwh > 0
+          ? getNetMeteringStorageSavingsRange({
+              pvProductionKwh: estimatedPvProductionKwh,
+              yearlyConsumptionKwh,
+              storageKwh: recommendedStorageKwh,
+              currentPvPowerKw,
+              baseAutoconsumptionRate,
+            })
+          : null;
 
-    const yearlySavingsLow = netBillingSavingsDetails
-      ? netBillingSavingsDetails.low
-      : netMeteringSavingsDetails
-        ? netMeteringSavingsDetails.low
-        : yearlyBill * savingsRate.low;
-    const yearlySavingsHigh = netBillingSavingsDetails
-      ? netBillingSavingsDetails.high
-      : netMeteringSavingsDetails
-        ? netMeteringSavingsDetails.high
-        : yearlyBill * savingsRate.high;
+      const yearlySavingsLow = netBillingSavingsDetails
+        ? netBillingSavingsDetails.low
+        : netMeteringSavingsDetails
+          ? netMeteringSavingsDetails.low
+          : yearlyBill * savingsRate.low;
+      const yearlySavingsHigh = netBillingSavingsDetails
+        ? netBillingSavingsDetails.high
+        : netMeteringSavingsDetails
+          ? netMeteringSavingsDetails.high
+          : yearlyBill * savingsRate.high;
 
-    const baseCalculatorPriceWithoutSellerMarkup =
-      hasPv === "yes"
-        ? getOnlyStorageBasePriceWithoutSellerMarkup(recommendedStorageKwh)
-        : getPvStorageBasePriceWithoutSellerMarkup(suggestedPvKw, recommendedStorageKwh);
+      const baseCalculatorPriceWithoutSellerMarkup =
+        hasPv === "yes"
+          ? getOnlyStorageBasePriceWithoutSellerMarkup(recommendedStorageKwh)
+          : getPvStorageBasePriceWithoutSellerMarkup(suggestedPvKw, recommendedStorageKwh);
 
-    const [priceLow, priceHigh] =
-      hasPv === "yes"
-        ? getMarketingPriceRange(baseCalculatorPriceWithoutSellerMarkup)
-        : getPvStorageMarketingPriceRange(suggestedPvKw, recommendedStorageKwh);
+      const [priceLow, priceHigh] =
+        hasPv === "yes"
+          ? getMarketingPriceRange(baseCalculatorPriceWithoutSellerMarkup)
+          : getPvStorageMarketingPriceRange(suggestedPvKw, recommendedStorageKwh);
 
-    const storageSubsidyCap = settlementSystem === "net_metering" ? 8000 : 16000;
-    const subsidyEstimate = Math.min(recommendedStorageKwh * 800, storageSubsidyCap) + 2000;
+      const storageSubsidyCap = settlementSystem === "net_metering" ? 8000 : 16000;
+      const subsidyEstimate = Math.min(recommendedStorageKwh * 800, storageSubsidyCap) + 2000;
 
-    const investmentLowAfterSubsidy = Math.max(0, priceLow - subsidyEstimate);
-    const investmentHighAfterSubsidy = Math.max(0, priceHigh - subsidyEstimate);
-    const paybackYearsLow = calculatePaybackYears(investmentLowAfterSubsidy, yearlySavingsHigh);
-    const paybackYearsHigh = calculatePaybackYears(investmentHighAfterSubsidy, yearlySavingsLow);
 
-    const recommendation = getRecommendation({
-      paybackYearsLow,
-      paybackYearsHigh,
-      priorities,
-    });
 
-    return {
-      recommendedStorageKwh,
-      storageFromConsumption,
-      storageFromPv,
-      currentPvPowerKw,
-      suggestedPvKw,
-      estimatedPvProductionKwh,
-      coveragePercent,
-      shouldRecommendPvExpansion,
-      pvExpansionStorageKwh,
-      pvExpansionPriceRange,
-      netBillingSavingsDetails,
-      netMeteringSavingsDetails,
-      yearlySavingsLow,
-      yearlySavingsHigh,
-      savingsRateLow: savingsRate.low,
-      savingsRateHigh: savingsRate.high,
-      priceLow,
-      priceHigh,
-      subsidyEstimate,
-      paybackYearsLow,
-      paybackYearsHigh,
-      recommendation,
-    };
-  }, [hasPv, currentPvPowerKw, estimatedPvProductionKwh, settlementSystem, tariff, yearlyBill, yearlyConsumptionKwh, priorities]);
+      const investmentLowAfterSubsidy = Math.max(0, priceLow - subsidyEstimate);
+      const investmentHighAfterSubsidy = Math.max(0, priceHigh - subsidyEstimate);
+      const paybackYearsLow = calculatePaybackYears(investmentLowAfterSubsidy, yearlySavingsHigh);
+      const paybackYearsHigh = calculatePaybackYears(investmentHighAfterSubsidy, yearlySavingsLow);
+
+      const recommendation = getRecommendation({
+        paybackYearsLow,
+        paybackYearsHigh,
+        priorities,
+      });
+
+      return {
+        recommendedStorageKwh,
+        storageFromConsumption,
+        storageFromPv,
+        currentPvPowerKw,
+        suggestedPvKw,
+        estimatedPvProductionKwh,
+        coveragePercent,
+        shouldRecommendPvExpansion,
+        pvExpansionStorageKwh,
+        pvExpansionPriceRange,
+        netBillingSavingsDetails,
+        netMeteringSavingsDetails,
+        yearlySavingsLow,
+        yearlySavingsHigh,
+        savingsRateLow: savingsRate.low,
+        savingsRateHigh: savingsRate.high,
+        priceLow,
+        priceHigh,
+        subsidyEstimate,
+        paybackYearsLow,
+        paybackYearsHigh,
+        recommendation,
+      };
+    }, [hasPv, currentPvPowerKw, estimatedPvProductionKwh, settlementSystem, tariff, yearlyBill, yearlyConsumptionKwh, priorities]);
 
   const hasValidPvDetails = hasPv !== "yes" || parseDecimal(pvPower) > 0;
-const canCalculate = Boolean(hasPv && yearlyBill > 0 && hasValidPvDetails && priorities.length > 0);
+const canCalculate = Boolean(
+  hasPv &&
+    yearlyBill > 0 &&
+    hasValidPvDetails &&
+    tariff &&
+    (hasPv === "no" || settlementSystem) &&
+    priorities.length > 0
+);
 
 const canSubmitLead = Boolean(
   contactFirstName.trim() &&
@@ -865,6 +926,8 @@ const canSubmitLead = Boolean(
     setIsAnalyzing(true);
     setShowResult(false);
     setAnalysisStep(0);
+    setExpandedResultDetails({});
+    setShowDetailedResult(false);
 
     scrollToElement(formRef.current);
 
@@ -916,6 +979,7 @@ const canSubmitLead = Boolean(
             estimatedPvProductionKwh,
             estimatedSelfConsumedPvKwh,
             estimatedExportedPvKwh,
+            estimatedReturnedFromNetMeteringKwh,
             baseAutoconsumptionRate,
             tariff,
             priorities,
@@ -1096,172 +1160,239 @@ const canSubmitLead = Boolean(
             ) : showResult && result ? (
               <div className={resultPanelClass}>
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Twój wstępny wynik</p>
+                  <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>
+                    Twój wstępny wynik
+                  </p>
                   <h2 className="mt-4 text-3xl font-bold">
-                    {hasPv === "yes" ? "Magazyn energii może mieć sens" : "Fotowoltaika i magazyn energii mogą mieć sens"}
+                    Oto wynik analizy Twojej sytuacji
                   </h2>
                 </div>
 
-                <div className="grid gap-3">
+                <div className={`rounded-[24px] border p-5 ${getRecommendationBoxClass(result.recommendation.type)}`}>
+                  <p className={`text-sm font-semibold uppercase tracking-[0.18em] ${
+                    result.recommendation.type === "recommended"
+                      ? (isDarkMode ? "text-emerald-200" : "text-emerald-700")
+                      : result.recommendation.type === "not_recommended"
+                        ? (isDarkMode ? "text-rose-200" : "text-rose-700")
+                        : (isDarkMode ? "text-amber-200" : "text-amber-700")
+                  }`}>
+                    {getRecommendationBadge(result.recommendation.type)}
+                  </p>
+                  <h3 className="mt-3 text-2xl font-bold">{result.recommendation.title}</h3>
+                  <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>{result.recommendation.description}</p>
+                  {(result.recommendation.type === "not_recommended" || (result.recommendation.type === "consider" && priorities.includes("Awaryjne zasilanie domu w razie awarii"))) && (
+                    <div className={`mt-4 rounded-[18px] border p-4 text-sm leading-6 ${isDarkMode ? "border-white/10 bg-white/5 text-[#D8CEC7]" : "border-slate-200 bg-white/70 text-slate-600"}`}>
+                      Nie oznacza to, że w Twoim domu nie da się poprawić kosztów energii. Może się okazać, że większy sens ma zmiana taryfy, korekta sposobu zużycia energii, optymalizacja pracy obecnej instalacji albo inne rozwiązanie. Warto omówić wynik z doradcą i sprawdzić, czy istnieje prostsza droga do obniżenia rachunków.
+                    </div>
+                  )}
+                </div>
+
+                <div>
+  <button
+    type="button"
+    onClick={() => {
+      setShowDetailedResult((current) => {
+        const next = !current;
+
+        if (next) {
+          window.setTimeout(() => {
+            scrollToElement(detailedReportRef.current);
+          }, 80);
+        }
+
+        return next;
+      });
+    }}
+    className="w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-lime-300 px-5 py-4 text-left text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:-translate-y-0.5 hover:brightness-105"
+  >
+    <span className="flex items-center justify-between gap-3">
+      <span>
+        <span className="block text-base font-extrabold">{showDetailedResult ? "Ukryj dokładny raport" : "Dokładny raport"}</span>
+        <span className="mt-1 block text-xs font-semibold text-slate-800/75">
+          {showDetailedResult ? "Schowaj szczegółowe liczby i założenia" : "Pokaż szczegółowe liczby i założenia"}
+        </span>
+      </span>
+      <span aria-hidden="true" className="text-2xl font-extrabold">{showDetailedResult ? "↑" : "↓"}</span>
+    </span>
+  </button>
+
+  {showDetailedResult && (
+    <div ref={detailedReportRef} className="space-y-0">
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>
                       {hasPv === "yes" ? "Szacowane całkowite zużycie energii" : "Szacowane roczne zużycie"}
                     </p>
-                    <p className="mt-1 text-2xl font-bold">{Math.round(yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-white" : "mt-1 text-2xl font-bold text-slate-950"}>{Math.round(yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh</p>
                     {hasPv === "yes" && result.estimatedPvProductionKwh > 0 && (
-                      <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        W tym około {Math.round(estimatedGridConsumptionKwh).toLocaleString("pl-PL")} kWh kupione z sieci oraz około {Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh zużyte bezpośrednio z obecnej instalacji fotowoltaicznej. Około {Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh traktujemy jako nadwyżkę oddaną do sieci.
-                      </p>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => toggleResultDetail("usage")}
+                          className={`mt-2 text-xs font-bold underline-offset-4 hover:underline ${isDarkMode ? "text-cyan-200" : "text-cyan-800"}`}
+                        >
+                          {expandedResultDetails.usage ? "Ukryj szczegóły" : "Rozwiń szczegóły"}
+                        </button>
+                        {expandedResultDetails.usage && (
+                          <div className={`mt-3 px-4 py-3 ${isDarkMode ? "bg-white/5" : "bg-slate-100/80"}`}>
+                            <p className={`text-xs leading-5 ${mutedTextClass}`}>
+                              W tym około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(estimatedGridConsumptionKwh).toLocaleString("pl-PL")} kWh</strong> kupione z sieci oraz około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh</strong> zużyte bezpośrednio z obecnej instalacji fotowoltaicznej. Około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh</strong> traktujemy jako nadwyżkę oddaną do sieci.
+                            </p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   {hasPv === "yes" && (
                     <div className={resultCardClass}>
-                      <p className={`text-sm ${mutedTextClass}`}>Twoja obecna instalacja fotowoltaiczna</p>
-                      <p className="mt-1 text-2xl font-bold">
-                        {pvPower ? `${pvPower} kWp` : "moc niepodana"} · {settlementSystem === "net_billing" ? "net-billing" : settlementSystem === "net_metering" ? "net-metering" : "system nieznany"}
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Twoja obecna instalacja fotowoltaiczna</p>
+                      <p className={isDarkMode ? "mt-1 text-2xl font-bold text-cyan-300" : "mt-1 text-2xl font-bold text-cyan-700"}>
+                        {pvPower ? `${pvPower} kWp` : "moc niepodana"}
                       </p>
+                      <div className="mt-2">
+                        <span className={`inline-flex px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${isDarkMode ? "bg-cyan-300/10 text-cyan-300" : "bg-cyan-100 text-cyan-700"}`}>
+                          {settlementSystem === "net_billing" ? "Net-billing" : settlementSystem === "net_metering" ? "Net-metering" : "System nieznany"}
+                        </span>
+                      </div>
                       <p className={`mt-2 text-sm ${mutedTextClass}`}>
                         Szacowana produkcja z fotowoltaiki: {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh/rok
                       </p>
                       <p className={`mt-1 text-sm ${mutedTextClass}`}>
                         Szacowana autokonsumpcja bez magazynu: {Math.round(baseAutoconsumptionRate * 100)}% ({Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh/rok)
                       </p>
-                      <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>
-                        Twoja instalacja fotowoltaiczna produkuje około {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh energii rocznie, co odpowiada około {result.coveragePercent}% rocznego zużycia energii w domu.
-                      </p>
-
-                      <p className={`mt-2 text-sm leading-6 ${mutedTextClass}`}>
-                        Obecnie wykorzystujesz bezpośrednio około {Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh ({Math.round(baseAutoconsumptionRate * 100)}%) tej energii, a pozostałe około {Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh trafia do sieci.
-                      </p>
-
-                      <p className={`mt-2 text-sm font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
-                        To właśnie ten obszar może poprawić magazyn energii, zwiększając wykorzystanie własnej produkcji zamiast oddawania jej do sieci.
-                      </p>
-                      {result.shouldRecommendPvExpansion && (
-                        <p className={`mt-2 text-sm font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
-                          Obecna instalacja fotowoltaiczna pokrywa mniej niż 70% szacowanego zapotrzebowania — warto sprawdzić wariant z rozbudową instalacji.
-                        </p>
+                      <button
+                        type="button"
+                        onClick={() => toggleResultDetail("currentPv")}
+                        className={`mt-2 text-xs font-bold underline-offset-4 hover:underline ${isDarkMode ? "text-cyan-200" : "text-cyan-800"}`}
+                      >
+                        {expandedResultDetails.currentPv ? "Ukryj szczegóły" : "Rozwiń szczegóły"}
+                      </button>
+                      {expandedResultDetails.currentPv && (
+                        <div className={`mt-3 space-y-2 px-4 py-3 text-xs leading-5 ${mutedTextClass} ${isDarkMode ? "bg-white/5" : "bg-slate-100/80"}`}>
+                          <p className={`mt-3 text-xs leading-5 ${mutedTextClass}`}>
+                            Twoja instalacja fotowoltaiczna produkuje około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh</strong> energii rocznie, co odpowiada około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{result.coveragePercent}%</strong> rocznego zużycia energii w domu.
+                          </p>
+                          <p className={`mt-2 text-xs leading-5 ${mutedTextClass}`}>
+                            Obecnie wykorzystujesz bezpośrednio około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(estimatedSelfConsumedPvKwh).toLocaleString("pl-PL")} kWh</strong> (<strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(baseAutoconsumptionRate * 100)}%</strong>) tej energii, a pozostałe około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(estimatedExportedPvKwh).toLocaleString("pl-PL")} kWh</strong> trafia do sieci.
+                          </p>
+                          <p className={`mt-2 text-xs font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
+                            To właśnie ten obszar może poprawić magazyn energii, zwiększając wykorzystanie własnej produkcji zamiast oddawania jej do sieci.
+                          </p>
+                          {result.shouldRecommendPvExpansion && (
+                            <p className={`mt-2 text-xs font-semibold ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
+                              Obecna instalacja fotowoltaiczna pokrywa mniej niż 70% szacowanego zapotrzebowania — warto sprawdzić wariant z rozbudową instalacji.
+                            </p>
+                          )}
+                        </div>
                       )}
-                    </div>
-                  )}
-                  {priorities.length > 0 && (
-                    <div className={resultCardClass}>
-                      <p className={`text-sm ${mutedTextClass}`}>Najważniejsze dla Ciebie</p>
-                      <p className="mt-1 text-lg font-bold">{priorities.join(" · ")}</p>
                     </div>
                   )}
                   {hasPv === "no" && (
                     <div className={resultCardClass}>
-                      <p className={`text-sm ${mutedTextClass}`}>Sugerowana moc instalacji fotowoltaicznej</p>
-                      <p className="mt-1 text-2xl font-bold">około {result.suggestedPvKw} kWp</p>
+                      <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Sugerowana moc instalacji fotowoltaicznej</p>
+                      <p className={isDarkMode ? "mt-1 text-2xl font-bold text-white" : "mt-1 text-2xl font-bold text-slate-950"}>około {result.suggestedPvKw} kWp</p>
                     </div>
                   )}
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>Sugerowany magazyn energii</p>
-                    <p className="mt-1 text-2xl font-bold">około {result.recommendedStorageKwh} kWh</p>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Sugerowany magazyn energii</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-cyan-300" : "mt-1 text-2xl font-bold text-cyan-700"}>około {result.recommendedStorageKwh} kWh</p>
                   </div>
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>Szacowana roczna korzyść</p>
-                    <p className="mt-1 text-2xl font-bold">
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Szacowana roczna korzyść</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-emerald-300" : "mt-1 text-2xl font-bold text-emerald-700"}>
                       {formatMoney(result.yearlySavingsLow)} – {formatMoney(result.yearlySavingsHigh)} / rok
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => toggleResultDetail("yearlySavings")}
+                      className={`mt-2 text-xs font-bold underline-offset-4 hover:underline ${isDarkMode ? "text-cyan-300" : "text-cyan-700"}`}
+                    >
+                      {expandedResultDetails.yearlySavings ? "Ukryj szczegóły" : "Rozwiń szczegóły"}
+                    </button>
 
-                    {result.netBillingSavingsDetails ? (
-                      <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        Dla net-billingu przyjęliśmy około 20% autokonsumpcji bez magazynu energii oraz około {Math.round(result.netBillingSavingsDetails.autoconsumptionRateWithStorage * 100)}% autokonsumpcji z zastosowaniem magazynu energii i HEMS. Korzyść wynika z tego, że zamiast sprzedawać energię po około {NET_BILLING_EXPORT_PRICE_PER_KWH.toLocaleString("pl-PL", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })} zł/kWh, a następnie kupować ją po około {ENERGY_PRICE_PER_KWH.toLocaleString("pl-PL", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })} zł/kWh, zużywasz większą część własnej energii na potrzeby domu.
-                      </p>
-                    ) : (
-                      <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                        {result.netMeteringSavingsDetails
-  ? `Dla net-meteringu przyjęliśmy około ${Math.round(result.netMeteringSavingsDetails.baseAutoconsumptionRate * 100)}% autokonsumpcji bez magazynu energii oraz około ${Math.round(result.netMeteringSavingsDetails.autoconsumptionRateWithStorage * 100)}% autokonsumpcji z zastosowaniem magazynu energii i HEMS. W systemie opustów za każdą 1 kWh oddaną do sieci możesz odebrać około ${Math.round(result.netMeteringSavingsDetails.returnRate * 100)}% energii, dlatego magazyn poprawia wynik głównie przez ograniczenie tej straty i zwiększenie zużycia energii na miejscu.`
-  : `To nawet około ${Math.round(result.savingsRateLow * 100)}–${Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.`}
-                      </p>
+                    {expandedResultDetails.yearlySavings && (
+                      result.netBillingSavingsDetails ? (
+                        <div className={`mt-3 px-4 py-3 ${isDarkMode ? "bg-white/5" : "bg-slate-100/80"}`}>
+                          <p className={`text-xs leading-5 ${mutedTextClass}`}>
+                            Dla net-billingu przyjęliśmy około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(result.netBillingSavingsDetails.baseAutoconsumptionRate * 100)}%</strong> autokonsumpcji bez magazynu energii oraz około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{Math.round(result.netBillingSavingsDetails.autoconsumptionRateWithStorage * 100)}%</strong> autokonsumpcji z zastosowaniem magazynu energii i HEMS. Korzyść wynika z tego, że zamiast sprzedawać energię po około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{NET_BILLING_EXPORT_PRICE_PER_KWH.toLocaleString("pl-PL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} zł/kWh</strong>, a następnie kupować ją po około <strong className={isDarkMode ? "text-white" : "text-slate-900"}>{ENERGY_PRICE_PER_KWH.toLocaleString("pl-PL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} zł/kWh</strong>, zużywasz większą część własnej energii na potrzeby domu.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className={`mt-3 px-4 py-3 ${isDarkMode ? "bg-white/5" : "bg-slate-100/80"}`}>
+                          <p className={`text-xs leading-5 ${mutedTextClass}`}>
+                            {result.netMeteringSavingsDetails
+      ? `Dla net-meteringu przyjęliśmy około ${Math.round(result.netMeteringSavingsDetails.baseAutoconsumptionRate * 100)}% autokonsumpcji bez magazynu energii oraz około ${Math.round(result.netMeteringSavingsDetails.autoconsumptionRateWithStorage * 100)}% autokonsumpcji z zastosowaniem magazynu energii i HEMS. W systemie opustów za każdą 1 kWh oddaną do sieci możesz odebrać około ${Math.round(result.netMeteringSavingsDetails.returnRate * 100)}% energii, dlatego magazyn poprawia wynik głównie przez ograniczenie tej straty i zwiększenie zużycia energii na miejscu.`
+      : `To nawet około ${Math.round(result.savingsRateLow * 100)}–${Math.round(result.savingsRateHigh * 100)}% obecnych kosztów energii, w zależności od profilu zużycia i sposobu pracy instalacji.`}
+                          </p>
+                        </div>
+                      )
                     )}
                   </div>
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>Orientacyjny koszt inwestycji</p>
-                    <p className="mt-1 text-2xl font-bold">
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Orientacyjny koszt inwestycji</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-white" : "mt-1 text-2xl font-bold text-slate-950"}>
                       {formatMoney(result.priceLow)} – {formatMoney(result.priceHigh)}
                     </p>
                   </div>
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>Możliwa dotacja</p>
-                    <p className="mt-1 text-2xl font-bold">do {formatMoney(result.subsidyEstimate)}</p>
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Możliwa dotacja</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-violet-300" : "mt-1 text-2xl font-bold text-violet-700"}>do {formatMoney(result.subsidyEstimate)}</p>
                   </div>
                   <div className={resultCardClass}>
-                    <p className={`text-sm ${mutedTextClass}`}>Szacunkowy okres zwrotu inwestycji</p>
-                    <p className="mt-1 text-2xl font-bold">
+                    <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-300/80" : "text-cyan-700"}`}>Szacunkowy okres zwrotu inwestycji</p>
+                    <p className={isDarkMode ? "mt-1 text-2xl font-bold text-amber-300" : "mt-1 text-2xl font-bold text-amber-700"}>
                       {result.paybackYearsLow === result.paybackYearsHigh
                         ? `około ${result.paybackYearsLow} ${result.paybackYearsLow === 1 ? "rok" : result.paybackYearsLow >= 2 && result.paybackYearsLow <= 4 ? "lata" : "lat"}`
                         : `${result.paybackYearsLow}–${result.paybackYearsHigh} lat`}
                     </p>
-                    <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                      Szacunek opiera się na dolnych widełkach ceny inwestycji po dotacji oraz prognozowanym wzroście ceny energii o 11% rocznie.
-                    </p>
-                  </div>
-                </div>
-
-                <div className={`rounded-[24px] border p-5 ${getRecommendationBoxClass(result.recommendation.type)}`}>
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-200">
-                    {getRecommendationBadge(result.recommendation.type)}
-                  </p>
-                  <h3 className="mt-3 text-2xl font-bold">{result.recommendation.title}</h3>
-                  <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>{result.recommendation.description}</p>
-                </div>
-
-                {result.shouldRecommendPvExpansion && (
-                  <div className={`rounded-[24px] border p-5 ${isDarkMode ? "border-cyan-300/30 bg-cyan-300/10" : "border-cyan-200 bg-cyan-50"}`}>
-                    <p className={`text-sm font-semibold uppercase tracking-[0.18em] ${isDarkMode ? "text-cyan-200" : "text-cyan-700"}`}>
-                      💡 Dodatkowa obserwacja
-                    </p>
-                    <h3 className="mt-3 text-xl font-bold">
-                      Warto rozważyć również rozbudowę fotowoltaiki
-                    </h3>
-
-                    {hasPv === "yes" && settlementSystem === "net_metering" && currentPvPowerKw < 10 && result.suggestedPvKw >= 10 && (
-                      <p className={`mt-3 text-sm font-semibold ${isDarkMode ? "text-amber-200" : "text-amber-700"}`}>
-                        W przypadku systemu opustów (net-metering) uwzględniliśmy zmianę współczynnika odbioru energii z 80% do 70% po przekroczeniu 10 kWp. Rekomendacja została dobrana tak, aby większa instalacja była proponowana tylko wtedy, gdy rzeczywiście daje zauważalną korzyść energetyczną.
-                      </p>
+                    <button
+                      type="button"
+                      onClick={() => toggleResultDetail("payback")}
+                      className={`mt-2 text-xs font-bold underline-offset-4 hover:underline ${isDarkMode ? "text-cyan-300" : "text-cyan-700"}`}
+                    >
+                      {expandedResultDetails.payback ? "Ukryj szczegóły" : "Rozwiń szczegóły"}
+                    </button>
+                    {expandedResultDetails.payback && (
+                      <div className={`mt-3 px-4 py-3 ${isDarkMode ? "bg-white/5" : "bg-slate-100/80"}`}>
+                        <p className={`text-xs leading-5 ${mutedTextClass}`}>
+                          Szacunek opiera się na wstępnych cenach inwestycji z uwzględnieniem dotacji oraz prognozowanym wzroście ceny energii o <strong className={isDarkMode ? "text-white" : "text-slate-900"}>11% rok do roku, co jest zgodnie ze wzrostami z ostatnich pięciu pełnych lat (2020-2025)</strong>.
+                        </p>
+                      </div>
                     )}
-
-                    <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>
-                      Twoja obecna instalacja fotowoltaiczna produkuje około {Math.round(result.estimatedPvProductionKwh).toLocaleString("pl-PL")} kWh rocznie, podczas gdy całkowite zużycie energii szacujemy na około {Math.round(yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh rocznie.
-                    </p>
-                    <p className={`mt-3 text-sm leading-6 ${mutedTextClass}`}>
-                      Sam magazyn energii pomoże lepiej wykorzystać energię z obecnej instalacji fotowoltaicznej, ale nie zwiększy ilości produkowanej energii. Przy takim profilu warto porównać sam magazyn z wariantem rozbudowy instalacji fotowoltaicznej wraz z magazynem energii.
-                    </p>
-                    <div className="mt-5 grid gap-3 md:grid-cols-2">
-                      <div className={resultCardClass}>
-                        <p className={`text-sm ${mutedTextClass}`}>Wariant A</p>
-                        <p className="mt-1 text-lg font-bold">Sam magazyn energii</p>
-                        <p className={`mt-2 text-sm ${mutedTextClass}`}>{result.recommendedStorageKwh} kWh</p>
-                        <p className="mt-2 font-bold">{formatMoney(result.priceLow)} – {formatMoney(result.priceHigh)}</p>
-                      </div>
-                      <div className={resultCardClass}>
-                        <p className={`text-sm ${mutedTextClass}`}>Wariant B</p>
-                        <p className="mt-1 text-lg font-bold">Fotowoltaika + magazyn energii</p>
-                        <p className={`mt-2 text-sm ${mutedTextClass}`}>około {result.suggestedPvKw} kWp + {result.pvExpansionStorageKwh} kWh</p>
-                        <p className="mt-2 font-bold">{formatMoney(result.pvExpansionPriceRange[0])} – {formatMoney(result.pvExpansionPriceRange[1])}</p>
-                      </div>
-                    </div>
                   </div>
-                )}
+                    </div>
+                  )}
+                </div>
 
-
-                <div className={`rounded-[24px] border p-5 text-sm leading-6 ${isDarkMode ? "border-white/10 bg-white/5 text-[#D8CEC7]" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-                  Wynik ma charakter orientacyjny i został przygotowany na podstawie danych podanych przez uytkownika, średnich cen zakupu i odsprzeday energii w Polsce oraz statystyk dotyczących historycznego wzrostu cen energii w Polsce. Dokładna analiza wymaga dodatkowo profil zużycia energii, parametry instalacji fotowoltaicznej, warunki techniczne budynku oraz możliwości uzyskania dotacji.
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={editAnswers}
+                    className={`w-full rounded-2xl px-5 py-3 text-sm font-bold transition hover:-translate-y-0.5 ${isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-slate-100 text-slate-800 hover:bg-slate-200"}`}
+                  >
+                    Popraw odpowiedzi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restartCalculator}
+                    className={`w-full rounded-2xl px-5 py-3 text-sm font-bold transition hover:-translate-y-0.5 ${isDarkMode ? "bg-white/5 text-white/80 hover:bg-white/10 hover:text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50 hover:text-slate-950"}`}
+                  >
+                    Zacznij od początku
+                  </button>
                 </div>
 
                 <div className={contactPanelClass}>
-                  <p className="text-lg font-bold">Chcesz dokładniejszą analizę dla swojego domu?</p>
+                  <p className={`text-xs font-bold uppercase tracking-[0.2em] ${isDarkMode ? "text-lime-300" : "text-lime-700"}`}>
+                    Bezpłatna konsultacja
+                  </p>
+                  <p className="mt-3 text-xl font-bold">Bezpłatna konsultacja z doradcą</p>
                   <p className={`mt-2 text-sm ${mutedTextClass}`}>
-                    Zostaw krótki kontakt. Doradca IdeaSol oddzwoni i omówi wynik kalkulatora oraz możliwy wariant instalacji.
+                    Zostaw kontakt, a sprawdzimy Twój przypadek dokładniej i zweryfikujemy możliwości uzyskania dotacji.
                   </p>
 
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -1371,7 +1502,7 @@ const canSubmitLead = Boolean(
                     disabled={!canSubmitLead || isSubmittingLead}
                     className={contactSubmitButtonClass}
                   >
-                    {isSubmittingLead ? "Wysyłamy zgłoszenie..." : "Poproś o kontakt doradcy"}
+                    {isSubmittingLead ? "Wysyłamy zgłoszenie..." : "Skonsultuj wynik z doradcą"}
                   </button>
 
                   {leadSubmitStatus === "success" && (
@@ -1387,20 +1518,15 @@ const canSubmitLead = Boolean(
                   )}
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <button type="button" onClick={editAnswers} className={secondaryButtonClass}>
-                    Popraw odpowiedzi
-                  </button>
-                  <button type="button" onClick={restartCalculator} className={ghostButtonClass}>
-                    Zacznij od początku
-                  </button>
+                <div className={`pt-2 text-xs leading-5 ${isDarkMode ? "text-[#D8CEC7]" : "text-slate-600"}`}>
+                  Wynik ma charakter orientacyjny i został przygotowany na podstawie danych podanych przez użytkownika, średnich cen zakupu i odsprzedaży energii w Polsce oraz statystyk dotyczących historycznego wzrostu cen energii. Dokładna analiza wymaga dodatkowo znajomości profilu zużycia energii, parametrów instalacji fotowoltaicznej, warunków technicznych budynku oraz potwierdzenia możliwości uzyskania dotacji.
                 </div>
               </div>
             ) : (
               <div className="space-y-6">
                 {step === 2 && (
                   <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-500">Krok 1</p>
+                    <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>Krok 1</p>
                     <h2 className="mt-3 text-2xl font-bold">Czy masz już instalację fotowoltaiczną?</h2>
                     <div className="mt-5 grid gap-3">
                       <button
@@ -1425,7 +1551,7 @@ const canSubmitLead = Boolean(
 
                 {hasPv === "yes" && step === 3 && (
                   <div ref={pvDetailsRef} className={`scroll-mt-6 rounded-[28px] border p-5 backdrop-blur animate-[fadeInUp_0.45s_ease-out] ${isDarkMode ? "border-white/10 bg-white/5 shadow-inner shadow-black/20" : "border-slate-200 bg-white/55 shadow-inner shadow-white/70"}`}>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-500">Krok 2</p>
+                    <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>Krok 2</p>
                     <h2 className="mt-3 text-2xl font-bold">Podaj szczegóły obecnej instalacji</h2>
 
                     <div className="mt-5 grid gap-4">
@@ -1454,7 +1580,7 @@ const canSubmitLead = Boolean(
                             <button
                               key={value}
                               type="button"
-                              onPointerUp={() => selectSettlementSystem(value as SettlementSystem)}
+                              onPointerUp={() => selectSettlementSystem(value as Exclude<SettlementSystem, null>)}
                               className={`${optionButtonClass(settlementSystem === value, "compact")} font-semibold`}
                             >
                               <span className="block">{label}</span>
@@ -1466,9 +1592,11 @@ const canSubmitLead = Boolean(
                             </button>
                           ))}
                         </div>
-                        <div className={hintBoxClass}>
-                          <span className={isDarkMode ? "font-bold text-white" : "font-bold text-slate-950"}>Wskazówka:</span> {settlementSystemHint[settlementSystem]}
-                        </div>
+                        {settlementSystem && (
+                          <div className={hintBoxClass}>
+                            <span className={isDarkMode ? "font-bold text-white" : "font-bold text-slate-950"}>Wskazówka:</span> {settlementSystemHint[settlementSystem]}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1478,7 +1606,7 @@ const canSubmitLead = Boolean(
                         goToStep(4);
                         scrollToElement(formRef.current);
                       }}
-                      disabled={!hasValidPvDetails}
+                      disabled={!hasValidPvDetails || !settlementSystem}
                       className={`mt-5 ${primaryButtonClass}`}
                     >
                       Dalej
@@ -1491,7 +1619,7 @@ const canSubmitLead = Boolean(
 
                 {step === 4 && (
                   <div ref={step4Ref}>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-500">Krok {hasPv === "yes" ? "3" : "2"}</p>
+                    <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>Krok {hasPv === "yes" ? "3" : "2"}</p>
                     <h2 className="mt-3 text-2xl font-bold">Jaki masz rachunek za energię?</h2>
                     <div className="mt-5 grid gap-3 sm:grid-cols-[160px_1fr]">
                       <select value={billMode} onChange={(event) => setBillMode(event.target.value as BillMode)} className={inputClass}>
@@ -1526,34 +1654,33 @@ const canSubmitLead = Boolean(
 
                 {step === 5 && (
                   <div ref={step5Ref}>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-500">Krok {hasPv === "yes" ? "4" : "3"}</p>
+                    <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>Krok {hasPv === "yes" ? "4" : "3"}</p>
                     <h2 className="mt-3 text-2xl font-bold">Z jakiej taryfy korzystasz?</h2>
                     <div className="mt-5 grid gap-3 sm:grid-cols-2">
                       {[
                         ["G11", "G11 — stała cena energii"],
                         ["G12", "G12 — dwie strefy"],
                         ["G13", "G13 — trzy strefy"],
-                        ["other", "Inna taryfa"],
-                        ["unknown", "Nie wiem"],
+                        ["other_unknown", "Inna / nie wiem"],
                       ].map(([value, label]) => (
                         <button
                           key={value}
                           type="button"
-                          onPointerUp={() => selectTariff(value as Tariff)}
+                          onPointerUp={() => selectTariff(value as Exclude<Tariff, null>)}
                           className={`${optionButtonClass(tariff === value, "compact")} font-semibold`}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
-                    <div className={hintBoxClass}>
-                      <span className={isDarkMode ? "font-bold text-white" : "font-bold text-slate-950"}>Wskazówka:</span> {tariffHint[tariff]}
-                    </div>
-                    <button type="button" onClick={goBack} className={backButtonClass}>
-                      Wstecz
-                    </button>
+                    {tariff && (
+                      <div className={hintBoxClass}>
+                        <span className={isDarkMode ? "font-bold text-white" : "font-bold text-slate-950"}>Wskazówka:</span> {tariffHint[tariff]}
+                      </div>
+                    )}
                     <button
                       type="button"
+                      disabled={!tariff}
                       onClick={() => {
                         goToStep(6);
                         scrollToElement(formRef.current);
@@ -1562,15 +1689,20 @@ const canSubmitLead = Boolean(
                     >
                       Dalej
                     </button>
+                    <button type="button" onClick={goBack} className={backButtonClass}>
+                      Wstecz
+                    </button>
                   </div>
                 )}
 
                 {step === 6 && (
                   <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-500">Krok {hasPv === "yes" ? "5" : "4"}</p>
+                    <p className={`text-sm font-semibold uppercase tracking-[0.2em] ${eyebrowTextClass}`}>Krok {hasPv === "yes" ? "5" : "4"}</p>
                     <h2 className="mt-3 text-2xl font-bold">Co jest dla Ciebie najważniejsze?</h2>
                     <div className="mt-5 grid gap-3">
-                      {Object.keys(priorityHint).map((item) => (
+                      {Object.keys(priorityHint)
+                        .filter((item) => hasPv === "yes" || item !== "Zwiększenie produktywności mojej instalacji fotowoltaicznej (zapobieganie wyłączeniom)")
+                        .map((item) => (
                         <div key={item}>
                           <button
                             type="button"
@@ -1592,7 +1724,7 @@ const canSubmitLead = Boolean(
                       type="button"
                       onClick={handleCalculate}
                       disabled={!canCalculate}
-                      className={`mt-3 rounded-[24px] px-6 py-4 text-lg ${primaryButtonClass}`}
+                      className="mt-3 w-full rounded-2xl bg-gradient-to-r from-cyan-300 to-lime-300 px-6 py-4 text-lg font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0"
                     >
                       Dokonaj analizy
                     </button>

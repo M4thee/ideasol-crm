@@ -5,6 +5,33 @@ function formatMoney(value: number) {
   return Number(value || 0).toLocaleString("pl-PL");
 }
 
+function getInverterTypeLabel(inverterType: unknown) {
+  const normalizedType = String(inverterType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (["hybrid", "hybrydowy", "hybryda", "hybrid_inverter"].includes(normalizedType)) {
+    return "Falownik hybrydowy";
+  }
+
+  if (
+    [
+      "grid",
+      "on_grid",
+      "ongrid",
+      "sieciowy",
+      "network",
+      "network_inverter",
+      "grid_tied",
+    ].includes(normalizedType)
+  ) {
+    return "Falownik sieciowy";
+  }
+
+  return "Falownik";
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -84,7 +111,7 @@ export async function POST(request: Request) {
     );
     const panelCount = Number(body.panelCount || body.panelsCount || body.modulesCount || 0);
     const hasPanelDetails = !isStorageOnly && Boolean(panelName || panelPowerWp || panelCount);
-    const inverterTypeLabel = hasEnergyStorage || isStorageOnly ? "Falownik hybrydowy" : "Falownik sieciowy";
+    const inverterTypeLabel = getInverterTypeLabel(body.inverterType);
     const includeSubsidy = Boolean(
       body.includeSubsidy || body.subsidyAllocation?.requested
     );
@@ -111,7 +138,7 @@ export async function POST(request: Request) {
       : `- instalacja PV: ${body.pvPowerKw} kWp\n`;
 
     const inverterTextLine = hasInverter
-      ? `- falownik: ${body.inverter}\n`
+      ? `- ${inverterTypeLabel.toLowerCase()}: ${body.inverter}\n`
       : "";
 
     const storageTextLine = hasEnergyStorage

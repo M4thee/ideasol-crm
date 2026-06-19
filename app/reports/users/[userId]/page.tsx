@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 
 type InteractionFilter = "all" | "phone" | "mail" | "sms";
 
+
 type ActivityRow = {
   id: string;
   created_at: string | null;
@@ -28,6 +29,18 @@ type ActivityRow = {
   description?: string | null;
   note?: string | null;
   title?: string | null;
+};
+
+type CalendarEventRow = {
+  id: string;
+  created_at: string | null;
+  created_by?: string | null;
+  assigned_user_id?: string | null;
+  source_activity_id?: string | null;
+  event_type?: string | null;
+  status?: string | null;
+  title?: string | null;
+  event_at?: string | null;
 };
 
 type ProfileRow = {
@@ -142,6 +155,27 @@ function getStatusLabel(row: ActivityRow) {
   return rawStatus && rawStatus !== "brak_statusu" ? String(rawStatus) : "Brak statusu";
 }
 
+function isNoAnswer(row: ActivityRow) {
+  const status = getContactStatus(row);
+  return status === "nie odbiera" || status === "no_answer";
+}
+
+function isAnsweredPhoneActivity(row: ActivityRow) {
+  return getInteractionType(row) === "phone" && !isNoAnswer(row);
+}
+
+
+function getConversationClientKey(row: ActivityRow) {
+  return row.client_id || row.id || `${row.created_by || row.assigned_user_id || "unknown"}-${row.created_at || "unknown"}`;
+}
+
+function isMeetingCalendarEvent(row: CalendarEventRow) {
+  const eventType = normalizeText(row.event_type);
+  const title = normalizeText(row.title);
+
+  return eventType === "meeting" || eventType === "spotkanie" || title.includes("spotkanie");
+}
+
 function getNote(row: ActivityRow) {
   return row.description || row.note || row.title || "—";
 }
@@ -210,16 +244,28 @@ function buildPieGradient(slices: StatusSlice[]) {
     .join(", ")})`;
 }
 
-function getInteractionSummary(rows: ActivityRow[]) {
-  const phones = rows.filter((row) => getInteractionType(row) === "phone").length;
+function getInteractionSummary(rows: ActivityRow[], calendarEvents: CalendarEventRow[] = []) {
+  const phoneRows = rows.filter((row) => getInteractionType(row) === "phone");
+  const phones = phoneRows.length;
   const mails = rows.filter((row) => getInteractionType(row) === "mail").length;
   const sms = rows.filter((row) => getInteractionType(row) === "sms").length;
-  const meetings = rows.filter((row) => getStatusLabel(row) === "Umówione spotkanie").length;
+  const scheduledPhoneRows = rows.filter((row) => getStatusLabel(row) === "Umówione spotkanie");
+  const scheduledPhoneActivityIds = new Set(
+    scheduledPhoneRows.map((row) => row.id).filter(Boolean)
+  );
+  const meetingEventRows = calendarEvents
+    .filter(isMeetingCalendarEvent)
+    .filter((event) => !event.source_activity_id || !scheduledPhoneActivityIds.has(event.source_activity_id));
+  const meetings = scheduledPhoneRows.length + meetingEventRows.length;
+  const uniqueClientConversations = new Set(
+    phoneRows.filter(isAnsweredPhoneActivity).map(getConversationClientKey)
+  ).size;
   const conversion = phones > 0 ? Math.round((meetings / phones) * 100) : 0;
 
   return {
     total: rows.length,
     phones,
+    uniqueClientConversations,
     mails,
     sms,
     meetings,
@@ -236,6 +282,7 @@ export default function UserReportDetailsPage() {
   const reportsBackUrl = `/reports?from=${encodeURIComponent(dateFrom)}&to=${encodeURIComponent(dateTo)}`;
   const [interactionFilter, setInteractionFilter] = useState<InteractionFilter>("all");
   const [activities, setActivities] = useState<ActivityRow[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEventRow[]>([]);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [clientMap, setClientMap] = useState<Map<string, ClientRow>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -255,8 +302,8 @@ export default function UserReportDetailsPage() {
   }, [activeStatusLabel, statusSlices]);
 
   const interactionSummary = useMemo(
-    () => getInteractionSummary(filteredActivities),
-    [filteredActivities]
+    () => getInteractionSummary(filteredActivities, calendarEvents),
+    [filteredActivities, calendarEvents]
   );
 
   function handleExportToExcel() {
@@ -282,6 +329,7 @@ export default function UserReportDetailsPage() {
       ["Podsumowanie"],
       ["Wszystkie interakcje", String(interactionSummary.total)],
       ["Telefony", String(interactionSummary.phones)],
+      ["Odbyte rozmowy", String(interactionSummary.uniqueClientConversations)],
       ["Maile", String(interactionSummary.mails)],
       ["SMS", String(interactionSummary.sms)],
       ["Umówione spotkania", String(interactionSummary.meetings)],
@@ -356,6 +404,16 @@ export default function UserReportDetailsPage() {
 
       const rows = (activityRows || []) as ActivityRow[];
       setActivities(rows);
+
+      const { data: calendarEventRows, error: calendarEventsError } = await supabase
+        .from("calendar_events")
+        .select("id, created_at, created_by, assigned_user_id, source_activity_id, event_type, status, title, event_at")
+        .eq("created_by", userId)
+        .gte("created_at", startIso)
+        .lte("created_at", endIso);
+
+      if (calendarEventsError) throw calendarEventsError;
+      setCalendarEvents((calendarEventRows || []) as CalendarEventRow[]);
 
       const clientIds = Array.from(new Set(rows.map((row) => row.client_id).filter(Boolean))) as string[];
 
@@ -443,11 +501,15 @@ export default function UserReportDetailsPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Konwersja</p>
                 <p className="mt-2 text-2xl font-bold text-slate-950">{interactionSummary.conversion}%</p>
-                <p className="mt-1 text-xs text-slate-500">Spotkania / telefony</p>
+                <p className="mt-1 text-xs text-slate-500">Umówione spotkania / telefony</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Telefony</p>
                 <p className="mt-2 text-xl font-bold text-slate-950">{interactionSummary.phones}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Odbyte rozmowy</p>
+                <p className="mt-2 text-xl font-bold text-slate-950">{interactionSummary.uniqueClientConversations}</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Maile</p>
@@ -458,7 +520,7 @@ export default function UserReportDetailsPage() {
                 <p className="mt-2 text-xl font-bold text-slate-950">{interactionSummary.sms}</p>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Spotkania</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Umówione spotkania</p>
                 <p className="mt-2 text-xl font-bold text-slate-950">{interactionSummary.meetings}</p>
               </div>
             </div>

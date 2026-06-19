@@ -430,7 +430,8 @@ export default function Home() {
       .select(
         "id, full_name, company_name, contact_person, nip, phone, email, street, building_number, postal_code, city, client_type, status, assigned_user_id"
       )
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(100);
 
     if (visibleUserIds && visibleUserIds.length > 0) {
       query = query.in("assigned_user_id", visibleUserIds);
@@ -675,13 +676,18 @@ export default function Home() {
 
   async function loadFollowUps() {
     setLoadingFollowUps(true);
+    const followUpsRangeStart = new Date();
+    followUpsRangeStart.setDate(followUpsRangeStart.getDate() - 90);
+    followUpsRangeStart.setHours(0, 0, 0, 0);
 
     let query = supabase
       .from("calendar_events")
       .select("id, client_id, title, description, event_at, status, created_by")
       .eq("event_type", "reminder")
       .not("client_id", "is", null)
-      .order("event_at", { ascending: true });
+      .gte("event_at", followUpsRangeStart.toISOString())
+      .order("event_at", { ascending: true })
+      .limit(200);
 
     if (visibleUserIds && visibleUserIds.length > 0) {
       query = query.in("created_by", visibleUserIds);
@@ -742,6 +748,9 @@ export default function Home() {
     setLoadingMeetings(true);
 
     const nowIso = new Date().toISOString();
+    const meetingsRangeEnd = new Date();
+    meetingsRangeEnd.setDate(meetingsRangeEnd.getDate() + 90);
+    meetingsRangeEnd.setHours(23, 59, 59, 999);
 
     let query = supabase
       .from("calendar_events")
@@ -749,7 +758,9 @@ export default function Home() {
       .eq("event_type", "meeting")
       .not("client_id", "is", null)
       .gte("event_at", nowIso)
-      .order("event_at", { ascending: true });
+      .lte("event_at", meetingsRangeEnd.toISOString())
+      .order("event_at", { ascending: true })
+      .limit(100);
 
     if (calendarMode === "mine" && currentUser?.id) {
       query = query.eq("created_by", currentUser.id);
@@ -883,7 +894,10 @@ export default function Home() {
       .from("calendar_events")
       .select("id, status, created_by")
       .eq("event_type", "meeting")
-      .like("status", "Zakończone - %");
+      .like("status", "Zakończone - %")
+      .gte("event_at", monthStart.toISOString())
+      .lt("event_at", nextMonthStart.toISOString())
+      .limit(1000);
 
     if (!shouldShowCompanySalesSummary) {
       if (visibleUserIds && visibleUserIds.length > 0) {
@@ -904,8 +918,11 @@ export default function Home() {
 
     const { data: allSales, error: monthlySalesError } = await supabase
       .from("sales")
-      .select("*")
-      .eq("status", "Zakończona");
+      .select("id, status, sale_date, created_at, deleted_at, seller_id, user_id, advisor_id, owner_id, offer_snapshot, offer_data, financial_summary, customer_data")
+      .eq("status", "Zakończona")
+      .gte("created_at", monthStart.toISOString())
+      .lt("created_at", nextMonthStart.toISOString())
+      .limit(1000);
 
     if (monthlySalesError) {
       console.warn("Nie udało się pobrać sprzedaży do podsumowania", monthlySalesError);

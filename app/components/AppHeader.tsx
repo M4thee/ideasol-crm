@@ -304,7 +304,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
     const notificationsRefreshInterval = window.setInterval(() => {
       loadNotifications();
-    }, 5000);
+    }, 60000);
 
     async function handleNotificationsRefresh() {
       const { data, error } = await supabase
@@ -328,54 +328,11 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
     window.addEventListener("ideasol-notifications-refresh", handleNotificationsRefresh);
 
-    const channel = supabase
-      .channel(`header-notifications-${profileId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${profileId}`,
-        },
-        (payload) => {
-          const notification = payload.new as HeaderNotification;
-          setNotifications((current) => [notification, ...current].slice(0, 10));
-
-          if (!notification.is_read) {
-            showToast(notification);
-          }
-
-          loadNotifications();
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${profileId}`,
-        },
-        (payload) => {
-          const notification = payload.new as HeaderNotification;
-          setNotifications((current) =>
-            current.map((item) =>
-              item.id === notification.id ? notification : item
-            )
-          );
-          loadNotifications();
-        }
-      )
-      .subscribe((status) => {
-        console.log("Header notifications realtime status:", status);
-      });
 
     return () => {
       active = false;
       window.clearInterval(notificationsRefreshInterval);
       window.removeEventListener("ideasol-notifications-refresh", handleNotificationsRefresh);
-      supabase.removeChannel(channel);
     };
   }, [profile?.id]);
 

@@ -86,7 +86,7 @@ export default function CalendarPage() {
     if (!currentUserId) return;
 
     loadCalendarItems();
-  }, [currentUserId, currentUserRole, selectedOwnerIds, visibleUserIds]);
+  }, [currentUserId, currentUserRole, selectedOwnerIds, visibleUserIds, currentDate]);
 
   // --- Manager-aware calendar visibility scopes ---
   async function loadVisibleUserIds(
@@ -195,12 +195,22 @@ export default function CalendarPage() {
   async function loadCalendarItems() {
     setLoading(true);
 
+    const rangeStart = new Date(currentDate);
+    rangeStart.setDate(rangeStart.getDate() - 45);
+    rangeStart.setHours(0, 0, 0, 0);
+
+    const rangeEnd = new Date(currentDate);
+    rangeEnd.setDate(rangeEnd.getDate() + 45);
+    rangeEnd.setHours(23, 59, 59, 999);
+
     let query = supabase
       .from("calendar_events")
       .select(
         "id, client_id, source_activity_id, event_type, title, description, event_at, status, created_by, assigned_user_id"
       )
       .not("event_at", "is", null)
+      .gte("event_at", rangeStart.toISOString())
+      .lte("event_at", rangeEnd.toISOString())
       .order("event_at", { ascending: true });
 
     const canSeeAllCalendarEvents = ["admin", "owner", "cc"].includes(currentUserRole);
