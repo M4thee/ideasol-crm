@@ -34,7 +34,7 @@ export default function MaintenancePage() {
                 Planowany czas zakończenia
               </p>
               <p className="mt-3 text-2xl font-black text-slate-950 sm:text-3xl">
-                10.06.2026, ok. godz. 06:00
+                21.06.2026, ok. godz. 09:00
               </p>
             </div>
 
