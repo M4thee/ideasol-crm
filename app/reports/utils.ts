@@ -1,6 +1,14 @@
 
 
-import type { PeriodPreset } from "./types";
+import type {
+  ActivityRow,
+  AdvisorUserOption,
+  CalendarEventRow,
+  ManagerTeamOption,
+  OfferRow,
+  PeriodPreset,
+  ProfileRow,
+} from "./types";
 
 export function formatCurrency(value: number) {
   return `${Number(value || 0).toLocaleString("pl-PL", {
@@ -124,4 +132,252 @@ export function getChangeLabel(current: number, previous: number) {
   const change = getChangePercent(current, previous);
   if (change > 0) return `+${change}%`;
   return `${change}%`;
+}
+
+export function formatPercentChange(current: number, previous: number) {
+  if (previous === 0 && current === 0) return "—";
+  if (previous === 0) return "+100%";
+  const change = Math.round(((current - previous) / previous) * 100);
+  return `${change > 0 ? "+" : ""}${change}%`;
+}
+
+export function formatNumberChange(current: number, previous: number) {
+  if (previous === current) return "—";
+  const change = current - previous;
+  return `${change > 0 ? "+" : ""}${change}`;
+}
+
+export function formatCurrencyChange(current: number, previous: number, inverse = false) {
+  const diff = Number(current || 0) - Number(previous || 0);
+
+  if (Math.abs(diff) < 0.01) {
+    return { change: "—", changeTone: "neutral" as const };
+  }
+
+  const isPositiveBusinessChange = inverse ? diff < 0 : diff > 0;
+
+  return {
+    change: `${diff > 0 ? "+" : ""}${formatCurrency(diff)}`,
+    changeTone: isPositiveBusinessChange ? ("positive" as const) : ("negative" as const),
+  };
+}
+
+export function formatGrossLine(value: number) {
+  return `Brutto: ${formatCurrency(value)}`;
+}
+
+export function getActivityType(row: ActivityRow) {
+  return normalizeText(row.activity_type);
+}
+
+export function getContactStatus(row: ActivityRow) {
+  return normalizeText(row.status || row.phone_status || row.contact_status || row.outcome || row.result);
+}
+
+export function isPhoneActivity(row: ActivityRow) {
+  return getActivityType(row) === "phone";
+}
+
+export function isEmailActivity(row: ActivityRow) {
+  return getActivityType(row) === "email";
+}
+
+export function isSmsActivity(row: ActivityRow) {
+  return getActivityType(row) === "sms";
+}
+
+export function isMeetingScheduled(row: ActivityRow) {
+  const status = getContactStatus(row);
+  return status === "umowione spotkanie" || status === "meeting_scheduled";
+}
+
+export function isNoAnswer(row: ActivityRow) {
+  const status = getContactStatus(row);
+  return status === "nie odbiera" || status === "no_answer";
+}
+
+export function isAnsweredPhoneActivity(row: ActivityRow) {
+  return isPhoneActivity(row) && !isNoAnswer(row);
+}
+
+export function getConversationClientKey(row: ActivityRow) {
+  return row.client_id || row.id || `${row.created_by || row.assigned_user_id || "unknown"}-${row.created_at || "unknown"}`;
+}
+
+export function isCallBackRequest(row: ActivityRow) {
+  const status = getContactStatus(row);
+  return status === "prosba o ponowny kontakt" || status === "call_back_request";
+}
+
+export function isNotInterested(row: ActivityRow) {
+  const status = getContactStatus(row);
+  return status === "niezainteresowany" || status === "not_interested";
+}
+
+export function getActivityOwnerId(row: ActivityRow) {
+  return row.created_by || row.user_id || row.owner_id || row.assigned_user_id || "unknown";
+}
+
+export function getCalendarEventOwnerId(row: CalendarEventRow) {
+  return row.created_by || row.user_id || row.owner_id || row.assigned_user_id || "unknown";
+}
+
+export function isMeetingCalendarEvent(row: CalendarEventRow) {
+  const eventType = normalizeText(row.event_type);
+  const title = normalizeText(row.title);
+
+  return eventType === "meeting" || eventType === "spotkanie" || title.includes("spotkanie");
+}
+
+export function getAdvisorActivityOwnerId(row: ActivityRow) {
+  return row.assigned_user_id || row.created_by || row.user_id || row.owner_id || "unknown";
+}
+
+export function getAdvisorEventOwnerId(row: CalendarEventRow) {
+  return row.assigned_user_id || row.created_by || row.user_id || row.owner_id || "unknown";
+}
+
+export function getOfferOwnerId(row: OfferRow) {
+  return row.seller_id || row.created_by || row.user_id || row.assigned_user_id || row.owner_id || "unknown";
+}
+
+export function isOfferSent(row: OfferRow) {
+  const status = normalizeText(row.status);
+  return Boolean(
+    row.sent_at ||
+      row.email_sent_at ||
+      row.mail_sent_at ||
+      status.includes("sent") ||
+      status.includes("wyslana") ||
+      status.includes("wyslane")
+  );
+}
+
+export function isCompletedMeetingEvent(row: CalendarEventRow) {
+  const status = normalizeText(row.status);
+  const title = normalizeText(row.title);
+  return (
+    status.includes("odbyte") ||
+    status.includes("completed") ||
+    status.includes("zakoncz") ||
+    title.includes("odbyte")
+  );
+}
+
+
+export function getAllowedAdvisorUsers(
+  profiles: ProfileRow[],
+  currentUserId: string,
+  currentRole: string
+): AdvisorUserOption[] {
+  const advisorRoles = new Set(["seller", "manager", "owner", "admin"]);
+
+  return profiles
+    .filter((profile) => advisorRoles.has(normalizeText(profile.role)))
+    .filter((profile) => {
+      const profileRole = normalizeText(profile.role);
+
+      if (currentRole === "admin" || currentRole === "owner") return true;
+      if (currentRole === "manager") {
+        return (
+          profile.id === currentUserId ||
+          profile.manager_id === currentUserId ||
+          (profileRole === "seller" && profile.manager_id === currentUserId)
+        );
+      }
+      if (currentRole === "seller") return profile.id === currentUserId;
+      return false;
+    })
+    .map((profile) => ({
+      id: profile.id,
+      name: profile.display_name || profile.email || "Nieznany użytkownik",
+      role: normalizeText(profile.role),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pl"));
+}
+
+export function getManagerTeamOptions(
+  profiles: ProfileRow[],
+  currentUserId: string,
+  currentRole: string
+): ManagerTeamOption[] {
+  const advisorRoles = new Set(["seller", "manager", "owner", "admin"]);
+  const visibleAdvisorIds = profiles
+    .filter((profile) => advisorRoles.has(normalizeText(profile.role)))
+    .map((profile) => profile.id);
+
+  const managerIds = new Set<string>();
+
+  profiles.forEach((profile) => {
+    if (normalizeText(profile.role) === "manager") {
+      managerIds.add(profile.id);
+    }
+
+    if (profile.manager_id) {
+      managerIds.add(profile.manager_id);
+    }
+  });
+
+  if (currentRole === "manager") {
+    managerIds.add(currentUserId);
+  }
+
+  const teams = Array.from(managerIds)
+    .map((managerId) => {
+      const manager = profiles.find((profile) => profile.id === managerId);
+      const teamMembers = profiles.filter((profile) => profile.manager_id === managerId);
+      const memberIds = Array.from(new Set([managerId, ...teamMembers.map((member) => member.id)]));
+
+      return {
+        id: managerId,
+        name: manager?.display_name || manager?.email || `Zespół ${managerId.slice(0, 8)}`,
+        managerId,
+        memberIds,
+      };
+    })
+    .filter((team) => {
+      if (currentRole === "admin" || currentRole === "owner") return true;
+      if (currentRole === "manager") return team.managerId === currentUserId;
+      return false;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "pl"));
+
+  if (teams.length > 0) return teams;
+
+  if (currentRole === "admin" || currentRole === "owner") {
+    return [
+      {
+        id: "all-teams",
+        name: "Wszyscy doradcy / wszystkie zespoły",
+        managerId: "all-teams",
+        memberIds: visibleAdvisorIds,
+      },
+    ];
+  }
+
+  if (currentRole === "manager") {
+    const currentManager = profiles.find((profile) => profile.id === currentUserId);
+    const teamMembers = profiles.filter((profile) => profile.manager_id === currentUserId);
+
+    return [
+      {
+        id: currentUserId,
+        name: currentManager?.display_name || currentManager?.email || "Mój zespół",
+        managerId: currentUserId,
+        memberIds: Array.from(new Set([currentUserId, ...teamMembers.map((member) => member.id)])),
+      },
+    ];
+  }
+
+  return [];
+}
+
+export function isSelectedAdvisor(
+  userId: string,
+  selectedAdvisorId: string,
+  allowedAdvisorIds: Set<string>
+) {
+  if (!allowedAdvisorIds.has(userId)) return false;
+  if (selectedAdvisorId === "all") return true;
+  return userId === selectedAdvisorId;
 }

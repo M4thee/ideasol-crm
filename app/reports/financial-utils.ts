@@ -1,6 +1,6 @@
 
 
-import type { FinancialSaleRow, FinancialSummary } from "./types";
+import type { ClientRow, FinancialDetailRow, FinancialDetailType, FinancialSaleRow, FinancialSummary } from "./types";
 import { grossFromNet, netFromGross, normalizeText, toNumber } from "./utils";
 
 export const EMPTY_FINANCIAL_SUMMARY: FinancialSummary = {
@@ -27,19 +27,18 @@ export const EMPTY_FINANCIAL_SUMMARY: FinancialSummary = {
 };
 
 export function getSaleRevenueGross(sale: FinancialSaleRow) {
-  return firstPositiveNumber(
-    sale.contract_value_gross,
-    sale.contract_value,
-    sale.total_gross,
-    sale.final_gross,
-    sale.gross_value,
-    getNestedNumber(sale.financial_data, "contract_value_gross"),
-    getNestedNumber(sale.financial_data, "total_gross"),
-    getNestedNumber(sale.offer_snapshot, "totalGross"),
-    getNestedNumber(sale.offer_snapshot, "total_gross"),
-    getNestedNumber(sale.offer_data, "totalGross"),
-    getNestedNumber(sale.offer_data, "total_gross")
-  );
+  return readSaleNumber(sale, [
+    "sale_price_gross",
+    "salePriceGross",
+    "grossPrice",
+    "finalGross",
+    "totalGross",
+    "contract_value_gross",
+    "contract_value",
+    "total_gross",
+    "final_gross",
+    "gross_value",
+  ]);
 }
 
 export function getSaleRevenueNet(sale: FinancialSaleRow) {
@@ -161,37 +160,91 @@ export function isLostSale(sale: FinancialSaleRow) {
   return status.includes("anul") || status.includes("utrac") || status.includes("rezygn");
 }
 
-export function summarizeFinancialSales(sales: FinancialSaleRow[]): FinancialSummary {
-  return sales.reduce<FinancialSummary>((summary, sale) => {
+export function summarizeFinancialSales(
+  sales: FinancialSaleRow[],
+  currentUserId: string,
+  currentUserRole: string,
+  ownerIds: Set<string>,
+  managerUserIds: Set<string>
+) {
+  const summary = { ...EMPTY_FINANCIAL_SUMMARY };
+
+  sales.forEach((sale) => {
+    const sellerId = getSaleSellerId(sale);
+    const status = getSaleStatus(sale);
     const revenueGross = getSaleRevenueGross(sale);
-    const lost = isLostSale(sale);
+    const isOwnerSeller = ownerIds.has(sellerId);
+    const isManagerSeller = managerUserIds.has(sellerId);
+    const isLost = isLostContractStatus(status);
+    const isCompleted = isCompletedSaleStatus(status);
+    const isCostEligible = !isCostExcludedStatus(status);
+    const forecast = isForecastCommissionSale(sale);
+    const payable = isPayableCommissionSale(sale) || isCompleted;
 
-    summary.totalRevenueGross += revenueGross;
+    const sellerCommission = getSaleSellerCommission(sale);
+    const sellerMarkupNet = getSaleSellerMarkupNet(sale) || sellerCommission;
+    const managerFee = getSaleManagerFee(sale);
+    const ownerMargin = getSaleOwnerMargin(sale);
+
     summary.salesCount += 1;
+    summary.totalRevenueGross += revenueGross;
 
-    if (lost) {
+    if (isLost) {
       summary.lostRevenueGross += revenueGross;
-      return summary;
+    } else {
+      summary.revenueGross += revenueGross;
     }
 
-    summary.revenueGross += revenueGross;
-    summary.guaranteeFund += getGuaranteeFundNet(sale);
-    summary.marketingFund += getMarketingFundNet(sale);
-    summary.equipmentCost += getEquipmentCostNet(sale);
-    summary.equipmentCostGross += getEquipmentCostGross(sale);
-    summary.installationCost += getInstallationCostNet(sale);
-    summary.installationCostGross += getInstallationCostGross(sale);
-    summary.sellerCommissions += getSellerCommissionNet(sale);
-    summary.managerCommissions += getManagerCommissionNet(sale);
-    summary.ownerProfit += getOwnerProfitNet(sale);
-    summary.companyProfit += getCompanyProfitNet(sale);
-    summary.advisorCommissionForecast += getSellerCommissionNet(sale);
-    summary.advisorCommissionPayable += getSellerCommissionNet(sale);
-    summary.managerFeeForecast += getManagerCommissionNet(sale);
-    summary.managerFeePayable += getManagerCommissionNet(sale);
+    if (isCompleted) {
+      summary.guaranteeFund += getSaleOperatorFeeNet(sale);
+      summary.marketingFund += getSaleMarketingValue(sale);
 
-    return summary;
-  }, { ...EMPTY_FINANCIAL_SUMMARY });
+      if (!isOwnerSeller) {
+        summary.sellerCommissions += sellerMarkupNet;
+      }
+    }
+
+    if (isCostEligible) {
+      const equipmentCost = getSaleEquipmentCostDetailed(sale) || getSaleEquipmentCost(sale);
+      const installationCost = getSaleInstallationCostDetailed(sale) || getSaleInstallationCost(sale);
+
+      summary.equipmentCost += equipmentCost;
+      summary.equipmentCostGross += equipmentCost * 1.23;
+      summary.installationCost += installationCost;
+      summary.installationCostGross += installationCost * 1.08;
+    }
+
+    summary.managerCommissions += isCompleted ? managerFee : 0;
+
+    if ((currentUserRole === "owner" || currentUserRole === "admin") && !isLost) {
+      summary.ownerProfit += ownerMargin + (isOwnerSeller ? sellerMarkupNet / 3 : 0);
+    }
+
+    if (sellerId === currentUserId && !isOwnerSeller) {
+      if (forecast) summary.advisorCommissionForecast += sellerCommission;
+      if (payable) summary.advisorCommissionPayable += sellerCommission;
+    }
+
+    if (currentUserRole === "manager") {
+      if (forecast) summary.managerFeeForecast += managerFee;
+      if (payable) summary.managerFeePayable += managerFee;
+
+      if (sellerId === currentUserId && isManagerSeller) {
+        if (forecast) summary.managerOwnSalesCommissionForecast += sellerCommission;
+        if (payable) summary.managerOwnSalesCommissionPayable += sellerCommission;
+      }
+    }
+  });
+
+  summary.companyProfit =
+    netFromGross(summary.revenueGross, 0.08) -
+    summary.equipmentCost -
+    summary.installationCost -
+    summary.sellerCommissions -
+    summary.managerCommissions -
+    summary.ownerProfit * 3;
+
+  return summary;
 }
 
 export function firstPositiveNumber(...values: unknown[]) {
@@ -517,4 +570,313 @@ export function getSaleMarketingValue(sale: FinancialSaleRow) {
 
 export function getSaleSellerMarkupNet(sale: FinancialSaleRow) {
   return readSaleDeepSum(sale, ["sellerMarkupNet", "seller_markup_net"]);
+}
+
+export function getSaleEquipmentCost(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "equipment_cost_net",
+    "equipment_cost",
+    "equipmentCostNet",
+    "equipmentCost",
+    "totalEquipmentCostNet",
+  ]);
+}
+
+export function getSaleInstallationCost(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "installation_cost_net",
+    "installation_cost",
+    "installationCostNet",
+    "installationCost",
+    "mountingCostNet",
+  ]);
+}
+
+
+export function getSaleSellerCommission(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "seller_commission_net",
+    "seller_commission",
+    "seller_margin",
+    "seller_markup_net",
+    "sellerCommissionNet",
+    "sellerMarkupNet",
+    "sellerMargin",
+  ]);
+}
+
+export function getSaleManagerFee(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "manager_fee_net",
+    "manager_fee",
+    "managerFeeNet",
+    "managerFee",
+  ]);
+}
+
+
+export function getSaleGuaranteeFund(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "guarantee_fund_net",
+    "guarantee_fund",
+    "warranty_fund_net",
+    "warranty_fund",
+    "guaranteeFundNet",
+    "guaranteeFund",
+    "warrantyFundNet",
+    "warrantyFund",
+  ]);
+}
+
+export function getSaleMarketingFund(sale: FinancialSaleRow) {
+  return readSaleNumber(sale, [
+    "marketing_fund",
+    "marketing_cost_net",
+    "marketing_cost",
+    "marketingFund",
+    "marketingCostNet",
+    "marketingCost",
+  ]);
+}
+
+export function getSaleOwnerMargin(sale: FinancialSaleRow) {
+  const managerOverridePerOwnerNet = readSaleDeepSum(sale, [
+    "managerOverridePerOwnerNet",
+    "manager_override_per_owner_net",
+  ]);
+
+  if (managerOverridePerOwnerNet !== 0) return managerOverridePerOwnerNet;
+
+  return readSaleNumber(sale, [
+    "owner_margin_net",
+    "owner_margin",
+    "company_margin_net",
+    "company_margin",
+    "ownerMarginNet",
+    "ownerMargin",
+    "companyMarginNet",
+    "companyMargin",
+  ]);
+}
+
+const forecastCommissionStatuses = new Set([
+  "umowione do montazu",
+  "zamontowany",
+  "oczekiwanie na pelna wplate",
+]);
+
+const payableCommissionStatuses = new Set([
+  "zakonczony",
+  "zakonczona",
+  "zakończony",
+  "zakończona",
+]);
+
+export function getSaleSellerId(sale: FinancialSaleRow) {
+  return sale.seller_id || sale.created_by || sale.assigned_user_id || sale.user_id || "";
+}
+
+export function getSaleStatus(sale: FinancialSaleRow) {
+  return normalizeText(sale.status || "");
+}
+
+export function isLostContractStatus(status: string) {
+  return (
+    status === "anulowana" ||
+    status === "odstapienie - utrzymanie" ||
+    status === "odstapienie - nieuratowana" ||
+    status === "utrzymanie - nieuratowana" ||
+    status === "utrzmanie - nieuratowana" ||
+    status === "utrzmanie - nieuratowana" ||
+    status === "utzymanie - nieuratowana"
+  );
+}
+
+export function isCompletedSaleStatus(status: string) {
+  return status.startsWith("zakonczon");
+}
+
+export function isCostExcludedStatus(status: string) {
+  return (
+    isLostContractStatus(status) ||
+    status === "oczekuje na sprawdzenie dokumentow" ||
+    status === "oczekiwanie na sprawdzenie dokumentow" ||
+    status === "oczekuje na umowienie montazu" ||
+    status === "oczekiwanie na umowienie montazu" ||
+    status === "oczekuje na zaliczke" ||
+    status === "oczekiwanie na zaliczke" ||
+    status === "oczekiwanie na zaksiegowanie zaliczki"
+  );
+}
+
+export function isForecastCommissionSale(sale: FinancialSaleRow) {
+  return forecastCommissionStatuses.has(getSaleStatus(sale));
+}
+
+export function isPayableCommissionSale(sale: FinancialSaleRow) {
+  return payableCommissionStatuses.has(getSaleStatus(sale));
+}
+export function getSaleDisplayId(sale: FinancialSaleRow) {
+  return sale.sale_public_id || sale.public_id || sale.id;
+}
+
+export function readStringFromObject(source: unknown, keys: string[]) {
+  if (!source || typeof source !== "object") return "";
+  const objectSource = source as Record<string, unknown>;
+
+  for (const key of keys) {
+    const value = objectSource[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return "";
+}
+
+export function getSaleClientName(sale: FinancialSaleRow, clientMap: Map<string, ClientRow>) {
+  const client = sale.client_id ? clientMap.get(sale.client_id) : undefined;
+  const fromClient = client?.full_name || client?.company_name || client?.contact_person || client?.email || client?.phone;
+  if (fromClient) return fromClient;
+
+  return (
+    readStringFromObject(sale.customer_data, ["full_name", "fullName", "name", "company_name", "companyName", "contact_person", "contactPerson", "email", "phone"]) ||
+    readStringFromObject(sale.offer_snapshot, ["client_name", "clientName", "full_name", "fullName", "company_name", "companyName"]) ||
+    "Brak klienta"
+  );
+}
+
+export function createFinancialDetailRow(
+  sale: FinancialSaleRow,
+  clientMap: Map<string, ClientRow>,
+  net: number,
+  gross: number,
+  description: string
+): FinancialDetailRow | null {
+  if (!Number.isFinite(net) || net === 0) return null;
+
+  return {
+    saleId: String(getSaleDisplayId(sale)),
+    clientName: getSaleClientName(sale, clientMap),
+    status: sale.status || "Brak statusu",
+    net,
+    gross,
+    description,
+  };
+} 
+
+export function getFinancialDetailTitle(type: FinancialDetailType) {
+  const titles: Record<FinancialDetailType, string> = {
+    allContracts: "Wartość wszystkich umów",
+    activeContracts: "Wartość umów aktywnych",
+    lostContracts: "Wartość umów straconych",
+    equipment: "Wydatki na sprzęt",
+    installation: "Wydatki na montaże",
+    commissions: "Prowizje handlowców/managerów",
+    guarantee: "Wpływy na fundusz gwarancyjny",
+    marketing: "Wpływy na marketing",
+    companyProfit: "Dochód firmy",
+    ownerProfit: "Zysk per wspólnik",
+  };
+
+  return titles[type];
+}
+
+
+export function buildFinancialDetailRows(
+  sales: FinancialSaleRow[],
+  type: FinancialDetailType | null,
+  ownerIds: Set<string>,
+  clientMap: Map<string, ClientRow>
+) {
+  if (!type) return [];
+
+  return sales
+    .map((sale) => {
+      const status = getSaleStatus(sale);
+      const revenueGross = getSaleRevenueGross(sale);
+      const revenueNet = netFromGross(revenueGross, 0.08);
+      const isLost = isLostContractStatus(status);
+      const isCompleted = isCompletedSaleStatus(status);
+      const isCostEligible = !isCostExcludedStatus(status);
+      const sellerId = getSaleSellerId(sale);
+      const isOwnerSeller = ownerIds.has(sellerId);
+      const sellerCommission = getSaleSellerCommission(sale);
+      const sellerMarkupNet = getSaleSellerMarkupNet(sale) || sellerCommission;
+      const managerFee = getSaleManagerFee(sale);
+      const ownerProfitNet = getSaleOwnerMargin(sale) + (isOwnerSeller ? sellerMarkupNet / 3 : 0);
+      const equipmentNet = isCostEligible ? getSaleEquipmentCostDetailed(sale) || getSaleEquipmentCost(sale) : 0;
+      const installationNet = isCostEligible ? getSaleInstallationCostDetailed(sale) || getSaleInstallationCost(sale) : 0;
+      const sellerCommissionNet = isCompleted && !isOwnerSeller ? sellerMarkupNet : 0;
+      const managerFeeNet = isCompleted ? managerFee : 0;
+
+      if (type === "allContracts") {
+        return createFinancialDetailRow(sale, clientMap, revenueNet, revenueGross, "Wartość umowy");
+      }
+
+      if (type === "activeContracts" && !isLost) {
+        return createFinancialDetailRow(sale, clientMap, revenueNet, revenueGross, "Wartość umowy aktywnej");
+      }
+
+      if (type === "lostContracts" && isLost) {
+        return createFinancialDetailRow(sale, clientMap, revenueNet, revenueGross, "Wartość umowy straconej");
+      }
+
+      if (type === "equipment") {
+        return createFinancialDetailRow(sale, clientMap, equipmentNet, grossFromNet(equipmentNet, 0.23), "Panele + falownik + magazyn energii + EMS");
+      }
+
+      if (type === "installation") {
+        return createFinancialDetailRow(sale, clientMap, installationNet, grossFromNet(installationNet, 0.08), "Montaże + konstrukcja + zabezpieczenia + okablowanie + transport");
+      }
+
+      if (type === "commissions") {
+        const commissionsNet = sellerCommissionNet + managerFeeNet;
+        return createFinancialDetailRow(sale, clientMap, commissionsNet, grossFromNet(commissionsNet, 0.23), "Prowizja handlowca + manager fee");
+      }
+
+      if (type === "guarantee" && isCompleted) {
+        const guaranteeNet = getSaleOperatorFeeNet(sale);
+        return createFinancialDetailRow(sale, clientMap, guaranteeNet, grossFromNet(guaranteeNet, 0.08), "operatorFeeNet");
+      }
+
+      if (type === "marketing" && isCompleted) {
+        const marketingNet = getSaleMarketingValue(sale);
+        return createFinancialDetailRow(sale, clientMap, marketingNet, grossFromNet(marketingNet, 0.08), "marketing");
+      }
+
+      if (type === "ownerProfit" && !isLost) {
+        return createFinancialDetailRow(sale, clientMap, ownerProfitNet, grossFromNet(ownerProfitNet, 0.08), "Zysk na jednego wspólnika");
+      }
+
+      if (type === "companyProfit" && !isLost) {
+        const companyProfitNet = revenueNet - equipmentNet - installationNet - sellerCommissionNet - managerFeeNet - ownerProfitNet * 3;
+        return createFinancialDetailRow(sale, clientMap, companyProfitNet, grossFromNet(companyProfitNet, 0.08), "Dochód firmy z umowy");
+      }
+
+      return null;
+    })
+    .filter((row): row is FinancialDetailRow => Boolean(row));
+}
+
+export function isSaleDocumentationComplete(sale: FinancialSaleRow) {
+  const source = sale as Record<string, unknown>;
+  const booleanKeys = [
+    "documents_complete",
+    "documentation_complete",
+    "docs_complete",
+    "documentsApproved",
+    "documents_approved",
+  ];
+
+  if (booleanKeys.some((key) => source[key] === true)) return true;
+
+  const status = normalizeText(
+    readStringFromObject(source, [
+      "documents_status",
+      "documentation_status",
+      "docs_status",
+      "document_status",
+    ])
+  );
+
+  return status.includes("komplet") || status.includes("zatwierdz") || status.includes("approved");
 }
