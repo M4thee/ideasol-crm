@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type {
   ActivityRow,
-  AdvisorDetailRow,
   AdvisorDetailType,
   AdvisorReportSummary,
   AdvisorUserOption,
@@ -30,30 +29,24 @@ import {
   formatNumberChange,
   formatPercentChange,
   getActivityOwnerId,
-  getAdvisorActivityOwnerId,
-  getAdvisorEventOwnerId,
+  getAdvisorDetailTitle,
   getCalendarEventOwnerId,
-  getContactStatus,
   getConversationClientKey,
   getAllowedAdvisorUsers,
   getManagerTeamOptions,
-  getOfferOwnerId,
   getDateRangeBoundaries,
   getPresetRange,
   getPreviousDateRange,
   grossFromNet,
   isAnsweredPhoneActivity,
   isCallBackRequest,
-  isCompletedMeetingEvent,
   isEmailActivity,
   isMeetingCalendarEvent,
   isMeetingScheduled,
   isNoAnswer,
   isNotInterested,
-  isOfferSent,
   isPhoneActivity,
   isSmsActivity,
-  isSelectedAdvisor,
   netFromGross,
   normalizeText,
 } from "./utils";
@@ -62,13 +55,11 @@ import { ReportSection } from "./components/ReportSection";
 import {
   buildFinancialDetailRows,
   getFinancialDetailTitle,
-  getSaleDisplayId,
   getSaleRevenueGross,
   getSaleSellerId,
-  isSaleDocumentationComplete,
   summarizeFinancialSales,
 } from "./financial-utils";
-
+import { buildAdvisorDetailRows, summarizeAdvisorReport } from "./advisor-utils";
 
 const emptyAdvisorSummary: AdvisorReportSummary = {
   remoteContacts: 0,
@@ -119,214 +110,6 @@ const emptyFinancialSummary: FinancialSummary = {
   salesCount: 0,
 };
 
-
-function summarizeAdvisorReport(
-  activities: ActivityRow[],
-  calendarEvents: CalendarEventRow[],
-  offers: OfferRow[],
-  sales: FinancialSaleRow[],
-  selectedAdvisorId: string,
-  allowedAdvisorIds: Set<string>
-): AdvisorReportSummary {
-  const advisorActivities = activities.filter((row) =>
-    isSelectedAdvisor(getAdvisorActivityOwnerId(row), selectedAdvisorId, allowedAdvisorIds)
-  );
-  const advisorEvents = calendarEvents.filter((row) =>
-    isSelectedAdvisor(getAdvisorEventOwnerId(row), selectedAdvisorId, allowedAdvisorIds)
-  );
-  const advisorOffers = offers.filter((row) =>
-    isSelectedAdvisor(getOfferOwnerId(row), selectedAdvisorId, allowedAdvisorIds)
-  );
-  const advisorSales = sales.filter((sale) =>
-    isSelectedAdvisor(getSaleSellerId(sale), selectedAdvisorId, allowedAdvisorIds)
-  );
-
-  const phoneCalls = advisorActivities.filter(isPhoneActivity).length;
-  const emails = advisorActivities.filter(isEmailActivity).length;
-  const sms = advisorActivities.filter(isSmsActivity).length;
-  const meetingsScheduled = advisorEvents.filter(isMeetingCalendarEvent).length;
-  const meetingsCompleted = advisorEvents.filter(
-    (event) => isMeetingCalendarEvent(event) && isCompletedMeetingEvent(event)
-  ).length;
-  const savedOffers = advisorOffers.length;
-  const sentOffers = advisorOffers.filter(isOfferSent).length;
-  const completedDocumentationSales = advisorSales.filter(isSaleDocumentationComplete).length;
-
-  return {
-    remoteContacts: phoneCalls + emails + sms,
-    phoneCalls,
-    emails,
-    sms,
-    savedOffers,
-    sentOffers,
-    meetingsScheduled,
-    meetingsCompleted,
-    salesCount: advisorSales.length,
-    documentationCompleteness:
-      advisorSales.length > 0
-        ? Math.round((completedDocumentationSales / advisorSales.length) * 100)
-        : 0,
-  };
-}
-
-function getAdvisorDetailTitle(type: AdvisorDetailType) {
-  const titles: Record<AdvisorDetailType, string> = {
-    remoteContacts: "Wykonane kontakty zdalne",
-    phoneCalls: "Telefony",
-    emails: "Maile",
-    savedOffers: "Zapisane oferty z kalkulatora",
-    sentOffers: "Wysłane oferty z kalkulatora",
-    meetingsScheduled: "Umówione spotkania",
-    meetingsCompleted: "Odbyte spotkania",
-    sales: "Sprzedaże",
-    documentation: "Kompletność dokumentacji",
-  };
-
-  return titles[type];
-}
-
-function formatAdvisorDetailDate(value?: string | null) {
-  if (!value) return "Brak daty";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Brak daty";
-
-  return date.toLocaleString("pl-PL", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getAdvisorName(userId: string, advisorMap: Map<string, AdvisorUserOption>) {
-  return advisorMap.get(userId)?.name || "Nieznany doradca";
-}
-
-function getAdvisorDetailClient(clientId: string | null | undefined, clientMap: Map<string, ClientRow>) {
-  if (!clientId) {
-    return { clientId: null, clientName: "—", leadId: "—" };
-  }
-
-  const client = clientMap.get(clientId);
-  if (!client) {
-    return { clientId, clientName: "Brak klienta", leadId: clientId };
-  }
-
-  return {
-    clientId,
-    clientName: client.full_name || client.company_name || client.contact_person || client.email || client.phone || "Brak nazwy klienta",
-    leadId: client.lead_id || client.lead_public_id || client.public_id || client.client_public_id || client.id,
-  };
-}
-
-function buildAdvisorDetailRows(
-  detailType: AdvisorDetailType | null,
-  selectedAdvisorId: string,
-  allowedAdvisorIds: Set<string>,
-  advisorMap: Map<string, AdvisorUserOption>,
-  clientMap: Map<string, ClientRow>,
-  activities: ActivityRow[],
-  calendarEvents: CalendarEventRow[],
-  offers: OfferRow[],
-  sales: FinancialSaleRow[]
-): AdvisorDetailRow[] {
-  if (!detailType) return [];
-
-  const activityRows = activities
-    .filter((row) => isSelectedAdvisor(getAdvisorActivityOwnerId(row), selectedAdvisorId, allowedAdvisorIds))
-    .filter((row) => {
-      if (detailType === "remoteContacts") return isPhoneActivity(row) || isEmailActivity(row) || isSmsActivity(row);
-      if (detailType === "phoneCalls") return isPhoneActivity(row);
-      if (detailType === "emails") return isEmailActivity(row);
-      return false;
-    })
-    .map((row) => {
-      const advisorId = getAdvisorActivityOwnerId(row);
-      const client = getAdvisorDetailClient(row.client_id, clientMap);
-      return {
-        id: row.id || `${advisorId}-${row.created_at || "activity"}`,
-        date: formatAdvisorDetailDate(row.created_at),
-        advisorName: getAdvisorName(advisorId, advisorMap),
-        clientId: client.clientId,
-        clientName: client.clientName,
-        leadId: client.leadId,
-        type: row.activity_type || row.type || "Aktywność",
-        status: getContactStatus(row) || row.status || "—",
-        description: row.description || row.note || "—",
-      };
-    });
-
-  const offerRows = offers
-    .filter((row) => isSelectedAdvisor(getOfferOwnerId(row), selectedAdvisorId, allowedAdvisorIds))
-    .filter((row) => {
-      if (detailType === "savedOffers") return true;
-      if (detailType === "sentOffers") return isOfferSent(row);
-      return false;
-    })
-    .map((row) => {
-      const advisorId = getOfferOwnerId(row);
-      const client = getAdvisorDetailClient(row.client_id, clientMap);
-      return {
-        id: row.id || `${advisorId}-${row.created_at || "offer"}`,
-        date: formatAdvisorDetailDate(row.created_at),
-        advisorName: getAdvisorName(advisorId, advisorMap),
-        clientId: client.clientId,
-        clientName: client.clientName,
-        leadId: client.leadId,
-        type: detailType === "sentOffers" ? "Oferta wysłana" : "Oferta zapisana",
-        status: row.status || "—",
-        description: row.id ? `OfferID: ${row.id}` : "Oferta z kalkulatora",
-      };
-    });
-
-  const meetingRows = calendarEvents
-    .filter((row) => isSelectedAdvisor(getAdvisorEventOwnerId(row), selectedAdvisorId, allowedAdvisorIds))
-    .filter((row) => {
-      if (detailType === "meetingsScheduled") return isMeetingCalendarEvent(row);
-      if (detailType === "meetingsCompleted") return isMeetingCalendarEvent(row) && isCompletedMeetingEvent(row);
-      return false;
-    })
-    .map((row) => {
-      const advisorId = getAdvisorEventOwnerId(row);
-      const client = getAdvisorDetailClient(row.client_id, clientMap);
-      return {
-        id: row.id || `${advisorId}-${row.event_at || row.created_at || "meeting"}`,
-        date: formatAdvisorDetailDate(row.event_at || row.created_at),
-        advisorName: getAdvisorName(advisorId, advisorMap),
-        clientId: client.clientId,
-        clientName: client.clientName,
-        leadId: client.leadId,
-        type: isCompletedMeetingEvent(row) ? "Odbyte spotkanie" : "Umówione spotkanie",
-        status: row.status || "—",
-        description: row.title || "Spotkanie",
-      };
-    });
-
-  const saleRows = sales
-    .filter((sale) => isSelectedAdvisor(getSaleSellerId(sale), selectedAdvisorId, allowedAdvisorIds))
-    .filter(() => detailType === "sales" || detailType === "documentation")
-    .map((sale) => {
-      const advisorId = getSaleSellerId(sale);
-      const docsComplete = isSaleDocumentationComplete(sale);
-      const client = getAdvisorDetailClient(sale.client_id, clientMap);
-      return {
-        id: String(getSaleDisplayId(sale)),
-        date: formatAdvisorDetailDate(sale.created_at || sale.sale_date || sale.date),
-        advisorName: getAdvisorName(advisorId, advisorMap),
-        clientId: client.clientId,
-        clientName: client.clientName,
-        leadId: client.leadId,
-        type: detailType === "documentation" ? "Dokumentacja sprzedaży" : "Sprzedaż",
-        status: detailType === "documentation" ? (docsComplete ? "Kompletna" : "Niekompletna") : sale.status || "—",
-        description: detailType === "documentation"
-          ? `SaleID: ${getSaleDisplayId(sale)}`
-          : `${getSaleDisplayId(sale)} · ${sale.status || "Brak statusu"}`,
-      };
-    });
-
-  return [...activityRows, ...offerRows, ...meetingRows, ...saleRows].sort((a, b) => b.date.localeCompare(a.date));
-}
 
 function summarizeCcRows(
   rows: ActivityRow[],
@@ -458,23 +241,6 @@ const periodButtons: Array<{ key: PeriodPreset; label: string }> = [
   { key: "custom", label: "Od daty do daty" },
 ];
 
-const advisorMetrics: MetricCard[] = [
-  { label: "Odbyte spotkania", value: "0", change: "—", hint: "Spotkania zakończone w okresie" },
-  { label: "Taski", value: "0", change: "—", hint: "Zamknięte i zaległe zadania" },
-  { label: "Pozyskani klienci", value: "0", change: "—", hint: "Nowi klienci przypisani do doradcy" },
-  { label: "Sprzedaże szt.", value: "0", change: "—", hint: "Liczba sprzedaży" },
-  { label: "Sprzedaże obrót", value: "0 zł", change: "—", hint: "Wartość podpisanych umów" },
-  { label: "Kompletność dokumentacji", value: "0%", change: "—", hint: "Sprzedaże z kompletem wymaganych plików" },
-];
-
-const boardMetrics: MetricCard[] = [
-  { label: "Nowe leady", value: "0", hint: "Wszystkie nowe kontakty w okresie" },
-  { label: "Spotkania", value: "0", hint: "Utworzone i odbyte spotkania" },
-  { label: "Oferty", value: "0", hint: "Oferty zapisane / wysłane" },
-  { label: "Sprzedaże", value: "0", hint: "Liczba sprzedaży" },
-  { label: "Obrót", value: "0 zł", hint: "Suma wartości umów" },
-  { label: "Konwersja lead → sprzedaż", value: "0%", hint: "Sprzedaże / nowe leady" },
-];
 
 
 export default function ReportsPage() {
@@ -511,6 +277,10 @@ export default function ReportsPage() {
   const [loadingFinancialReport, setLoadingFinancialReport] = useState(false);
   const [financialReportError, setFinancialReportError] = useState("");
   const [boardNewLeads, setBoardNewLeads] = useState(0);
+  const [boardMeetingsCount, setBoardMeetingsCount] = useState(0);
+  const [boardOffersCount, setBoardOffersCount] = useState(0);
+  const [boardSalesCount, setBoardSalesCount] = useState(0);
+  const [boardRevenueGross, setBoardRevenueGross] = useState(0);
   const [loadingBoardReport, setLoadingBoardReport] = useState(false);
   const [boardReportError, setBoardReportError] = useState("");
 
@@ -857,15 +627,46 @@ export default function ReportsPage() {
     try {
       const currentRange = getDateRangeBoundaries(dateFrom, dateTo);
 
-      const { count, error } = await supabase
+      const { count: clientsCount, error: clientsError } = await supabase
         .from("clients")
         .select("id", { count: "exact", head: true })
         .gte("created_at", currentRange.startIso)
         .lte("created_at", currentRange.endIso);
 
-      if (error) throw error;
+      if (clientsError) throw clientsError;
 
-      setBoardNewLeads(count || 0);
+      const { data: calendarEventRows, error: calendarEventsError } = await supabase
+        .from("calendar_events")
+        .select("id, created_at, event_at, event_type, status, title")
+        .gte("created_at", currentRange.startIso)
+        .lte("created_at", currentRange.endIso);
+
+      if (calendarEventsError) throw calendarEventsError;
+
+      const { count: offersCount, error: offersError } = await supabase
+        .from("client_offers")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", currentRange.startIso)
+        .lte("created_at", currentRange.endIso);
+
+      if (offersError) throw offersError;
+
+      const { data: saleRows, error: salesError } = await supabase
+        .from("sales")
+        .select("*")
+        .gte("created_at", currentRange.startIso)
+        .lte("created_at", currentRange.endIso);
+
+      if (salesError) throw salesError;
+
+      const boardCalendarEvents = (calendarEventRows || []) as CalendarEventRow[];
+      const boardSales = (saleRows || []) as FinancialSaleRow[];
+
+      setBoardNewLeads(clientsCount || 0);
+      setBoardMeetingsCount(boardCalendarEvents.filter(isMeetingCalendarEvent).length);
+      setBoardOffersCount(offersCount || 0);
+      setBoardSalesCount(boardSales.length);
+      setBoardRevenueGross(boardSales.reduce((sum, sale) => sum + getSaleRevenueGross(sale), 0));
     } catch (error) {
       console.error("Błąd ładowania raportu zarządu", error);
       setBoardReportError(error instanceof Error ? error.message : "Nie udało się załadować raportu zarządu.");
@@ -1262,10 +1063,6 @@ export default function ReportsPage() {
       detailType: "documentation",
     },
   ];
-const boardMeetingsCount = advisorCalendarEvents.filter(isMeetingCalendarEvent).length;
-const boardOffersCount = advisorOffers.length;
-const boardSalesCount = advisorSales.length;
-const boardRevenueGross = advisorSales.reduce((sum, sale) => sum + getSaleRevenueGross(sale), 0);
 const boardConversionRate = boardNewLeads > 0 ? Math.round((boardSalesCount / boardNewLeads) * 100) : 0;
 
 const dynamicBoardMetrics: MetricCard[] = [
@@ -1725,44 +1522,120 @@ const dynamicBoardMetrics: MetricCard[] = [
           </ReportSection>
         ) : null}
 
-        <ReportSection title="Raport managera" description="Te same KPI co u doradcy, ale liczone zespołowo po przypisaniu doradców do managera.">
-          <div ref={managerTeamReportTopRef} className="scroll-mt-6" />
+        {canSeeManagerTeamReport ? (
+          <ReportSection title="Raport managera" description="Te same KPI co u doradcy, ale liczone zespołowo po przypisaniu doradców do managera.">
+            <div ref={managerTeamReportTopRef} className="scroll-mt-6" />
 
-{managerTeamOptions.length > 0 ? (
-  <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <label className="flex max-w-md flex-col gap-2 text-sm font-semibold text-slate-700">
-      Zespół managera
-      <select
-        value={selectedManagerTeamId}
-        onChange={(event) => setSelectedManagerTeamId(event.target.value)}
-        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-slate-400"
-      >
-        {managerTeamOptions.map((team) => (
-          <option key={team.id} value={team.id}>
-            {team.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  </div>
-) : (
-  <div className="mb-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
-    Brak dostępnych zespołów managerów w tym widoku.
-  </div>
-)}
+            {managerTeamOptions.length > 0 ? (
+              <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <label className="flex max-w-md flex-col gap-2 text-sm font-semibold text-slate-700">
+                  Zespół managera
+                  <select
+                    value={selectedManagerTeamId}
+                    onChange={(event) => setSelectedManagerTeamId(event.target.value)}
+                    className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-slate-400"
+                  >
+                    {managerTeamOptions.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <div className="mb-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
+                Brak dostępnych zespołów managerów w tym widoku.
+              </div>
+            )}
 
-<MetricGrid metrics={managerTeamReportMetrics} onMetricClick={handleManagerTeamMetricClick} />
-        </ReportSection>
+            <MetricGrid metrics={managerTeamReportMetrics} onMetricClick={handleManagerTeamMetricClick} />
 
-        <ReportSection title="Raport zarządu" description="Widok ogólny: leady, spotkania, oferty, sprzedaże, obrót i konwersja lejka.">
-         {boardReportError ? (
-  <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-    {boardReportError}
-  </div>
-) : (
-  <MetricGrid metrics={dynamicBoardMetrics} />
-)}
-        </ReportSection>
+            {activeManagerTeamDetail ? (
+              <div ref={managerTeamDetailRef} className="mt-5 scroll-mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="font-semibold text-slate-950">
+                      Szczegóły zespołu: {getAdvisorDetailTitle(activeManagerTeamDetail)}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Pozycje zgodne z aktualnym zakresem dat oraz wybranym zespołem managera.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCloseManagerTeamDetail}
+                    className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+                  >
+                    Zamknij szczegóły
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-5 py-3">Data</th>
+                        <th className="px-5 py-3">Doradca</th>
+                        <th className="px-5 py-3">LeadID</th>
+                        <th className="px-5 py-3">Klient</th>
+                        <th className="px-5 py-3">Typ</th>
+                        <th className="px-5 py-3">Status</th>
+                        <th className="px-5 py-3">Opis / powiązanie</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {managerTeamDetailRows.length > 0 ? (
+                        managerTeamDetailRows.map((row) => (
+                          <tr key={`${row.id}-${row.type}-${row.date}`} className="transition hover:bg-slate-50">
+                            <td className="px-5 py-4 font-semibold text-slate-900">{row.date}</td>
+                            <td className="px-5 py-4 text-slate-800">{row.advisorName}</td>
+                            <td className="px-5 py-4 font-semibold text-slate-900">
+                              {row.clientId ? (
+                                <a className="text-blue-700 underline-offset-2 hover:underline" href={`/clients/${row.clientId}`}>
+                                  {row.leadId}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-slate-800">{row.clientName}</td>
+                            <td className="px-5 py-4 text-slate-600">{row.type}</td>
+                            <td className="px-5 py-4 text-slate-600">{row.status}</td>
+                            <td className="px-5 py-4 text-slate-600">{row.description}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="px-5 py-5 text-slate-500" colSpan={7}>
+                            Brak pozycji dla tego typu aktywności w wybranym okresie.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+          </ReportSection>
+        ) : null}
+
+        {canSeeOwnerFinance ? (
+          <ReportSection title="Raport zarządu" description="Widok ogólny: leady, spotkania, oferty, sprzedaże, obrót i konwersja lejka.">
+            {loadingBoardReport ? (
+              <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
+                Ładowanie raportu zarządu...
+              </div>
+            ) : null}
+            {boardReportError ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+                {boardReportError}
+              </div>
+            ) : (
+              <MetricGrid metrics={dynamicBoardMetrics} />
+            )}
+          </ReportSection>
+        ) : null}
       </div>
     </main>
   );

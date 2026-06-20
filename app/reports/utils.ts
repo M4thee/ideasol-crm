@@ -2,8 +2,10 @@
 
 import type {
   ActivityRow,
+  AdvisorDetailType,
   AdvisorUserOption,
   CalendarEventRow,
+  ClientRow,
   ManagerTeamOption,
   OfferRow,
   PeriodPreset,
@@ -380,4 +382,55 @@ export function isSelectedAdvisor(
   if (!allowedAdvisorIds.has(userId)) return false;
   if (selectedAdvisorId === "all") return true;
   return userId === selectedAdvisorId;
+}
+
+export function getAdvisorDetailTitle(type: AdvisorDetailType) {
+  const titles: Record<AdvisorDetailType, string> = {
+    remoteContacts: "Wykonane kontakty zdalne",
+    phoneCalls: "Telefony",
+    emails: "Maile",
+    savedOffers: "Zapisane oferty z kalkulatora",
+    sentOffers: "Wysłane oferty z kalkulatora",
+    meetingsScheduled: "Umówione spotkania",
+    meetingsCompleted: "Odbyte spotkania",
+    sales: "Sprzedaże",
+    documentation: "Kompletność dokumentacji",
+  };
+
+  return titles[type];
+}
+
+export function formatAdvisorDetailDate(value?: string | null) {
+  if (!value) return "Brak daty";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Brak daty";
+
+  return date.toLocaleString("pl-PL", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function getAdvisorName(userId: string, advisorMap: Map<string, AdvisorUserOption>) {
+  return advisorMap.get(userId)?.name || "Nieznany doradca";
+}
+
+export function getAdvisorDetailClient(clientId: string | null | undefined, clientMap: Map<string, ClientRow>) {
+  if (!clientId) {
+    return { clientId: null, clientName: "—", leadId: "—" };
+  }
+
+  const client = clientMap.get(clientId);
+  if (!client) {
+    return { clientId, clientName: "Brak klienta", leadId: clientId };
+  }
+
+  return {
+    clientId,
+    clientName: client.full_name || client.company_name || client.contact_person || client.email || client.phone || "Brak nazwy klienta",
+    leadId: client.lead_id || client.lead_public_id || client.public_id || client.client_public_id || client.id,
+  };
 }
