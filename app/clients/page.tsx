@@ -425,6 +425,12 @@ function ClientsPageContent() {
     );
   }
 
+  function canViewAllClientsForRole(role: UserRole | null) {
+    return ["owner", "admin", "cc"].includes(
+      String(role || "").toLowerCase()
+    );
+  }
+
   function maskClientName(value: string | null) {
     const cleanValue = String(value || "").trim();
 
@@ -575,7 +581,8 @@ function ClientsPageContent() {
     setLoading(true);
 
     const normalizedRole = String(role || "seller").toLowerCase();
-    const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
+    const canViewAllClients = canViewAllClientsForRole(normalizedRole);
+    let allowedAssignedUserIds: string[] | null = null;
 
     let query = supabase
       .from("clients")
@@ -587,6 +594,7 @@ function ClientsPageContent() {
 
     if (!canViewAllClients) {
       if (!userId) {
+        allowedAssignedUserIds = [];
         query = query.eq("assigned_user_id", "__no_user__");
       } else if (normalizedRole === "manager") {
         const { data: teamMembers, error: teamError } = await supabase
@@ -598,13 +606,14 @@ function ClientsPageContent() {
           console.error("Błąd ładowania zespołu managera:", teamError);
         }
 
-        const allowedUserIds = [
+        allowedAssignedUserIds = [
           userId,
           ...((teamMembers || []).map((item: { id: string }) => item.id)),
         ];
 
-        query = query.in("assigned_user_id", allowedUserIds);
+        query = query.in("assigned_user_id", allowedAssignedUserIds);
       } else {
+        allowedAssignedUserIds = [userId];
         query = query.eq("assigned_user_id", userId);
       }
     }
@@ -615,7 +624,14 @@ function ClientsPageContent() {
       console.error("Błąd ładowania klientów:", error);
     }
 
-    const clientsWithoutAssignedUsers = (data || []) as ClientRow[];
+    const rawClients = (data || []) as ClientRow[];
+    const clientsWithoutAssignedUsers = canViewAllClients
+      ? rawClients
+      : rawClients.filter(
+        (client) =>
+          !!client.assigned_user_id &&
+          !!allowedAssignedUserIds?.includes(client.assigned_user_id)
+      );
 
     const clientIds = clientsWithoutAssignedUsers.map((client) => client.id);
     let tagsByClientId: Record<string, ClientTag[]> = {};

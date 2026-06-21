@@ -301,11 +301,44 @@ export default function ClientPage() {
     const role = (profileData?.role || "seller") as UserRole;
     setCurrentUserRole(role);
 
-    const { data: clientData, error: clientError } = await supabase
+    const normalizedRole = String(role || "seller").toLowerCase();
+    const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
+    let allowedAssignedUserIds: string[] | null = null;
+
+    if (!canViewAllClients) {
+      if (normalizedRole === "manager") {
+        const { data: teamMembers, error: teamError } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("manager_id", user.id);
+
+        if (teamError) {
+          console.error("Błąd ładowania zespołu managera przy dostępie do klienta:", teamError);
+        }
+
+        allowedAssignedUserIds = [
+          user.id,
+          ...((teamMembers || []).map((member: { id: string }) => member.id)),
+        ];
+      } else {
+        allowedAssignedUserIds = [user.id];
+      }
+    }
+
+    let clientQuery = supabase
       .from("clients")
       .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at, created_by")
-      .eq("id", clientId)
-      .maybeSingle();
+      .eq("id", clientId);
+
+    if (!canViewAllClients) {
+      if (!allowedAssignedUserIds || allowedAssignedUserIds.length === 0) {
+        clientQuery = clientQuery.eq("assigned_user_id", "__no_user__");
+      } else {
+        clientQuery = clientQuery.in("assigned_user_id", allowedAssignedUserIds);
+      }
+    }
+
+    const { data: clientData, error: clientError } = await clientQuery.maybeSingle();
 
     if (clientError) {
       console.error("Błąd ładowania klienta:", clientError);
@@ -353,23 +386,10 @@ export default function ClientPage() {
       created_by_user: createdByUser,
     };
 
-    const normalizedRole = String(role || "seller").toLowerCase();
-    const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
-    let canAccessClient = canViewAllClients || clientData.assigned_user_id === user.id;
-
-    if (!canAccessClient && normalizedRole === "manager") {
-      const { data: teamMembers, error: teamError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("manager_id", user.id);
-
-      if (teamError) {
-        console.error("Błąd ładowania zespołu managera przy dostępie do klienta:", teamError);
-      }
-
-      const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
-      canAccessClient = !!clientData.assigned_user_id && teamUserIds.includes(clientData.assigned_user_id);
-    }
+    const canAccessClient =
+      canViewAllClients ||
+      (!!clientData.assigned_user_id &&
+        !!allowedAssignedUserIds?.includes(clientData.assigned_user_id));
 
     if (!canAccessClient) {
       setClient(null);

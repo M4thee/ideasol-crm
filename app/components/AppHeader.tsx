@@ -93,6 +93,7 @@ type SearchableClient = {
   phone?: string | null;
   contact_email?: string | null;
   contact_phone?: string | null;
+  assigned_user_id?: string | null;
   [key: string]: unknown;
 };
 
@@ -101,6 +102,7 @@ type SearchableSale = {
   public_id?: string | null;
   sale_id?: string | null;
   sale_number?: string | number | null;
+  client_id?: string | null;
   event_id?: string | null;
   [key: string]: unknown;
 };
@@ -411,20 +413,91 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
         return;
       }
 
+      if (!profile?.id) {
+        setSearchResults([]);
+        setSearchError(null);
+        return;
+      }
+
       setSearching(true);
       setSearchError(null);
 
       const searchValue = trimmedSearch.toLowerCase();
       const searchDigits = trimmedSearch.replace(/\D/g, "");
+      const normalizedRole = String(profile.role || "seller").toLowerCase();
+      const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
+      let allowedAssignedUserIds: string[] | null = null;
 
-      const [clientsResponse, salesResponse] = await Promise.all([
-        supabase.from("clients").select("*").limit(300),
-        supabase.from("sales").select("*").limit(300),
-      ]);
+      if (!canViewAllClients) {
+        if (normalizedRole === "manager") {
+          const { data: teamMembers, error: teamError } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("manager_id", profile.id);
 
-      if (clientsResponse.error || salesResponse.error) {
+          if (teamError) {
+            console.error("Błąd ładowania zespołu managera w wyszukiwarce:", teamError);
+          }
+
+          allowedAssignedUserIds = [
+            profile.id,
+            ...((teamMembers || []).map((member: { id: string }) => member.id)),
+          ];
+        } else {
+          allowedAssignedUserIds = [profile.id];
+        }
+      }
+
+      let clientsQuery = supabase.from("clients").select("*").limit(300);
+
+      if (!canViewAllClients) {
+        if (!allowedAssignedUserIds || allowedAssignedUserIds.length === 0) {
+          clientsQuery = clientsQuery.eq("assigned_user_id", "__no_user__");
+        } else {
+          clientsQuery = clientsQuery.in("assigned_user_id", allowedAssignedUserIds);
+        }
+      }
+
+      const clientsResponse = await clientsQuery;
+
+      if (clientsResponse.error) {
         console.error("Błąd wyszukiwania CRM:", {
           clients: clientsResponse.error,
+        });
+
+        setSearchError("Nie udało się wykonać wyszukiwania.");
+        setSearchResults([]);
+        setSearching(false);
+        return;
+      }
+
+      const rawClients = (clientsResponse.data || []) as SearchableClient[];
+      const scopedClients = canViewAllClients
+        ? rawClients
+        : rawClients.filter(
+            (client) =>
+              !!client.assigned_user_id &&
+              !!allowedAssignedUserIds?.includes(client.assigned_user_id)
+          );
+
+      const accessibleClientIds = scopedClients.map((client) => client.id);
+      let salesResponse: { data: unknown[] | null; error: unknown } = {
+        data: [],
+        error: null,
+      };
+
+      if (canViewAllClients || accessibleClientIds.length > 0) {
+        let salesQuery = supabase.from("sales").select("*").limit(300);
+
+        if (!canViewAllClients) {
+          salesQuery = salesQuery.in("client_id", accessibleClientIds);
+        }
+
+        salesResponse = await salesQuery;
+      }
+
+      if (salesResponse.error) {
+        console.error("Błąd wyszukiwania CRM:", {
           sales: salesResponse.error,
         });
 
@@ -434,7 +507,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
         return;
       }
 
-      const clientResults: SearchResult[] = ((clientsResponse.data || []) as SearchableClient[])
+      const clientResults: SearchResult[] = scopedClients
         .filter((client) => {
           const searchableText = getRecordSearchText(client);
           const searchableDigits = getRecordSearchDigits(client);
@@ -489,7 +562,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     }, 250);
 
     return () => clearTimeout(timeout);
-  }, [trimmedSearch]);
+  }, [trimmedSearch, profile?.id, profile?.role]);
 
   function openSearchResult(result: SearchResult) {
     setSearchQuery("");

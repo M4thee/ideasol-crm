@@ -428,11 +428,46 @@ export default function SalePage() {
       setCurrentUserRole(resolvedRole);
     }
 
-    const { data: saleData, error } = await supabase
+    const normalizedRole = String(resolvedRole || "seller").toLowerCase();
+    const canViewAllSales = ["admin", "owner", "cc"].includes(normalizedRole);
+    let allowedSellerIds: string[] | null = null;
+
+    if (!canViewAllSales) {
+      if (user && normalizedRole === "manager") {
+        const { data: teamMembers, error: teamError } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("manager_id", user.id);
+
+        if (teamError) {
+          console.error("Błąd ładowania zespołu managera przy dostępie do sprzedaży:", teamError);
+        }
+
+        allowedSellerIds = [
+          user.id,
+          ...((teamMembers || []).map((member: { id: string }) => member.id)),
+        ];
+      } else if (user) {
+        allowedSellerIds = [user.id];
+      } else {
+        allowedSellerIds = [];
+      }
+    }
+
+    let saleQuery = supabase
       .from("sales")
       .select("*")
-      .eq("id", saleId)
-      .maybeSingle();
+      .eq("id", saleId);
+
+    if (!canViewAllSales) {
+      if (!allowedSellerIds || allowedSellerIds.length === 0) {
+        saleQuery = saleQuery.eq("seller_id", "__no_user__");
+      } else {
+        saleQuery = saleQuery.in("seller_id", allowedSellerIds);
+      }
+    }
+
+    const { data: saleData, error } = await saleQuery.maybeSingle();
 
     if (error) {
       console.error("Błąd ładowania sprzedaży:", error);
@@ -447,26 +482,9 @@ export default function SalePage() {
       return;
     }
 
-    const normalizedRole = String(resolvedRole || "seller").toLowerCase();
-    let canOpenSale = ["admin", "owner", "cc"].includes(normalizedRole);
-
-    if (!canOpenSale && user && saleData.seller_id === user.id) {
-      canOpenSale = true;
-    }
-
-    if (!canOpenSale && user && normalizedRole === "manager") {
-      const { data: teamMembers, error: teamError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("manager_id", user.id);
-
-      if (teamError) {
-        console.error("Błąd ładowania zespołu managera przy dostępie do sprzedaży:", teamError);
-      }
-
-      const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
-      canOpenSale = !!saleData.seller_id && teamUserIds.includes(saleData.seller_id);
-    }
+    const canOpenSale =
+      canViewAllSales ||
+      (!!saleData.seller_id && !!allowedSellerIds?.includes(saleData.seller_id));
 
     if (!canOpenSale) {
       setSale(null);
