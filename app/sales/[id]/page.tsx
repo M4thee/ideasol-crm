@@ -429,58 +429,58 @@ export default function SalePage() {
     }
 
     const { data: saleData, error } = await supabase
-  .from("sales")
-  .select("*")
-  .eq("id", saleId)
-  .maybeSingle();
+      .from("sales")
+      .select("*")
+      .eq("id", saleId)
+      .maybeSingle();
 
-if (error) {
-  console.error("Błąd ładowania sprzedaży:", error);
-  setLoading(false);
-  return;
-}
+    if (error) {
+      console.error("Błąd ładowania sprzedaży:", error);
+      setLoading(false);
+      return;
+    }
 
-if (!saleData) {
-  setSale(null);
-  setAccessDenied(true);
-  setLoading(false);
-  return;
-}
+    if (!saleData) {
+      setSale(null);
+      setAccessDenied(true);
+      setLoading(false);
+      return;
+    }
 
-const normalizedRole = String(resolvedRole || "seller").toLowerCase();
-let canOpenSale = ["admin", "owner", "cc"].includes(normalizedRole);
+    const normalizedRole = String(resolvedRole || "seller").toLowerCase();
+    let canOpenSale = ["admin", "owner", "cc"].includes(normalizedRole);
 
-if (!canOpenSale && user && saleData.seller_id === user.id) {
-  canOpenSale = true;
-}
+    if (!canOpenSale && user && saleData.seller_id === user.id) {
+      canOpenSale = true;
+    }
 
-if (!canOpenSale && user && normalizedRole === "manager") {
-  const { data: teamMembers, error: teamError } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("manager_id", user.id);
+    if (!canOpenSale && user && normalizedRole === "manager") {
+      const { data: teamMembers, error: teamError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", user.id);
 
-  if (teamError) {
-    console.error("Błąd ładowania zespołu managera przy dostępie do sprzedaży:", teamError);
-  }
+      if (teamError) {
+        console.error("Błąd ładowania zespołu managera przy dostępie do sprzedaży:", teamError);
+      }
 
-  const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
-  canOpenSale = !!saleData.seller_id && teamUserIds.includes(saleData.seller_id);
-}
+      const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
+      canOpenSale = !!saleData.seller_id && teamUserIds.includes(saleData.seller_id);
+    }
 
-if (!canOpenSale) {
-  setSale(null);
-  setClient(null);
-  setSellerProfile(null);
-  setDocuments([]);
-  setDocumentContainers([]);
-  setSaleNotes([]);
-  setAccessDenied(true);
-  setLoading(false);
-  return;
-}
+    if (!canOpenSale) {
+      setSale(null);
+      setClient(null);
+      setSellerProfile(null);
+      setDocuments([]);
+      setDocumentContainers([]);
+      setSaleNotes([]);
+      setAccessDenied(true);
+      setLoading(false);
+      return;
+    }
 
-setSale(saleData as Sale);
+    setSale(saleData as Sale);
     setContractValueInput(
       saleData.contract_value !== null && saleData.contract_value !== undefined
         ? String(saleData.contract_value)
@@ -1203,21 +1203,21 @@ setSale(saleData as Sale);
       </main>
     );
   }
-if (accessDenied) {
-  return (
-    <main>
-      <div className="max-w-3xl mx-auto bg-white border border-red-200 rounded-2xl shadow-sm p-6 space-y-4">
-        <h1 className="text-2xl font-bold text-red-700">
-          Brak dostępu do sprzedaży
-        </h1>
+  if (accessDenied) {
+    return (
+      <main>
+        <div className="max-w-3xl mx-auto bg-white border border-red-200 rounded-2xl shadow-sm p-6 space-y-4">
+          <h1 className="text-2xl font-bold text-red-700">
+            Brak dostępu do sprzedaży
+          </h1>
 
-        <p className="text-slate-600 break-all">
-          Nie masz uprawnień do otwarcia tej karty sprzedaży.
-        </p>
-      </div>
-    </main>
-  );
-}
+          <p className="text-slate-600 break-all">
+            Nie masz uprawnień do otwarcia tej karty sprzedaży.
+          </p>
+        </div>
+      </main>
+    );
+  }
   if (!sale) {
     return (
       <main>
