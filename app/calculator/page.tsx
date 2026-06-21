@@ -258,6 +258,12 @@ function addOfflineOfferToQueue(item: OfflineOfferQueueItem) {
   writeOfflineOfferQueue(nextQueue);
   return nextQueue.length;
 }
+function removeOfflineOfferFromQueue(itemId: string) {
+  const currentQueue = readOfflineOfferQueue();
+  const nextQueue = currentQueue.filter((item) => item.id !== itemId);
+  writeOfflineOfferQueue(nextQueue);
+  return nextQueue.length;
+}
 
 
 const DEFAULT_PRICING_OVERRIDES = {
@@ -309,7 +315,7 @@ export default function Home() {
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
-
+  const [syncingOfflineOffers, setSyncingOfflineOffers] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -361,9 +367,9 @@ export default function Home() {
   const canSeePricingPanel = currentUserRole.includes("admin");
   useEffect(() => {
     function updateOnlineStatus() {
-  setIsOffline(!isCalculatorOnline());
-  setQueuedOfferCount(readOfflineOfferQueue().length);
-}
+      setIsOffline(!isCalculatorOnline());
+      setQueuedOfferCount(readOfflineOfferQueue().length);
+    }
 
     updateOnlineStatus();
     window.addEventListener("online", updateOnlineStatus);
@@ -1033,64 +1039,64 @@ IdeaSol`;
     }
 
     setClientEmail(emailForSend);
-setSendingEmail(true);
-setEmailStatus("");
+    setSendingEmail(true);
+    setEmailStatus("");
 
-if (!isCalculatorOnline()) {
-  const offlineItem: OfflineOfferQueueItem = {
-    id: createOfflineQueueId(),
-    createdAt: new Date().toISOString(),
-    status: "pending",
-    clientId: selectedClientId,
-    clientName: clientName || getClientDisplayName(selectedClient),
-    clientEmail: emailForSend,
-    sendMode: mode,
-    offerText: buildOfferText(result),
-    snapshot: {
-      result,
-      selectedClientId,
-      clientName: clientName || getClientDisplayName(selectedClient),
-      clientEmail: emailForSend,
-      selectedClientEmail,
-      typedClientEmail,
-      offerType,
-      panelModel,
-      panelCount,
-      panelPowerWp: getPanelPowerWp(panelModel),
-      panelName: getPanelDisplayName(panelModel),
-      manualPowerKw,
-      roofType,
-      storage,
-      withEms,
-      includeSubsidy,
-      isUpsell,
-      existingPvPowerKw,
-      billingSystem,
-      selectedInverterName,
-      sellerMarkup,
-      vatRate,
-      selectedAdditionalServices,
-      pricingOverrides,
-      advisor: {
-        id: userProfile?.id || null,
-        name: advisorName,
-        phone: advisorPhone,
-        email: advisorEmail,
-        role: userProfile?.role || currentUserRole,
-      },
-    },
-  };
+    if (!isCalculatorOnline()) {
+      const offlineItem: OfflineOfferQueueItem = {
+        id: createOfflineQueueId(),
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        clientId: selectedClientId,
+        clientName: clientName || getClientDisplayName(selectedClient),
+        clientEmail: emailForSend,
+        sendMode: mode,
+        offerText: buildOfferText(result),
+        snapshot: {
+          result,
+          selectedClientId,
+          clientName: clientName || getClientDisplayName(selectedClient),
+          clientEmail: emailForSend,
+          selectedClientEmail,
+          typedClientEmail,
+          offerType,
+          panelModel,
+          panelCount,
+          panelPowerWp: getPanelPowerWp(panelModel),
+          panelName: getPanelDisplayName(panelModel),
+          manualPowerKw,
+          roofType,
+          storage,
+          withEms,
+          includeSubsidy,
+          isUpsell,
+          existingPvPowerKw,
+          billingSystem,
+          selectedInverterName,
+          sellerMarkup,
+          vatRate,
+          selectedAdditionalServices,
+          pricingOverrides,
+          advisor: {
+            id: userProfile?.id || null,
+            name: advisorName,
+            phone: advisorPhone,
+            email: advisorEmail,
+            role: userProfile?.role || currentUserRole,
+          },
+        },
+      };
 
-  const nextQueueLength = addOfflineOfferToQueue(offlineItem);
-  setQueuedOfferCount(nextQueueLength);
-  setSendingEmail(false);
-  setEmailStatus(
-    `Brak internetu — oferta została dodana do kolejki offline. Liczba oczekujących ofert: ${nextQueueLength}.`
-  );
-  return;
-}
+      const nextQueueLength = addOfflineOfferToQueue(offlineItem);
+      setQueuedOfferCount(nextQueueLength);
+      setSendingEmail(false);
+      setEmailStatus(
+        `Brak internetu — oferta została dodana do kolejki offline. Liczba oczekujących ofert: ${nextQueueLength}.`
+      );
+      return;
+    }
 
-if (!selectedClientEmail && typedClientEmail) {
+    if (!selectedClientEmail && typedClientEmail) {
       const { error: updateClientEmailError } = await supabase
         .from("clients")
         .update({ email: typedClientEmail })
@@ -1214,6 +1220,222 @@ if (!selectedClientEmail && typedClientEmail) {
     }
   }
 
+  async function syncOfflineOfferQueue() {
+    if (syncingOfflineOffers) return;
+    if (!isCalculatorOnline()) return;
+
+    const queue = readOfflineOfferQueue();
+
+    if (queue.length === 0) {
+      setQueuedOfferCount(0);
+      return;
+    }
+
+    if (!userProfile?.id) {
+      setEmailStatus("Nie można zsynchronizować ofert offline — brak zalogowanego użytkownika.");
+      return;
+    }
+
+    setSyncingOfflineOffers(true);
+    setEmailStatus(`Synchronizuję oferty offline: ${queue.length} oczekujących...`);
+
+    try {
+      for (const item of queue) {
+        const snapshot = item.snapshot as Record<string, any>;
+        const queuedResult = snapshot.result as Result | null;
+
+        if (!queuedResult) {
+          continue;
+        }
+
+        const selectedAdditionalServicesSnapshot =
+          (snapshot.selectedAdditionalServices as SelectedAdditionalService[] | undefined) || [];
+        const pricingOverridesSnapshot = snapshot.pricingOverrides || pricingOverrides;
+        const advisorSnapshot =
+          (snapshot.advisor as Record<string, unknown> | undefined) || {};
+
+        if (!snapshot.selectedClientEmail && snapshot.typedClientEmail) {
+          const { error: updateClientEmailError } = await supabase
+            .from("clients")
+            .update({ email: item.clientEmail })
+            .eq("id", item.clientId);
+
+          if (updateClientEmailError) {
+            throw new Error(
+              `Nie udało się zapisać e-maila klienta dla oferty offline: ${updateClientEmailError.message}`
+            );
+          }
+        }
+
+        const offerPayload = {
+          client_id: item.clientId,
+          created_by: userProfile.id,
+          offer_type: queuedResult.offerType,
+          status: "draft",
+          client_name: item.clientName || null,
+          client_email: item.clientEmail || null,
+          sale_price_net: queuedResult.finalNet,
+          sale_price_gross: queuedResult.finalGross,
+          vat_rate: queuedResult.vatRate,
+          seller_margin: queuedResult.sellerMarkupNet,
+          company_margin: queuedResult.companyMargin,
+          subsidy_allocation_enabled: queuedResult.subsidyAllocation?.enabled ?? false,
+          subsidy_billing_system:
+            queuedResult.subsidyAllocation?.billingSystem ?? queuedResult.billingSystem ?? null,
+          subsidy_pv_net: queuedResult.subsidyAllocation?.pvNet ?? null,
+          subsidy_storage_net: queuedResult.subsidyAllocation?.storageNet ?? null,
+          subsidy_ems_net: queuedResult.subsidyAllocation?.emsNet ?? null,
+          subsidy_storage_subsidy: queuedResult.subsidyAllocation?.storageSubsidy ?? null,
+          subsidy_ems_bonus: queuedResult.subsidyAllocation?.emsBonus ?? null,
+          subsidy_total: queuedResult.subsidyAllocation?.total ?? null,
+          pv_power_kw: queuedResult.pvPowerKw,
+          panel_model: snapshot.panelModel || null,
+          panel_count: Number(snapshot.panelCount || 0),
+          panel_power_wp: Number(snapshot.panelPowerWp || 0),
+          inverter: queuedResult.inverter,
+          energy_storage: queuedResult.energyStorage,
+          roof_type: snapshot.roofType || null,
+          offer_data: {
+            result: queuedResult,
+            contractBreakdown: queuedResult.contractBreakdown || null,
+            additionalServices: selectedAdditionalServicesSnapshot,
+            additional_services: selectedAdditionalServicesSnapshot,
+            form: {
+              offerType: snapshot.offerType || queuedResult.offerType,
+              panelModel: snapshot.panelModel || null,
+              panelCount: Number(snapshot.panelCount || 0),
+              manualPowerKw: snapshot.manualPowerKw || "",
+              roofType: snapshot.roofType || null,
+              storage: snapshot.storage || null,
+              withEms: Boolean(snapshot.withEms),
+              includeSubsidy: Boolean(snapshot.includeSubsidy),
+              isUpsell: Boolean(snapshot.isUpsell),
+              existingPvPowerKw: snapshot.isUpsell ? snapshot.existingPvPowerKw || "0" : "0",
+              billingSystem: snapshot.billingSystem || queuedResult.billingSystem || "net_billing",
+              selectedInverterName: snapshot.selectedInverterName || "auto",
+              sellerMarkup: Number(snapshot.sellerMarkup || 0),
+              vatRate: Number(snapshot.vatRate || queuedResult.vatRate || 8),
+              defaultCalculatorMargin: userProfile?.default_seller_markup ?? null,
+              contractBreakdown: queuedResult.contractBreakdown || null,
+              additionalServices: selectedAdditionalServicesSnapshot,
+              additional_services: selectedAdditionalServicesSnapshot,
+            },
+            pricingOverrides: pricingOverridesSnapshot,
+            advisor: {
+              id: userProfile.id,
+              name: advisorSnapshot.name || advisorName,
+              phone: advisorSnapshot.phone || advisorPhone,
+              email: advisorSnapshot.email || advisorEmail,
+            },
+          },
+        };
+
+        const { data: savedOffer, error: offerError } = await supabase
+          .from("client_offers")
+          .insert(offerPayload)
+          .select("id, offer_public_id")
+          .single();
+
+        if (offerError || !savedOffer) {
+          throw new Error(
+            offerError?.message || "Nie udało się zapisać oferty offline w CRM"
+          );
+        }
+
+        const res = await fetch("/api/send-offer", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            clientEmail: item.clientEmail,
+            sendMode: item.sendMode,
+            advisor: {
+              id: userProfile.id,
+              name: advisorSnapshot.name || advisorName,
+              phone: advisorSnapshot.phone || advisorPhone,
+              email: advisorSnapshot.email || advisorEmail,
+              role: advisorSnapshot.role || currentUserRole,
+            },
+            advisorName: advisorSnapshot.name || advisorName,
+            advisorPhone: advisorSnapshot.phone || advisorPhone,
+            advisorEmail: advisorSnapshot.email || advisorEmail,
+            offerType: queuedResult.offerType,
+            pvPowerKw: queuedResult.pvPowerKw,
+            panelName: snapshot.panelName || snapshot.panelModel,
+            panelModel: snapshot.panelModel,
+            panelCount: Number(snapshot.panelCount || 0),
+            panelPowerWp: Number(snapshot.panelPowerWp || 0),
+            inverter: queuedResult.inverter,
+            inverterType: getSelectedInverterType(queuedResult.inverter),
+            energyStorage: queuedResult.energyStorage,
+            finalNet: queuedResult.finalNet,
+            finalGross: queuedResult.finalGross,
+            vatRate: queuedResult.vatRate,
+            subsidyAllocation: queuedResult.subsidyAllocation || null,
+            subsidyTotal: queuedResult.subsidyAllocation?.total || 0,
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error("Nie udało się wysłać zaległej oferty mailowej");
+        }
+
+        const mailActivityDescription = [
+          `Wysłano zaległą ofertę mailową z kolejki offline kalkulatora.`,
+          savedOffer?.offer_public_id ? `OfferID: ${savedOffer.offer_public_id}` : `OfferID: ${savedOffer.id}`,
+          `Odbiorca: ${item.clientEmail}`,
+          !snapshot.selectedClientEmail && snapshot.typedClientEmail
+            ? "E-mail został automatycznie zapisany na karcie klienta."
+            : null,
+          "",
+          item.offerText,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const { error: activityError } = await supabase
+          .from("client_activities")
+          .insert({
+            client_id: item.clientId,
+            created_by: userProfile.id,
+            activity_type: "email",
+            status: "wyslano",
+            description: mailActivityDescription,
+          });
+
+        if (activityError) {
+          throw new Error(
+            `Oferta offline została wysłana, ale nie udało się zapisać aktywności CRM: ${activityError.message}`
+          );
+        }
+
+        const nextQueueLength = removeOfflineOfferFromQueue(item.id);
+        setQueuedOfferCount(nextQueueLength);
+      }
+
+      setEmailStatus("Zaległe oferty offline zostały zsynchronizowane.");
+    } catch (error) {
+      console.error("Błąd synchronizacji ofert offline", error);
+      setEmailStatus(
+        error instanceof Error
+          ? `Błąd synchronizacji ofert offline: ${error.message}`
+          : "Błąd synchronizacji ofert offline"
+      );
+    } finally {
+      setSyncingOfflineOffers(false);
+      setQueuedOfferCount(readOfflineOfferQueue().length);
+    }
+  }
+
+  useEffect(() => {
+    if (isOffline || queuedOfferCount === 0 || !userProfile?.id) {
+      return;
+    }
+
+    void syncOfflineOfferQueue();
+  }, [isOffline, queuedOfferCount, userProfile?.id]);
+
 
 
   return (
@@ -1221,22 +1443,22 @@ if (!selectedClientEmail && typedClientEmail) {
       <div className="mx-auto max-w-7xl space-y-6">
 
         {(isOffline || queuedOfferCount > 0) && (
-  <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-    <p className="font-semibold">
-      {isOffline ? "Tryb offline kalkulatora" : "Kolejka ofert offline"}
-    </p>
-    <p className="mt-1">
-      {isOffline
-        ? "Korzystasz z klientów zapisanych wcześniej w pamięci tego urządzenia. Wysyłka oferty zostanie dodana do kolejki offline."
-        : "Masz oczekujące oferty zapisane offline."}
-    </p>
-    {queuedOfferCount > 0 && (
-      <p className="mt-2 font-medium">
-        Oczekujące oferty do synchronizacji: {queuedOfferCount}
-      </p>
-    )}
-  </div>
-)}
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">
+              {isOffline ? "Tryb offline kalkulatora" : "Kolejka ofert offline"}
+            </p>
+            <p className="mt-1">
+              {isOffline
+                ? "Korzystasz z klientów zapisanych wcześniej w pamięci tego urządzenia. Wysyłka oferty zostanie dodana do kolejki offline."
+                : "Masz oczekujące oferty zapisane offline."}
+            </p>
+            {queuedOfferCount > 0 && (
+              <p className="mt-2 font-medium">
+                Oczekujące oferty do synchronizacji: {queuedOfferCount}
+              </p>
+            )}
+          </div>
+        )}
 
         {canSeePricingPanel && showAdminPanel && (
           <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
