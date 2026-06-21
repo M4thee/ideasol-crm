@@ -1067,14 +1067,12 @@ function ClientsPageContent() {
       assigningClient.full_name || assigningClient.company_name || "Nowy klient";
     const clientCity = assigningClient.city || "Brak miejscowości";
 
-    const { error: notificationError } = await supabase
-      .from("notifications")
-      .insert({
-        user_id: selectedSellerId,
-        title: "Przypisano Ci nowego klienta",
-        body: `${clientName}, ${clientCity}`,
-        client_id: assigningClient.id,
-      });
+    const { error: notificationError } = await supabase.rpc("create_notification", {
+      p_user_id: selectedSellerId,
+      p_title: "Przypisano Ci nowego klienta",
+      p_body: `${clientName}, ${clientCity}`,
+      p_client_id: assigningClient.id,
+    });
 
     if (notificationError) {
       console.error("Błąd tworzenia powiadomienia:", {
