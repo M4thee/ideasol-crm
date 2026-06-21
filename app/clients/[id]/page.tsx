@@ -341,7 +341,25 @@ export default function ClientPage() {
       created_by_user: createdByUser,
     };
 
-    if (role === "seller" && clientData.assigned_user_id !== user.id) {
+    const normalizedRole = String(role || "seller").toLowerCase();
+    const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
+    let canAccessClient = canViewAllClients || clientData.assigned_user_id === user.id;
+
+    if (!canAccessClient && normalizedRole === "manager") {
+      const { data: teamMembers, error: teamError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", user.id);
+
+      if (teamError) {
+        console.error("Błąd ładowania zespołu managera przy dostępie do klienta:", teamError);
+      }
+
+      const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
+      canAccessClient = !!clientData.assigned_user_id && teamUserIds.includes(clientData.assigned_user_id);
+    }
+
+    if (!canAccessClient) {
       setClient(null);
       setEvents([]);
       setSales([]);

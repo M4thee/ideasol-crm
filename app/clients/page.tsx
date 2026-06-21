@@ -446,57 +446,57 @@ function ClientsPageContent() {
   }
 
   function normalizeTagFilterValue(value: string | null | undefined) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "");
-}
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "");
+  }
 
   function clientMatchesSelectedTags(client: Client) {
-  if (selectedTagIds.length === 0) return true;
+    if (selectedTagIds.length === 0) return true;
 
-  const normalizedSelectedTagIds = selectedTagIds.map((tagId) => tagId.trim());
+    const normalizedSelectedTagIds = selectedTagIds.map((tagId) => tagId.trim());
 
-  const selectedTagNames = availableTags
-    .filter((tag) => normalizedSelectedTagIds.includes(tag.id))
-    .map((tag) => normalizeTagFilterValue(tag.name))
-    .filter(Boolean);
+    const selectedTagNames = availableTags
+      .filter((tag) => normalizedSelectedTagIds.includes(tag.id))
+      .map((tag) => normalizeTagFilterValue(tag.name))
+      .filter(Boolean);
 
-  const clientTagIds = [
-    ...(client.tag_ids || []),
-    ...(client.tags || []).map((tag) => tag.id),
-  ].map((tagId) => tagId.trim());
+    const clientTagIds = [
+      ...(client.tag_ids || []),
+      ...(client.tags || []).map((tag) => tag.id),
+    ].map((tagId) => tagId.trim());
 
-  const clientTagNames = (client.tags || [])
-    .map((tag) => normalizeTagFilterValue(tag.name))
-    .filter(Boolean);
+    const clientTagNames = (client.tags || [])
+      .map((tag) => normalizeTagFilterValue(tag.name))
+      .filter(Boolean);
 
-  const clientLeadSource = normalizeTagFilterValue(client.lead_source);
+    const clientLeadSource = normalizeTagFilterValue(client.lead_source);
 
-  const matchesLinkedTag = normalizedSelectedTagIds.some((selectedTagId) =>
-    clientTagIds.includes(selectedTagId)
-  );
-
-  const matchesTagName = selectedTagNames.some((selectedTagName) =>
-    clientTagNames.some(
-      (clientTagName) =>
-        selectedTagName === clientTagName ||
-        clientTagName.includes(selectedTagName) ||
-        selectedTagName.includes(clientTagName)
-    )
-  );
-
-  const matchesLeadSource =
-    clientLeadSource.length > 0 &&
-    selectedTagNames.some(
-      (selectedTagName) =>
-        selectedTagName === clientLeadSource ||
-        clientLeadSource.includes(selectedTagName) ||
-        selectedTagName.includes(clientLeadSource)
+    const matchesLinkedTag = normalizedSelectedTagIds.some((selectedTagId) =>
+      clientTagIds.includes(selectedTagId)
     );
 
-  return matchesLinkedTag || matchesTagName || matchesLeadSource;
-}
+    const matchesTagName = selectedTagNames.some((selectedTagName) =>
+      clientTagNames.some(
+        (clientTagName) =>
+          selectedTagName === clientTagName ||
+          clientTagName.includes(selectedTagName) ||
+          selectedTagName.includes(clientTagName)
+      )
+    );
+
+    const matchesLeadSource =
+      clientLeadSource.length > 0 &&
+      selectedTagNames.some(
+        (selectedTagName) =>
+          selectedTagName === clientLeadSource ||
+          clientLeadSource.includes(selectedTagName) ||
+          selectedTagName.includes(clientLeadSource)
+      );
+
+    return matchesLinkedTag || matchesTagName || matchesLeadSource;
+  }
   function getClientTypeLabel(client: Client) {
     return client.client_type || (client.company_name ? "B2B" : "B2C");
   }
@@ -563,6 +563,9 @@ function ClientsPageContent() {
   async function loadClients(userId = currentUserId, role = currentUserRole) {
     setLoading(true);
 
+    const normalizedRole = String(role || "seller").toLowerCase();
+    const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
+
     let query = supabase
       .from("clients")
       .select(
@@ -571,26 +574,28 @@ function ClientsPageContent() {
       .order("created_at", { ascending: false })
       .limit(500);
 
-    if (role === "seller" && userId) {
-      query = query.eq("assigned_user_id", userId);
-    }
+    if (!canViewAllClients) {
+      if (!userId) {
+        query = query.eq("assigned_user_id", "__no_user__");
+      } else if (normalizedRole === "manager") {
+        const { data: teamMembers, error: teamError } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("manager_id", userId);
 
-    if (role === "manager" && userId) {
-      const { data: teamMembers, error: teamError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("manager_id", userId);
+        if (teamError) {
+          console.error("Błąd ładowania zespołu managera:", teamError);
+        }
 
-      if (teamError) {
-        console.error("Błąd ładowania zespołu managera:", teamError);
+        const allowedUserIds = [
+          userId,
+          ...((teamMembers || []).map((item: { id: string }) => item.id)),
+        ];
+
+        query = query.in("assigned_user_id", allowedUserIds);
+      } else {
+        query = query.eq("assigned_user_id", userId);
       }
-
-      const allowedUserIds = [
-        userId,
-        ...((teamMembers || []).map((item: { id: string }) => item.id)),
-      ];
-
-      query = query.in("assigned_user_id", allowedUserIds);
     }
 
     const { data, error } = await query;
@@ -998,10 +1003,10 @@ function ClientsPageContent() {
 
       alert(
         `Nie udało się dodać klienta.\n\n` +
-          `Message: ${error.message || "brak"}\n` +
-          `Details: ${error.details || "brak"}\n` +
-          `Hint: ${error.hint || "brak"}\n` +
-          `Code: ${error.code || "brak"}`
+        `Message: ${error.message || "brak"}\n` +
+        `Details: ${error.details || "brak"}\n` +
+        `Hint: ${error.hint || "brak"}\n` +
+        `Code: ${error.code || "brak"}`
       );
 
       setSavingClient(false);
@@ -1290,7 +1295,7 @@ function ClientsPageContent() {
 
     const confirmed = window.confirm(
       `Czy na pewno chcesz zanonimizować kontakt: ${clientName}?\n\n` +
-        "Ta operacja usunie dane osobowe i kontaktowe oraz ustawi status Utracony."
+      "Ta operacja usunie dane osobowe i kontaktowe oraz ustawi status Utracony."
     );
 
     if (!confirmed) return;
@@ -1329,23 +1334,23 @@ function ClientsPageContent() {
       currentClients.map((currentClient) =>
         currentClient.id === client.id
           ? {
-              ...currentClient,
-              full_name: maskedFullName,
-              company_name: maskedCompanyName,
-              phone: null,
-              email: null,
-              city: null,
-              postal_code: null,
-              street: null,
-              building_number: null,
-              province: null,
-              phone_country_code: null,
-              pesel: null,
-              nip: null,
-              contact_person: null,
-              contact_phone: null,
-              status: "Utracony",
-            }
+            ...currentClient,
+            full_name: maskedFullName,
+            company_name: maskedCompanyName,
+            phone: null,
+            email: null,
+            city: null,
+            postal_code: null,
+            street: null,
+            building_number: null,
+            province: null,
+            phone_country_code: null,
+            pesel: null,
+            nip: null,
+            contact_person: null,
+            contact_phone: null,
+            status: "Utracony",
+          }
           : currentClient
       )
     );
@@ -1535,11 +1540,10 @@ function ClientsPageContent() {
                       key={status}
                       type="button"
                       onClick={() => setStatusFilter(status)}
-                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${
-                        statusFilter === status
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${statusFilter === status
                           ? "bg-slate-900 text-white"
                           : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }`}
+                        }`}
                     >
                       {status}
                     </button>
@@ -1557,17 +1561,16 @@ function ClientsPageContent() {
                       key={subStatus}
                       type="button"
                       onClick={() => setSubStatusFilter(subStatus)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                        subStatusFilter === subStatus
+                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${subStatusFilter === subStatus
                           ? "bg-slate-800 text-white"
                           : subStatus === "Zaległe"
-                          ? "bg-[#FBBCD0] text-[#700729] hover:bg-[#f7a8c0]"
-                          : subStatus === "W kontakcie"
-                          ? "bg-[#CCEBE6] text-slate-800 hover:bg-[#b8e0da]"
-                          : subStatus === "Niezainteresowani"
-                          ? "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
+                            ? "bg-[#FBBCD0] text-[#700729] hover:bg-[#f7a8c0]"
+                            : subStatus === "W kontakcie"
+                              ? "bg-[#CCEBE6] text-slate-800 hover:bg-[#b8e0da]"
+                              : subStatus === "Niezainteresowani"
+                                ? "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
                     >
                       {subStatus}
                     </button>
@@ -1830,156 +1833,154 @@ function ClientsPageContent() {
             <div>
               <div className="overflow-x-auto">
                 <table className="min-w-[900px] w-full table-fixed text-xs">
-                <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="w-[5%] px-4 py-2.5 text-left font-semibold">
-                      <input
-                        type="checkbox"
-                        checked={
-                          visibleClients.length > 0 &&
-                          visibleClients.every((client) => selectedClientIds.includes(client.id))
-                        }
-                        onChange={toggleAllVisibleClients}
-                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                    </th>
-                    <th className="w-[24%] px-4 py-2.5 text-left font-semibold">Klient</th>
-                    <th className="w-[13%] px-4 py-2.5 text-left font-semibold">Status</th>
-                    <th className="w-[17%] px-4 py-2.5 text-left font-semibold">Doradca</th>
-                    <th className="w-[15%] px-4 py-2.5 text-left font-semibold">Miasto</th>
-                    <th className="w-[14%] px-4 py-2.5 text-left font-semibold">Województwo</th>
-                    <th className="w-[12%] px-4 py-2.5 text-right font-semibold">Akcje</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {visibleClients.map((client) => {
-                    const isNotInterested =
-                      isNotInterestedStatus(client.status) ||
-                      isNotInterestedStatus(client.last_contact_status);
-                    const contactBadge = client.contact_followup_status;
-                    const rowBackgroundClass = isNotInterested
-                      ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
-                      : contactBadge === "overdue"
-                      ? "bg-[#FBBCD0] hover:bg-[#FBBCD0]"
-                      : contactBadge === "active"
-                      ? "bg-[#CCEBE6] hover:bg-[#CCEBE6]"
-                      : "hover:bg-slate-50";
-
-                    return (
-                    <tr
-                      key={client.id}
-                      className={`border-b border-slate-100 transition ${rowBackgroundClass}`}
-                    >
-                      <td className="px-4 py-2.5">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="w-[5%] px-4 py-2.5 text-left font-semibold">
                         <input
                           type="checkbox"
-                          checked={selectedClientIds.includes(client.id)}
-                          onChange={() => toggleSelectedClient(client.id)}
+                          checked={
+                            visibleClients.length > 0 &&
+                            visibleClients.every((client) => selectedClientIds.includes(client.id))
+                          }
+                          onChange={toggleAllVisibleClients}
                           className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                         />
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span
-                            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${getClientTypeClass(client)}`}
-                          >
-                            {getClientTypeLabel(client)}
-                          </span>
-
-                          <div className="min-w-0">
-                            <div
-                              className={`truncate font-semibold ${
-                                isNotInterested ? "text-slate-400" : "text-slate-900"
-                              }`}
-                            >
-                              {client.full_name || client.company_name || "Brak nazwy"}
-                            </div>
-
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1.5">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                              statusStyles[client.status || ""] ||
-                              "bg-slate-100 text-slate-700"
-                            }`}
-                          >
-                            {client.status || "Brak statusu"}
-                          </span>
-
-                          {isNotInterested && (
-                            <span className="inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-500">
-                              Niezainteresowany
-                            </span>
-                          )}
-
-                          {!isNotInterested && contactBadge === "active" && (
-                            <span className="inline-flex rounded-full bg-[#73C7BA] px-2.5 py-0.5 text-[11px] font-bold text-slate-900">
-                              W kontakcie
-                            </span>
-                          )}
-
-                          {!isNotInterested && contactBadge === "overdue" && (
-                            <span className="inline-flex rounded-full bg-[#700729] px-2.5 py-0.5 text-[11px] font-bold text-white">
-                              Zaległy kontakt
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="truncate px-4 py-2.5 text-slate-700">
-                        {getAdvisorName(client)}
-                      </td>
-
-
-                      <td className="truncate px-4 py-2.5 text-slate-700">
-                        {client.city || "—"}
-                      </td>
-
-                      <td className="truncate px-4 py-2.5 text-slate-700">
-                        {client.province || "—"}
-                      </td>
-
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex justify-end gap-2 whitespace-nowrap">
-                          {canAssignClients() && (
-                            <button
-                              type="button"
-                              onClick={() => openAssignModal(client)}
-                              className="inline-flex rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
-                            >
-                              Przypisz
-                            </button>
-                          )}
-
-                          {canAnonymizeClients() && (
-                            <button
-                              type="button"
-                              onClick={() => anonymizeClient(client)}
-                              className="inline-flex rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700 hover:bg-red-100"
-                            >
-                              Anonimizuj
-                            </button>
-                          )}
-
-                          <Link
-                            href={`/clients/${client.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
-                          >
-                            Otwórz
-                          </Link>
-                        </div>
-                      </td>
+                      </th>
+                      <th className="w-[24%] px-4 py-2.5 text-left font-semibold">Klient</th>
+                      <th className="w-[13%] px-4 py-2.5 text-left font-semibold">Status</th>
+                      <th className="w-[17%] px-4 py-2.5 text-left font-semibold">Doradca</th>
+                      <th className="w-[15%] px-4 py-2.5 text-left font-semibold">Miasto</th>
+                      <th className="w-[14%] px-4 py-2.5 text-left font-semibold">Województwo</th>
+                      <th className="w-[12%] px-4 py-2.5 text-right font-semibold">Akcje</th>
                     </tr>
-                  );
-                })}
-                </tbody>
+                  </thead>
+
+                  <tbody>
+                    {visibleClients.map((client) => {
+                      const isNotInterested =
+                        isNotInterestedStatus(client.status) ||
+                        isNotInterestedStatus(client.last_contact_status);
+                      const contactBadge = client.contact_followup_status;
+                      const rowBackgroundClass = isNotInterested
+                        ? "bg-slate-100 text-slate-400 hover:bg-slate-100"
+                        : contactBadge === "overdue"
+                          ? "bg-[#FBBCD0] hover:bg-[#FBBCD0]"
+                          : contactBadge === "active"
+                            ? "bg-[#CCEBE6] hover:bg-[#CCEBE6]"
+                            : "hover:bg-slate-50";
+
+                      return (
+                        <tr
+                          key={client.id}
+                          className={`border-b border-slate-100 transition ${rowBackgroundClass}`}
+                        >
+                          <td className="px-4 py-2.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedClientIds.includes(client.id)}
+                              onChange={() => toggleSelectedClient(client.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span
+                                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${getClientTypeClass(client)}`}
+                              >
+                                {getClientTypeLabel(client)}
+                              </span>
+
+                              <div className="min-w-0">
+                                <div
+                                  className={`truncate font-semibold ${isNotInterested ? "text-slate-400" : "text-slate-900"
+                                    }`}
+                                >
+                                  {client.full_name || client.company_name || "Brak nazwy"}
+                                </div>
+
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-2.5">
+                            <div className="flex flex-wrap gap-1.5">
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${statusStyles[client.status || ""] ||
+                                  "bg-slate-100 text-slate-700"
+                                  }`}
+                              >
+                                {client.status || "Brak statusu"}
+                              </span>
+
+                              {isNotInterested && (
+                                <span className="inline-flex rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-500">
+                                  Niezainteresowany
+                                </span>
+                              )}
+
+                              {!isNotInterested && contactBadge === "active" && (
+                                <span className="inline-flex rounded-full bg-[#73C7BA] px-2.5 py-0.5 text-[11px] font-bold text-slate-900">
+                                  W kontakcie
+                                </span>
+                              )}
+
+                              {!isNotInterested && contactBadge === "overdue" && (
+                                <span className="inline-flex rounded-full bg-[#700729] px-2.5 py-0.5 text-[11px] font-bold text-white">
+                                  Zaległy kontakt
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="truncate px-4 py-2.5 text-slate-700">
+                            {getAdvisorName(client)}
+                          </td>
+
+
+                          <td className="truncate px-4 py-2.5 text-slate-700">
+                            {client.city || "—"}
+                          </td>
+
+                          <td className="truncate px-4 py-2.5 text-slate-700">
+                            {client.province || "—"}
+                          </td>
+
+                          <td className="px-4 py-2.5 text-right">
+                            <div className="flex justify-end gap-2 whitespace-nowrap">
+                              {canAssignClients() && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAssignModal(client)}
+                                  className="inline-flex rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                                >
+                                  Przypisz
+                                </button>
+                              )}
+
+                              {canAnonymizeClients() && (
+                                <button
+                                  type="button"
+                                  onClick={() => anonymizeClient(client)}
+                                  className="inline-flex rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                                >
+                                  Anonimizuj
+                                </button>
+                              )}
+
+                              <Link
+                                href={`/clients/${client.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
+                              >
+                                Otwórz
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
                 </table>
               </div>
               <div className="border-t border-slate-100 px-4 py-3 text-center text-xs font-semibold text-slate-400">
@@ -2116,11 +2117,10 @@ function ClientsPageContent() {
               <button
                 type="button"
                 onClick={() => setClientType("B2C")}
-                className={`rounded-xl px-5 py-3 text-sm font-bold transition ${
-                  clientType === "B2C"
+                className={`rounded-xl px-5 py-3 text-sm font-bold transition ${clientType === "B2C"
                     ? "bg-slate-900 text-white"
                     : "bg-slate-100 text-slate-700"
-                }`}
+                  }`}
               >
                 B2C
               </button>
@@ -2128,11 +2128,10 @@ function ClientsPageContent() {
               <button
                 type="button"
                 onClick={() => setClientType("B2B")}
-                className={`rounded-xl px-5 py-3 text-sm font-bold transition ${
-                  clientType === "B2B"
+                className={`rounded-xl px-5 py-3 text-sm font-bold transition ${clientType === "B2B"
                     ? "bg-slate-900 text-white"
                     : "bg-slate-100 text-slate-700"
-                }`}
+                  }`}
               >
                 B2B
               </button>
