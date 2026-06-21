@@ -76,6 +76,28 @@ const SESSION_DURATION_REMEMBER_MS = 12 * 60 * 60 * 1000;
 
 const SESSION_DURATION_SHORT_MS = 30 * 60 * 1000;
 
+function getAuthErrorMessage(error: unknown) {
+  if (!error) return "";
+
+  if (error instanceof Error) return error.message;
+
+  if (typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message || "");
+  }
+
+  return String(error);
+}
+
+function isInvalidRefreshTokenError(error: unknown) {
+  const message = getAuthErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes("invalid refresh token") ||
+    message.includes("refresh token not found") ||
+    message.includes("refresh token")
+  );
+}
+
 type UserRole = "admin" | "owner" | "manager" | "seller" | "cc";
 
 export default function Home() {
@@ -222,6 +244,25 @@ export default function Home() {
     return true;
   }
 
+  async function clearInvalidRefreshTokenSession() {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(AUTH_EXPIRY_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_REMEMBER_STORAGE_KEY);
+    }
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (signOutError) {
+      console.warn("Nie udało się wyczyścić lokalnej sesji Supabase", signOutError);
+    }
+
+    setCurrentUser(null);
+    setCurrentUserRole("seller");
+    setClients([]);
+    setSelectedClient(null);
+    setError("Sesja wygasła. Zaloguj się ponownie.");
+  }
+
 
   const [showAddClientModal, setShowAddClientModal] = useState(false);
 
@@ -266,6 +307,15 @@ export default function Home() {
 
         if (sessionError) {
           console.error("Błąd pobierania sesji", sessionError);
+
+          if (isInvalidRefreshTokenError(sessionError)) {
+            await clearInvalidRefreshTokenSession();
+
+            if (!mounted) return;
+
+            setAuthLoading(false);
+            return;
+          }
         }
 
         if (!mounted) return;
@@ -328,6 +378,10 @@ export default function Home() {
         }
       } catch (authError) {
         console.error("Błąd sprawdzania sesji", authError);
+
+        if (isInvalidRefreshTokenError(authError)) {
+          await clearInvalidRefreshTokenSession();
+        }
 
         if (!mounted) return;
 
