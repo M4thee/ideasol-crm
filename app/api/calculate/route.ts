@@ -280,41 +280,41 @@ async function loadCatalogFromSupabase() {
 
   const panels = panelsFromDb.length
     ? Object.fromEntries(
-        panelsFromDb.map((panel: any) => [
-          panel.code,
-          {
-            name: panel.name,
-            displayName: panel.display_name || panel.name,
-            powerWp: Number(panel.power_wp),
-            priceNet: Number(panel.price_net),
-          },
-        ])
-      )
+      panelsFromDb.map((panel: any) => [
+        panel.code,
+        {
+          name: panel.name,
+          displayName: panel.display_name || panel.name,
+          powerWp: Number(panel.power_wp),
+          priceNet: Number(panel.price_net),
+        },
+      ])
+    )
     : FALLBACK_PANELS;
 
   const inverters = invertersFromDb.length
     ? invertersFromDb.map((inverter: any) => ({
-        name: inverter.name,
-        displayName: inverter.display_name || inverter.name,
-        type: inverter.type,
-        maxPvKw: Number(inverter.max_pv_kw),
-        priceNet: Number(inverter.price_net),
-      }))
+      name: inverter.name,
+      displayName: inverter.display_name || inverter.name,
+      type: inverter.type,
+      maxPvKw: Number(inverter.max_pv_kw),
+      priceNet: Number(inverter.price_net),
+    }))
     : FALLBACK_INVERTERS;
 
   const storages = storagesFromDb.length
     ? Object.fromEntries(
-        storagesFromDb.map((storage: any) => [
-          storage.code,
-          {
-            name: storage.name,
-            displayName: storage.display_name || storage.name,
-            capacityKwh: Number(storage.capacity_kwh),
-            priceNet: Number(storage.price_net),
-            installationNet: Number(storage.installation_net),
-          },
-        ])
-      )
+      storagesFromDb.map((storage: any) => [
+        storage.code,
+        {
+          name: storage.name,
+          displayName: storage.display_name || storage.name,
+          capacityKwh: Number(storage.capacity_kwh),
+          priceNet: Number(storage.price_net),
+          installationNet: Number(storage.installation_net),
+        },
+      ])
+    )
     : FALLBACK_STORAGES;
 
   if (!storages.none) {
@@ -538,7 +538,9 @@ export async function POST(request: Request) {
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
       .from("pricing_settings")
-      .select("*")
+      .select(
+        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent"
+      )
       .eq("id", 1)
       .single(),
     loadCatalogFromSupabase(),
@@ -552,29 +554,29 @@ export async function POST(request: Request) {
       ...(currentOverrides.installation || {}),
       pvPerKwNet: Number(
         settingsRow?.installation_pv_per_kw ??
-          currentOverrides?.installation?.pvPerKwNet ??
-          500
+        currentOverrides?.installation?.pvPerKwNet ??
+        500
       ),
     },
     placeholders: {
       ...(currentOverrides.placeholders || {}),
       protections: Number(
         settingsRow?.protections_cost ??
-          currentOverrides?.placeholders?.protections ??
-          1500
+        currentOverrides?.placeholders?.protections ??
+        1500
       ),
       wiring: Number(
         settingsRow?.wiring_cost ?? currentOverrides?.placeholders?.wiring ?? 800
       ),
       transport: Number(
         settingsRow?.transport_cost ??
-          currentOverrides?.placeholders?.transport ??
-          500
+        currentOverrides?.placeholders?.transport ??
+        500
       ),
       documentation: Number(
         settingsRow?.documentation_cost ??
-          currentOverrides?.placeholders?.documentation ??
-          700
+        currentOverrides?.placeholders?.documentation ??
+        700
       ),
       ems: Number(
         settingsRow?.ems_cost ?? currentOverrides?.placeholders?.ems ?? 1200
@@ -594,44 +596,46 @@ export async function POST(request: Request) {
 
       ownersCount: Number(
         settingsRow?.owners_count ??
-          currentOverrides?.margins?.ownersCount ??
-          3
+        currentOverrides?.margins?.ownersCount ??
+        3
       ),
 
       pvSmallPerKw: Number(
         settingsRow?.pv_small_per_kw ??
-          currentOverrides?.margins?.pvSmallPerKw ??
-          250
+        currentOverrides?.margins?.pvSmallPerKw ??
+        250
       ),
 
       pvSmallFixed: Number(
         settingsRow?.pv_small_fixed ??
-          currentOverrides?.margins?.pvSmallFixed ??
-          500
+        currentOverrides?.margins?.pvSmallFixed ??
+        500
       ),
 
       pvLargePerKw: Number(
         settingsRow?.pv_large_per_kw ??
-          currentOverrides?.margins?.pvLargePerKw ??
-          150
+        currentOverrides?.margins?.pvLargePerKw ??
+        150
       ),
 
       pvLargeFixed: Number(
         settingsRow?.pv_large_fixed ??
-          currentOverrides?.margins?.pvLargeFixed ??
-          700
+        currentOverrides?.margins?.pvLargeFixed ??
+        700
       ),
 
       storagePerOwner: Number(
         settingsRow?.storage_per_owner ??
-          currentOverrides?.margins?.storagePerOwner ??
-          500
+        currentOverrides?.margins?.storagePerOwner ??
+        500
       ),
 
+      // Historyczna nazwa kolumny w bazie to manager_fee_percent,
+      // ale w kalkulatorze używamy tej wartości jako stałej kwoty netto manager fee.
       managerFeeNet: Number(
         settingsRow?.manager_fee_percent ??
-          currentOverrides?.margins?.managerFeeNet ??
-          500
+        currentOverrides?.margins?.managerFeeNet ??
+        500
       ),
     },
   };
@@ -764,43 +768,43 @@ export async function POST(request: Request) {
 
   const marketingNet = pricing.margins.marketingNet;
 
-const shouldApplyManagerFee = Boolean(
-  currentUser?.role === "seller" && currentUser?.manager_id
-);
+  const shouldApplyManagerFee = Boolean(
+    currentUser?.role === "seller" && currentUser?.manager_id
+  );
 
-let managerFeeMultiplier = 0;
+  let managerFeeMultiplier = 0;
 
-if (shouldApplyManagerFee) {
-  if (hasPv) {
-    managerFeeMultiplier += 1;
+  if (shouldApplyManagerFee) {
+    if (hasPv) {
+      managerFeeMultiplier += 1;
+    }
+
+    if (hasStorageSelected) {
+      managerFeeMultiplier += 1;
+    }
   }
 
-  if (hasStorageSelected) {
-    managerFeeMultiplier += 1;
-  }
-}
+  const managerFeeNet = Math.round(
+    pricing.margins.managerFeeNet * managerFeeMultiplier
+  );
 
-const managerFeeNet = Math.round(
-  pricing.margins.managerFeeNet * managerFeeMultiplier
-);
-
-const finalNet = Math.round(
-  purchaseCostNet +
+  const finalNet = Math.round(
+    purchaseCostNet +
     grossManagerMarginsBeforeOperatorNet +
     sellerMarkupNet +
     marketingNet +
     managerFeeNet
-);
+  );
 
-const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
-const sellerWarrantyFeeNet = Math.round(
-  sellerMarkupNet * (operatorPercent / 100)
-);
+  const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
+  const sellerWarrantyFeeNet = Math.round(
+    sellerMarkupNet * (operatorPercent / 100)
+  );
 
-const sellerCommissionNet = Math.max(
-  0,
-  sellerMarkupNet
-);
+  const sellerCommissionNet = Math.max(
+    0,
+    sellerMarkupNet
+  );
 
 
   const managerWarrantyFeeNet = Math.max(0, operatorFeeNet - sellerWarrantyFeeNet);
@@ -824,7 +828,7 @@ const sellerCommissionNet = Math.max(
 
   const companyMargin = Math.round(
     managerMarginAfterOperatorTotalNet +
-      managerFeeNet
+    managerFeeNet
   );
 
   const subsidyProgramCap = billingSystem === "net_billing" ? 16000 : 8000;
@@ -855,10 +859,10 @@ const sellerCommissionNet = Math.max(
 
   const storageSubsidy = hasStorageForSubsidy
     ? Math.min(
-        optimizedStorageNet * 0.3,
-        storageCapByKwh,
-        subsidyProgramCap
-      )
+      optimizedStorageNet * 0.3,
+      storageCapByKwh,
+      subsidyProgramCap
+    )
     : 0;
 
   const emsBonus = hasStorageForSubsidy && shouldAddEms
@@ -929,9 +933,9 @@ const sellerCommissionNet = Math.max(
     existingPvPowerKw,
     basePriceNet: Math.round(
       purchaseCostNet +
-        grossManagerMarginsBeforeOperatorNet +
-        marketingNet +
-        managerFeeNet
+      grossManagerMarginsBeforeOperatorNet +
+      marketingNet +
+      managerFeeNet
     ),
     sellerMarkupNet,
     finalNet,
@@ -962,19 +966,19 @@ const sellerCommissionNet = Math.max(
       process.env.NODE_ENV === "development"
         ? true
         : currentUser?.role === "admin" ||
-          currentUser?.role === "owner",
+        currentUser?.role === "owner",
     breakdown: [
       ...(isStorageOnly
         ? [{ label: "Falownik", value: Math.round(inverterCostNet) }]
         : [
-            { label: "Panele", value: Math.round(panelsCostNet) },
-            { label: "Falownik", value: Math.round(inverterCostNet) },
-            { label: "Montaż PV", value: Math.round(pvInstallationNet) },
-            {
-              label: "Konstrukcja / dach / grunt",
-              value: Math.round(roofExtraNet),
-            },
-          ]),
+          { label: "Panele", value: Math.round(panelsCostNet) },
+          { label: "Falownik", value: Math.round(inverterCostNet) },
+          { label: "Montaż PV", value: Math.round(pvInstallationNet) },
+          {
+            label: "Konstrukcja / dach / grunt",
+            value: Math.round(roofExtraNet),
+          },
+        ]),
       { label: "Magazyn energii", value: Math.round(storage.priceNet) },
       { label: "Montaż ME", value: Math.round(storage.installationNet) },
       {
@@ -995,11 +999,11 @@ const sellerCommissionNet = Math.max(
       },
       ...(shouldAddEms
         ? [
-            {
-              label: "System EMS",
-              value: Math.round(emsNet),
-            },
-          ]
+          {
+            label: "System EMS",
+            value: Math.round(emsNet),
+          },
+        ]
         : []),
       ...additionalServices.map((service) => ({
         label: service.quantity > 1 ? `${service.name} x ${service.quantity}` : service.name,
