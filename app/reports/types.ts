@@ -263,3 +263,14 @@ export type BoardReportSummary = {
   revenueGross: number;
   conversionRate: number;
 };
+
+export type BoardAdvisorRankingRow = {
+  advisorId: string;
+  advisorName: string;
+  remoteContacts: number;
+  meetings: number;
+  offers: number;
+  sales: number;
+  revenueGross: number;
+  conversionRate: number;
+};

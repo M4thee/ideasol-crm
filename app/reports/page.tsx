@@ -8,6 +8,7 @@ import type {
   AdvisorDetailType,
   AdvisorReportSummary,
   AdvisorUserOption,
+  BoardAdvisorRankingRow,
   CalendarEventRow,
   CcUserSummary,
   CcReportSummary,
@@ -34,6 +35,7 @@ import {
   getConversationClientKey,
   getAllowedAdvisorUsers,
   getManagerTeamOptions,
+  getOfferOwnerId,
   getDateRangeBoundaries,
   getPresetRange,
   getPreviousDateRange,
@@ -109,6 +111,17 @@ const emptyFinancialSummary: FinancialSummary = {
   managerOwnSalesCommissionPayable: 0,
   salesCount: 0,
 };
+
+type BoardAdvisorRankingSortKey =
+  | "advisorName"
+  | "remoteContacts"
+  | "meetings"
+  | "offers"
+  | "sales"
+  | "revenueGross"
+  | "conversionRate";
+
+type BoardAdvisorRankingSortDirection = "asc" | "desc";
 
 
 function summarizeCcRows(
@@ -281,6 +294,9 @@ export default function ReportsPage() {
   const [boardOffersCount, setBoardOffersCount] = useState(0);
   const [boardSalesCount, setBoardSalesCount] = useState(0);
   const [boardRevenueGross, setBoardRevenueGross] = useState(0);
+  const [boardAdvisorRanking, setBoardAdvisorRanking] = useState<BoardAdvisorRankingRow[]>([]);
+  const [boardAdvisorRankingSortKey, setBoardAdvisorRankingSortKey] = useState<BoardAdvisorRankingSortKey>("sales");
+  const [boardAdvisorRankingSortDirection, setBoardAdvisorRankingSortDirection] = useState<BoardAdvisorRankingSortDirection>("desc");
   const [loadingBoardReport, setLoadingBoardReport] = useState(false);
   const [boardReportError, setBoardReportError] = useState("");
 
@@ -635,6 +651,20 @@ export default function ReportsPage() {
 
       if (clientsError) throw clientsError;
 
+      const { data: profileRows, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, display_name, email, role");
+
+      if (profilesError) throw profilesError;
+
+      const { data: activityRows, error: activitiesError } = await supabase
+        .from("client_activities")
+        .select("*")
+        .gte("created_at", currentRange.startIso)
+        .lte("created_at", currentRange.endIso);
+
+      if (activitiesError) throw activitiesError;
+
       const { data: calendarEventRows, error: calendarEventsError } = await supabase
         .from("calendar_events")
         .select("id, created_at, event_at, event_type, status, title")
@@ -643,9 +673,9 @@ export default function ReportsPage() {
 
       if (calendarEventsError) throw calendarEventsError;
 
-      const { count: offersCount, error: offersError } = await supabase
+      const { data: offerRows, error: offersError } = await supabase
         .from("client_offers")
-        .select("id", { count: "exact", head: true })
+        .select("*")
         .gte("created_at", currentRange.startIso)
         .lte("created_at", currentRange.endIso);
 
@@ -659,14 +689,76 @@ export default function ReportsPage() {
 
       if (salesError) throw salesError;
 
+      const boardProfiles = (profileRows || []) as ProfileRow[];
+      const boardActivities = (activityRows || []) as ActivityRow[];
       const boardCalendarEvents = (calendarEventRows || []) as CalendarEventRow[];
+      const boardOffers = (offerRows || []) as OfferRow[];
       const boardSales = (saleRows || []) as FinancialSaleRow[];
+
+      const rankingMap = new Map<string, BoardAdvisorRankingRow>();
+      const boardAdvisorProfiles = boardProfiles.filter((profile) => {
+        const role = normalizeText(profile.role);
+        return role === "seller" || role === "manager" || role === "owner" || role === "admin";
+      });
+
+      boardAdvisorProfiles.forEach((profile) => {
+        rankingMap.set(profile.id, {
+          advisorId: profile.id,
+          advisorName: profile.display_name || profile.email || "Nieznany doradca",
+          remoteContacts: 0,
+          meetings: 0,
+          offers: 0,
+          sales: 0,
+          revenueGross: 0,
+          conversionRate: 0,
+        });
+      });
+
+      boardActivities
+        .filter((row) => isPhoneActivity(row) || isEmailActivity(row) || isSmsActivity(row))
+        .forEach((row) => {
+          const ownerId = getActivityOwnerId(row);
+          const current = rankingMap.get(ownerId);
+          if (!current) return;
+          current.remoteContacts += 1;
+        });
+
+      boardCalendarEvents.filter(isMeetingCalendarEvent).forEach((event) => {
+        const ownerId = getCalendarEventOwnerId(event);
+        const current = rankingMap.get(ownerId);
+        if (!current) return;
+        current.meetings += 1;
+      });
+
+      boardOffers.forEach((offer) => {
+        const ownerId = getOfferOwnerId(offer);
+        const current = rankingMap.get(ownerId);
+        if (!current) return;
+        current.offers += 1;
+      });
+
+      boardSales.forEach((sale) => {
+        const ownerId = getSaleSellerId(sale);
+        const current = rankingMap.get(ownerId);
+        if (!current) return;
+        current.sales += 1;
+        current.revenueGross += getSaleRevenueGross(sale);
+      });
+
+      const rankingRows = Array.from(rankingMap.values())
+        .map((row) => ({
+          ...row,
+          conversionRate: row.remoteContacts > 0 ? Math.round((row.sales / row.remoteContacts) * 100) : 0,
+        }))
+        .filter((row) => row.remoteContacts > 0 || row.meetings > 0 || row.offers > 0 || row.sales > 0)
+        .sort((a, b) => b.sales - a.sales || b.revenueGross - a.revenueGross || b.remoteContacts - a.remoteContacts || a.advisorName.localeCompare(b.advisorName));
 
       setBoardNewLeads(clientsCount || 0);
       setBoardMeetingsCount(boardCalendarEvents.filter(isMeetingCalendarEvent).length);
-      setBoardOffersCount(offersCount || 0);
+      setBoardOffersCount(boardOffers.length);
       setBoardSalesCount(boardSales.length);
       setBoardRevenueGross(boardSales.reduce((sum, sale) => sum + getSaleRevenueGross(sale), 0));
+      setBoardAdvisorRanking(rankingRows);
     } catch (error) {
       console.error("Błąd ładowania raportu zarządu", error);
       setBoardReportError(error instanceof Error ? error.message : "Nie udało się załadować raportu zarządu.");
@@ -1097,6 +1189,44 @@ const dynamicBoardMetrics: MetricCard[] = [
     hint: "Sprzedaże / nowe leady",
   },
 ];
+
+const sortedBoardAdvisorRanking = useMemo(() => {
+  const directionMultiplier = boardAdvisorRankingSortDirection === "asc" ? 1 : -1;
+
+  return [...boardAdvisorRanking].sort((a, b) => {
+    const firstValue = a[boardAdvisorRankingSortKey];
+    const secondValue = b[boardAdvisorRankingSortKey];
+
+    let result = 0;
+
+    if (typeof firstValue === "string" || typeof secondValue === "string") {
+      result = String(firstValue || "").localeCompare(String(secondValue || ""), "pl");
+    } else {
+      result = Number(firstValue || 0) - Number(secondValue || 0);
+    }
+
+    if (result === 0) {
+      result = b.sales - a.sales || b.revenueGross - a.revenueGross || b.remoteContacts - a.remoteContacts || a.advisorName.localeCompare(b.advisorName, "pl");
+    }
+
+    return result * directionMultiplier;
+  });
+}, [boardAdvisorRanking, boardAdvisorRankingSortDirection, boardAdvisorRankingSortKey]);
+
+function handleBoardAdvisorRankingSort(key: BoardAdvisorRankingSortKey) {
+  if (boardAdvisorRankingSortKey === key) {
+    setBoardAdvisorRankingSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    return;
+  }
+
+  setBoardAdvisorRankingSortKey(key);
+  setBoardAdvisorRankingSortDirection(key === "advisorName" ? "asc" : "desc");
+}
+
+function getBoardAdvisorRankingSortIndicator(key: BoardAdvisorRankingSortKey) {
+  if (boardAdvisorRankingSortKey !== key) return "↕";
+  return boardAdvisorRankingSortDirection === "asc" ? "↑" : "↓";
+}
   const ccMetrics: MetricCard[] = [
     {
       label: "Telefony",
@@ -1632,7 +1762,110 @@ const dynamicBoardMetrics: MetricCard[] = [
                 {boardReportError}
               </div>
             ) : (
-              <MetricGrid metrics={dynamicBoardMetrics} />
+              <>
+                <MetricGrid metrics={dynamicBoardMetrics} />
+
+                <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-5 py-4">
+                    <h3 className="font-semibold text-slate-950">Ranking doradców</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Kontakty, spotkania, oferty, sprzedaże, obrót i konwersja w wybranym okresie.
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm">
+                      <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-5 py-3">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("advisorName")}
+                              className="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Doradca <span>{getBoardAdvisorRankingSortIndicator("advisorName")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("remoteContacts")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Kontakty <span>{getBoardAdvisorRankingSortIndicator("remoteContacts")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("meetings")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Spotkania <span>{getBoardAdvisorRankingSortIndicator("meetings")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("offers")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Oferty <span>{getBoardAdvisorRankingSortIndicator("offers")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("sales")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Sprzedaże <span>{getBoardAdvisorRankingSortIndicator("sales")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("revenueGross")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Obrót <span>{getBoardAdvisorRankingSortIndicator("revenueGross")}</span>
+                            </button>
+                          </th>
+                          <th className="px-5 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleBoardAdvisorRankingSort("conversionRate")}
+                              className="inline-flex items-center justify-end gap-1 font-semibold transition hover:text-slate-900"
+                            >
+                              Konwersja <span>{getBoardAdvisorRankingSortIndicator("conversionRate")}</span>
+                            </button>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {sortedBoardAdvisorRanking.length > 0 ? (
+                          sortedBoardAdvisorRanking.map((row) => (
+                            <tr key={row.advisorId} className="transition hover:bg-slate-50">
+                              <td className="px-5 py-4 font-semibold text-slate-900">{row.advisorName}</td>
+                              <td className="px-5 py-4 text-right text-slate-700">{row.remoteContacts}</td>
+                              <td className="px-5 py-4 text-right text-slate-700">{row.meetings}</td>
+                              <td className="px-5 py-4 text-right text-slate-700">{row.offers}</td>
+                              <td className="px-5 py-4 text-right font-semibold text-slate-900">{row.sales}</td>
+                              <td className="px-5 py-4 text-right font-semibold text-slate-900">{formatCurrency(row.revenueGross)}</td>
+                              <td className="px-5 py-4 text-right text-slate-700">{row.conversionRate}%</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td className="px-5 py-5 text-slate-500" colSpan={7}>
+                              Brak aktywności doradców w wybranym okresie.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
             )}
           </ReportSection>
         ) : null}

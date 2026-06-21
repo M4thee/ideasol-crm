@@ -582,22 +582,12 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
           return;
         }
 
-        console.log("HEADER SESSION USER:", {
-          id: session.user.id,
-          email: session.user.email,
-          metadata: session.user.user_metadata,
-        });
 
         let { data: profileData, error: profileError } = await supabase
           .from("profiles")
           .select("id, user_number, display_name, role, email")
           .eq("id", session.user.id)
           .maybeSingle();
-
-        console.log("HEADER PROFILE BY ID:", {
-          profileData,
-          profileError,
-        });
 
         if (!profileData && session.user.email) {
           const fallbackResponse = await supabase
@@ -608,11 +598,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
           profileData = fallbackResponse.data;
           profileError = fallbackResponse.error;
-
-          console.log("HEADER PROFILE BY EMAIL:", {
-            profileData,
-            profileError,
-          });
         }
 
         if (profileError) {

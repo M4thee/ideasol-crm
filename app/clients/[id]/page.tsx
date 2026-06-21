@@ -400,13 +400,6 @@ export default function ClientPage() {
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
 
-    console.log("Client notes loaded:", {
-      clientId,
-      count: notesData?.length || 0,
-      notesData,
-      notesError,
-    });
-
     if (notesError) {
       console.error("Błąd ładowania notatek klienta:", notesError);
       setNotes([]);
