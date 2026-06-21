@@ -150,6 +150,56 @@ type CrmClientOption = {
   [key: string]: unknown;
 };
 
+const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
+
+type CachedCrmClientsPayload = {
+  savedAt: string;
+  clients: CrmClientOption[];
+};
+
+function isCalculatorOnline() {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine;
+}
+
+function readCachedCrmClients() {
+  if (typeof window === "undefined") return [] as CrmClientOption[];
+
+  try {
+    const rawValue = window.localStorage.getItem(CRM_CLIENTS_CACHE_KEY);
+
+    if (!rawValue) {
+      return [] as CrmClientOption[];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as CachedCrmClientsPayload;
+
+    if (!Array.isArray(parsedValue.clients)) {
+      return [] as CrmClientOption[];
+    }
+
+    return parsedValue.clients;
+  } catch (error) {
+    console.warn("Nie udało się odczytać cache klientów CRM kalkulatora", error);
+    return [] as CrmClientOption[];
+  }
+}
+
+function writeCachedCrmClients(clients: CrmClientOption[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const payload: CachedCrmClientsPayload = {
+      savedAt: new Date().toISOString(),
+      clients,
+    };
+
+    window.localStorage.setItem(CRM_CLIENTS_CACHE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Nie udało się zapisać cache klientów CRM kalkulatora", error);
+  }
+}
+
 
 const DEFAULT_PRICING_OVERRIDES = {
   panels: {
@@ -198,6 +248,7 @@ const DEFAULT_PRICING_OVERRIDES = {
 
 export default function Home() {
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
+  const [isOffline, setIsOffline] = useState(false);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
@@ -248,6 +299,20 @@ export default function Home() {
   const advisorEmail = currentUserEmail || "kontakt@ideasol.pl";
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
   const canSeePricingPanel = currentUserRole.includes("admin");
+  useEffect(() => {
+    function updateOnlineStatus() {
+      setIsOffline(!isCalculatorOnline());
+    }
+
+    updateOnlineStatus();
+    window.addEventListener("online", updateOnlineStatus);
+    window.addEventListener("offline", updateOnlineStatus);
+
+    return () => {
+      window.removeEventListener("online", updateOnlineStatus);
+      window.removeEventListener("offline", updateOnlineStatus);
+    };
+  }, []);
 
   function getPanelPowerWp(model: string) {
     const selectedPanel = panels.find((panel) => panel.code === model);
@@ -286,10 +351,10 @@ export default function Home() {
       selectedInverterName !== "auto"
         ? inverters.find((inverter) => inverter.name === selectedInverterName)
         : inverters.find(
-            (inverter) =>
-              inverter.name === inverterDisplayName ||
-              inverter.display_name === inverterDisplayName
-          );
+          (inverter) =>
+            inverter.name === inverterDisplayName ||
+            inverter.display_name === inverterDisplayName
+        );
 
     return selectedInverter?.type || null;
   }
@@ -433,19 +498,38 @@ export default function Home() {
     }
 
     async function loadCrmClients() {
+      const cachedClients = readCachedCrmClients();
+
+      if (cachedClients.length > 0) {
+        setCrmClients(cachedClients);
+      }
+
+      if (!isCalculatorOnline()) {
+        console.warn("Kalkulator offline — używam klientów CRM zapisanych w cache");
+        return;
+      }
+
       const { data, error } = await supabase
         .from("clients")
-        .select("*")
+        .select(
+          "id, public_id, full_name, company_name, client_type, phone, email, city, postal_code, street, building_number, contact_person, contact_phone"
+        )
         .order("created_at", { ascending: false })
         .limit(1000);
 
       if (error) {
         console.warn("Nie udało się załadować klientów CRM do kalkulatora", error);
-        setCrmClients([]);
+
+        if (cachedClients.length === 0) {
+          setCrmClients([]);
+        }
+
         return;
       }
 
-      setCrmClients((data || []) as CrmClientOption[]);
+      const loadedClients = (data || []) as CrmClientOption[];
+      setCrmClients(loadedClients);
+      writeCachedCrmClients(loadedClients);
     }
 
     async function loadCatalog() {
@@ -497,7 +581,7 @@ export default function Home() {
       if (loadedStorages.length > 0) {
         setStorage((current) =>
           current === "none" ||
-          loadedStorages.some((catalogStorage: CatalogStorage) => catalogStorage.code === current)
+            loadedStorages.some((catalogStorage: CatalogStorage) => catalogStorage.code === current)
             ? current
             : loadedStorages[0].code
         );
@@ -1021,7 +1105,15 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
 
-
+        {isOffline && (
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">Tryb offline kalkulatora</p>
+            <p className="mt-1">
+              Korzystasz z klientów zapisanych wcześniej w pamięci tego urządzenia.
+              W kolejnym kroku dodamy kolejkę zapisu ofert i wysyłki maili po odzyskaniu internetu.
+            </p>
+          </div>
+        )}
         {canSeePricingPanel && (
           <div className="flex justify-end">
             <button
