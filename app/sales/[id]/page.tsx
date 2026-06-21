@@ -326,6 +326,9 @@ export default function SalePage() {
   const [soldItemsInput, setSoldItemsInput] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("sale");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
+
+  const [accessDenied, setAccessDenied] = useState(false);
+
   const [documents, setDocuments] = useState<SaleDocument[]>([]);
   const [documentContainers, setDocumentContainers] = useState<SaleDocumentContainer[]>([]);
   const [documentDescription, setDocumentDescription] = useState("");
@@ -385,9 +388,13 @@ export default function SalePage() {
 
   async function loadSale() {
     setLoading(true);
+    setAccessDenied(false);
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
+
+    let resolvedRole: UserRole = null;
 
     if (user) {
       setCurrentUserId(user.id);
@@ -402,7 +409,7 @@ export default function SalePage() {
         console.error("Błąd ładowania roli aktualnego użytkownika z profiles:", currentProfileError);
       }
 
-      let resolvedRole = (currentProfileData?.role || null) as UserRole;
+      resolvedRole = (currentProfileData?.role || null) as UserRole;
 
       if (!resolvedRole) {
         const { data: currentUserProfileData, error: currentUserProfileError } = await supabase
@@ -422,18 +429,58 @@ export default function SalePage() {
     }
 
     const { data: saleData, error } = await supabase
-      .from("sales")
-      .select("*")
-      .eq("id", saleId)
-      .single();
+  .from("sales")
+  .select("*")
+  .eq("id", saleId)
+  .maybeSingle();
 
-    if (error || !saleData) {
-      console.error("Błąd ładowania sprzedaży:", error);
-      setLoading(false);
-      return;
-    }
+if (error) {
+  console.error("Błąd ładowania sprzedaży:", error);
+  setLoading(false);
+  return;
+}
 
-    setSale(saleData as Sale);
+if (!saleData) {
+  setSale(null);
+  setAccessDenied(true);
+  setLoading(false);
+  return;
+}
+
+const normalizedRole = String(resolvedRole || "seller").toLowerCase();
+let canOpenSale = ["admin", "owner", "cc"].includes(normalizedRole);
+
+if (!canOpenSale && user && saleData.seller_id === user.id) {
+  canOpenSale = true;
+}
+
+if (!canOpenSale && user && normalizedRole === "manager") {
+  const { data: teamMembers, error: teamError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("manager_id", user.id);
+
+  if (teamError) {
+    console.error("Błąd ładowania zespołu managera przy dostępie do sprzedaży:", teamError);
+  }
+
+  const teamUserIds = (teamMembers || []).map((member: { id: string }) => member.id);
+  canOpenSale = !!saleData.seller_id && teamUserIds.includes(saleData.seller_id);
+}
+
+if (!canOpenSale) {
+  setSale(null);
+  setClient(null);
+  setSellerProfile(null);
+  setDocuments([]);
+  setDocumentContainers([]);
+  setSaleNotes([]);
+  setAccessDenied(true);
+  setLoading(false);
+  return;
+}
+
+setSale(saleData as Sale);
     setContractValueInput(
       saleData.contract_value !== null && saleData.contract_value !== undefined
         ? String(saleData.contract_value)
@@ -446,12 +493,12 @@ export default function SalePage() {
     );
     setSoldItemsInput(saleData.sold_items || "");
 
-      if (saleData.client_id) {
-        const { data: clientData, error: clientError } = await supabase
-          .from("clients")
-          .select("id, full_name, company_name, phone, email, city, street, building_number, postal_code, address")
-          .eq("id", saleData.client_id)
-          .maybeSingle();
+    if (saleData.client_id) {
+      const { data: clientData, error: clientError } = await supabase
+        .from("clients")
+        .select("id, full_name, company_name, phone, email, city, street, building_number, postal_code, address")
+        .eq("id", saleData.client_id)
+        .maybeSingle();
 
       if (clientError) {
         console.error("Błąd ładowania klienta sprzedaży:", clientError);
@@ -705,7 +752,7 @@ export default function SalePage() {
     }
   }
 
-  
+
   async function submitDocumentContainersForReview() {
     if (!sale) return;
 
@@ -1121,34 +1168,34 @@ export default function SalePage() {
       setSavingSaleNote(false);
     }
   }
-async function deleteSale() {
-  if (!sale || !canDeleteSale) return;
+  async function deleteSale() {
+    if (!sale || !canDeleteSale) return;
 
-  const confirmed = window.confirm(
-    "Czy na pewno chcesz usunąć tę sprzedaż? Operacja jest nieodwracalna."
-  );
+    const confirmed = window.confirm(
+      "Czy na pewno chcesz usunąć tę sprzedaż? Operacja jest nieodwracalna."
+    );
 
-  if (!confirmed) return;
+    if (!confirmed) return;
 
-  try {
-    const { error } = await supabase.rpc("delete_sale", {
-      p_sale_id: sale.id,
-    });
+    try {
+      const { error } = await supabase.rpc("delete_sale", {
+        p_sale_id: sale.id,
+      });
 
-    if (error) {
-      console.error("Błąd usuwania sprzedaży:", error);
-      alert(`Nie udało się usunąć sprzedaży: ${error.message}`);
-      return;
+      if (error) {
+        console.error("Błąd usuwania sprzedaży:", error);
+        alert(`Nie udało się usunąć sprzedaży: ${error.message}`);
+        return;
+      }
+
+      alert("Sprzedaż została usunięta.");
+
+      window.location.href = "/sales";
+    } catch (error) {
+      console.error("Nieoczekiwany błąd usuwania sprzedaży:", error);
+      alert("Wystąpił nieoczekiwany błąd podczas usuwania sprzedaży.");
     }
-
-    alert("Sprzedaż została usunięta.");
-
-    window.location.href = "/sales";
-  } catch (error) {
-    console.error("Nieoczekiwany błąd usuwania sprzedaży:", error);
-    alert("Wystąpił nieoczekiwany błąd podczas usuwania sprzedaży.");
   }
-}
   if (loading) {
     return (
       <main>
@@ -1156,7 +1203,21 @@ async function deleteSale() {
       </main>
     );
   }
+if (accessDenied) {
+  return (
+    <main>
+      <div className="max-w-3xl mx-auto bg-white border border-red-200 rounded-2xl shadow-sm p-6 space-y-4">
+        <h1 className="text-2xl font-bold text-red-700">
+          Brak dostępu do sprzedaży
+        </h1>
 
+        <p className="text-slate-600 break-all">
+          Nie masz uprawnień do otwarcia tej karty sprzedaży.
+        </p>
+      </div>
+    </main>
+  );
+}
   if (!sale) {
     return (
       <main>
@@ -1257,56 +1318,56 @@ async function deleteSale() {
       : null;
 
   const canSeeFullFinancials =
-  currentUserRole === "owner" || currentUserRole === "admin";
+    currentUserRole === "owner" || currentUserRole === "admin";
 
-const canSeeManagerFee =
-  currentUserRole === "owner" ||
-  currentUserRole === "admin" ||
-  currentUserRole === "manager";
+  const canSeeManagerFee =
+    currentUserRole === "owner" ||
+    currentUserRole === "admin" ||
+    currentUserRole === "manager";
 
-const canSeeSellerCommission =
-  currentUserRole === "owner" ||
-  currentUserRole === "admin" ||
-  currentUserRole === "manager" ||
-  currentUserRole === "seller";
+  const canSeeSellerCommission =
+    currentUserRole === "owner" ||
+    currentUserRole === "admin" ||
+    currentUserRole === "manager" ||
+    currentUserRole === "seller";
 
-function isSellerCommissionItem(label?: string | null) {
-  const normalizedLabel = String(label || "").toLowerCase();
+  function isSellerCommissionItem(label?: string | null) {
+    const normalizedLabel = String(label || "").toLowerCase();
 
-  return (
-    normalizedLabel.includes("prowizja handlowca") ||
-    normalizedLabel.includes("handlowca") ||
-    normalizedLabel.includes("seller commission")
-  );
-}
-
-function isManagerFeeItem(label?: string | null) {
-  const normalizedLabel = String(label || "").toLowerCase();
-
-  return (
-    normalizedLabel.includes("manager fee") ||
-    normalizedLabel.includes("manager override") ||
-    normalizedLabel.includes("opłata manager") ||
-    normalizedLabel.includes("oplata manager") ||
-    normalizedLabel.includes("prowizja manager") ||
-    normalizedLabel.includes("prowizja menedżer") ||
-    normalizedLabel.includes("prowizja menedzer")
-  );
-}
-
-function canShowFinancialBreakdownItem(label?: string | null) {
-  if (canSeeFullFinancials) return true;
-
-  if (isSellerCommissionItem(label)) {
-    return canSeeSellerCommission;
+    return (
+      normalizedLabel.includes("prowizja handlowca") ||
+      normalizedLabel.includes("handlowca") ||
+      normalizedLabel.includes("seller commission")
+    );
   }
 
-  if (isManagerFeeItem(label)) {
-    return canSeeManagerFee;
+  function isManagerFeeItem(label?: string | null) {
+    const normalizedLabel = String(label || "").toLowerCase();
+
+    return (
+      normalizedLabel.includes("manager fee") ||
+      normalizedLabel.includes("manager override") ||
+      normalizedLabel.includes("opłata manager") ||
+      normalizedLabel.includes("oplata manager") ||
+      normalizedLabel.includes("prowizja manager") ||
+      normalizedLabel.includes("prowizja menedżer") ||
+      normalizedLabel.includes("prowizja menedzer")
+    );
   }
 
-  return false;
-}
+  function canShowFinancialBreakdownItem(label?: string | null) {
+    if (canSeeFullFinancials) return true;
+
+    if (isSellerCommissionItem(label)) {
+      return canSeeSellerCommission;
+    }
+
+    if (isManagerFeeItem(label)) {
+      return canSeeManagerFee;
+    }
+
+    return false;
+  }
 
 
   const canManageSaleStatus =
@@ -1406,11 +1467,10 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               <button
                 type="button"
                 onClick={() => setActiveTab("sale")}
-                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${
-                  activeTab === "sale"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
+                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${activeTab === "sale"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
+                  }`}
               >
                 Dane sprzedaży
               </button>
@@ -1418,11 +1478,10 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               <button
                 type="button"
                 onClick={() => setActiveTab("documents")}
-                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${
-                  activeTab === "documents"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
+                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${activeTab === "documents"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
+                  }`}
               >
                 Dokumenty
               </button>
@@ -1430,11 +1489,10 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               <button
                 type="button"
                 onClick={() => setActiveTab("financial")}
-                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${
-                  activeTab === "financial"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
+                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${activeTab === "financial"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
+                  }`}
               >
                 Dane finansowe
               </button>
@@ -1442,11 +1500,10 @@ function canShowFinancialBreakdownItem(label?: string | null) {
               <button
                 type="button"
                 onClick={() => setActiveTab("notes")}
-                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${
-                  activeTab === "notes"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
+                className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${activeTab === "notes"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
+                  }`}
               >
                 Notatki
               </button>
@@ -1455,350 +1512,350 @@ function canShowFinancialBreakdownItem(label?: string | null) {
             <div className="p-6 space-y-6">
               {activeTab === "sale" && (
                 <>
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    Dane sprzedaży
-                  </h3>
-                  <p className="text-sm text-slate-500">
-                    Uzupełnij podstawowe dane sprzedaży ręcznie. Później te pola będą mogły zaczytać się z oferty.
-                  </p>
-                </div>
-
-                {!editingSaleData ? (
-                  <button
-                    type="button"
-                    onClick={() => setEditingSaleData(true)}
-                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-white font-semibold"
-                  >
-                    Edytuj dane sprzedaży
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setContractValueInput(
-                          sale.contract_value !== null && sale.contract_value !== undefined
-                            ? String(sale.contract_value)
-                            : ""
-                        );
-                        setMarginValueInput(
-                          sale.margin_value !== null && sale.margin_value !== undefined
-                            ? String(sale.margin_value)
-                            : ""
-                        );
-                        setSoldItemsInput(sale.sold_items || "");
-                        setEditingSaleData(false);
-                      }}
-                      className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold"
-                    >
-                      Anuluj
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={saveSaleData}
-                      disabled={savingSaleData}
-                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold"
-                    >
-                      {savingSaleData ? "Zapisywanie..." : "Zapisz"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {!editingSaleData ? (
-                <>
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-                    <div className="flex items-start justify-between gap-4 flex-wrap">
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">
-                          Dane umowy
-                        </p>
-                        <p className="mt-2 font-mono text-xl font-black text-emerald-950">
-                          {contractNumber}
-                        </p>
-                      </div>
-
-                      <div className="text-right text-sm text-emerald-900">
-                        <p>
-                          <span className="font-bold">Podpis:</span> {saleCustomerData.contract_place || "Brak"}, {formatDateOnly(saleCustomerData.contract_date)}
-                        </p>
-                        <p className="mt-1">
-                          <span className="font-bold">Zaliczka do:</span> {formatDateOnly(saleCustomerData.deposit_due_date)}
-                        </p>
-                      </div>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">
+                        Dane sprzedaży
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        Uzupełnij podstawowe dane sprzedaży ręcznie. Później te pola będą mogły zaczytać się z oferty.
+                      </p>
                     </div>
 
-                    <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <div>
-                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
-                          Rodzaj własności
-                        </p>
-                        <p className="font-semibold text-emerald-950">{ownershipLabel}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
-                          Wizyta umówiona
-                        </p>
-                        <p className="font-semibold text-emerald-950">{visitLabel}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
-                          Wariant realizacji
-                        </p>
-                        <p className="font-semibold text-emerald-950">{realizationVariantLabel}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
-                          Zaliczka
-                        </p>
-                        <p className="font-semibold text-emerald-950">
-                          {formatMoney(sale.deposit_amount)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {saleCustomerData.ownership_type === "co_owner" && (
-                      <div className="mt-5 rounded-xl border border-emerald-200 bg-white/70 p-4">
-                        <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
-                          Klient 2 / współwłaściciel
-                        </p>
-                        <div className="mt-3 grid gap-4 md:grid-cols-2">
-                          <div>
-                            <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                              Imię i nazwisko
-                            </p>
-                            <p className="font-semibold text-slate-900">
-                              {saleCustomerData.second_client_name || "Brak"}
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                              PESEL
-                            </p>
-                            <p className="font-semibold text-slate-900">
-                              {saleCustomerData.second_client_pesel || "Brak"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                      Data sprzedaży
-                    </p>
-
-                    <p className="font-semibold text-slate-900">
-                      {new Date(sale.sale_date).toLocaleString("pl-PL")}
-                    </p>
-                  </div>
-
-                  {contractPriceRows.hasAnyValue && (
-                    <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="text-sm font-black text-slate-950">
-                            Rozpiska cen do umowy i księgowości
-                          </p>
-                          <p className="mt-1 text-xs font-medium text-slate-500">
-                            Dane zapisane historycznie w sprzedaży. Używane do §3 umowy PDF.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 space-y-3">
-                        {contractPriceRows.rows.map((row) => (
-                          <div
-                            key={row.label}
-                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <p className="text-sm font-black leading-snug text-slate-950">
-                              {row.label}
-                            </p>
-
-                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                              <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
-                                  Netto po rabacie
-                                </p>
-                                <p className="mt-1 text-sm font-black text-slate-900">
-                                  {formatMoney(row.netAfterDiscount)}
-                                </p>
-                              </div>
-
-                              <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
-                                  Brutto przed rabatem
-                                </p>
-                                <p className="mt-1 text-sm font-black text-slate-900">
-                                  {formatMoney(row.beforeDiscount)}
-                                </p>
-                              </div>
-
-                              <div className="rounded-xl bg-emerald-50 px-3 py-3 ring-1 ring-emerald-200">
-                                <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
-                                  Brutto po rabacie
-                                </p>
-                                <p className="mt-1 text-sm font-black text-emerald-800">
-                                  {formatMoney(row.afterDiscount)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                          <p className="text-sm font-black text-emerald-950">Suma</p>
-
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
-                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
-                                Netto po rabacie
-                              </p>
-                              <p className="mt-1 text-sm font-black text-emerald-950">
-                                {formatMoney(contractPriceRows.totalNetAfterDiscount)}
-                              </p>
-                            </div>
-
-                            <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
-                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
-                                Brutto przed rabatem
-                              </p>
-                              <p className="mt-1 text-sm font-black text-emerald-950">
-                                {formatMoney(contractPriceRows.totalBeforeDiscount)}
-                              </p>
-                            </div>
-
-                            <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-emerald-200">
-                              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
-                                Brutto po rabacie
-                              </p>
-                              <p className="mt-1 text-base font-black text-emerald-700">
-                                {formatMoney(contractPriceRows.totalAfterDiscount)}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                      Sprzedawca
-                    </p>
-
-                   <p className="font-semibold text-slate-900">
-  {sellerProfile?.display_name ||
-    sellerProfile?.email ||
-    (sale.seller_id
-      ? `Seller: ${sale.seller_id.slice(0, 8)}`
-      : "Brak sprzedawcy")}
-</p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                      Wartość umowy
-                    </p>
-
-                    <p className="font-semibold text-slate-900">
-                      {sale.contract_value
-                        ? `${sale.contract_value.toLocaleString("pl-PL")} zł`
-                        : "Brak danych"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                      Sprzedane produkty/usługi
-                    </p>
-
-                    {soldItemsList.length > 0 ? (
-                      <div className="space-y-2">
-                        {soldItemsList.map((item, index) => (
-                          <div
-                            key={`${item}-${index}`}
-                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800"
-                          >
-                            {item}
-                          </div>
-                        ))}
-                      </div>
+                    {!editingSaleData ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingSaleData(true)}
+                        className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-white font-semibold"
+                      >
+                        Edytuj dane sprzedaży
+                      </button>
                     ) : (
-                      <p className="text-slate-800">Brak danych</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setContractValueInput(
+                              sale.contract_value !== null && sale.contract_value !== undefined
+                                ? String(sale.contract_value)
+                                : ""
+                            );
+                            setMarginValueInput(
+                              sale.margin_value !== null && sale.margin_value !== undefined
+                                ? String(sale.margin_value)
+                                : ""
+                            );
+                            setSoldItemsInput(sale.sold_items || "");
+                            setEditingSaleData(false);
+                          }}
+                          className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold"
+                        >
+                          Anuluj
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={saveSaleData}
+                          disabled={savingSaleData}
+                          className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold"
+                        >
+                          {savingSaleData ? "Zapisywanie..." : "Zapisz"}
+                        </button>
+                      </div>
                     )}
                   </div>
 
-                  {currentUserRole !== "cc" && (
-                    <div>
-                      <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
-                        Marża doradcy
-                      </p>
+                  {!editingSaleData ? (
+                    <>
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                        <div className="flex items-start justify-between gap-4 flex-wrap">
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">
+                              Dane umowy
+                            </p>
+                            <p className="mt-2 font-mono text-xl font-black text-emerald-950">
+                              {contractNumber}
+                            </p>
+                          </div>
 
-                      <p className="text-slate-800">
-                        {sale.margin_value
-                          ? `${sale.margin_value.toLocaleString("pl-PL")} zł`
-                          : "Brak danych"}
-                      </p>
+                          <div className="text-right text-sm text-emerald-900">
+                            <p>
+                              <span className="font-bold">Podpis:</span> {saleCustomerData.contract_place || "Brak"}, {formatDateOnly(saleCustomerData.contract_date)}
+                            </p>
+                            <p className="mt-1">
+                              <span className="font-bold">Zaliczka do:</span> {formatDateOnly(saleCustomerData.deposit_due_date)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                              Rodzaj własności
+                            </p>
+                            <p className="font-semibold text-emerald-950">{ownershipLabel}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                              Wizyta umówiona
+                            </p>
+                            <p className="font-semibold text-emerald-950">{visitLabel}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                              Wariant realizacji
+                            </p>
+                            <p className="font-semibold text-emerald-950">{realizationVariantLabel}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
+                              Zaliczka
+                            </p>
+                            <p className="font-semibold text-emerald-950">
+                              {formatMoney(sale.deposit_amount)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {saleCustomerData.ownership_type === "co_owner" && (
+                          <div className="mt-5 rounded-xl border border-emerald-200 bg-white/70 p-4">
+                            <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
+                              Klient 2 / współwłaściciel
+                            </p>
+                            <div className="mt-3 grid gap-4 md:grid-cols-2">
+                              <div>
+                                <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                                  Imię i nazwisko
+                                </p>
+                                <p className="font-semibold text-slate-900">
+                                  {saleCustomerData.second_client_name || "Brak"}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                                  PESEL
+                                </p>
+                                <p className="font-semibold text-slate-900">
+                                  {saleCustomerData.second_client_pesel || "Brak"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                            Data sprzedaży
+                          </p>
+
+                          <p className="font-semibold text-slate-900">
+                            {new Date(sale.sale_date).toLocaleString("pl-PL")}
+                          </p>
+                        </div>
+
+                        {contractPriceRows.hasAnyValue && (
+                          <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-sm font-black text-slate-950">
+                                  Rozpiska cen do umowy i księgowości
+                                </p>
+                                <p className="mt-1 text-xs font-medium text-slate-500">
+                                  Dane zapisane historycznie w sprzedaży. Używane do §3 umowy PDF.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                              {contractPriceRows.rows.map((row) => (
+                                <div
+                                  key={row.label}
+                                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                >
+                                  <p className="text-sm font-black leading-snug text-slate-950">
+                                    {row.label}
+                                  </p>
+
+                                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                    <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
+                                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                                        Netto po rabacie
+                                      </p>
+                                      <p className="mt-1 text-sm font-black text-slate-900">
+                                        {formatMoney(row.netAfterDiscount)}
+                                      </p>
+                                    </div>
+
+                                    <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
+                                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+                                        Brutto przed rabatem
+                                      </p>
+                                      <p className="mt-1 text-sm font-black text-slate-900">
+                                        {formatMoney(row.beforeDiscount)}
+                                      </p>
+                                    </div>
+
+                                    <div className="rounded-xl bg-emerald-50 px-3 py-3 ring-1 ring-emerald-200">
+                                      <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                        Brutto po rabacie
+                                      </p>
+                                      <p className="mt-1 text-sm font-black text-emerald-800">
+                                        {formatMoney(row.afterDiscount)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+
+                              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                                <p className="text-sm font-black text-emerald-950">Suma</p>
+
+                                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                  <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
+                                      Netto po rabacie
+                                    </p>
+                                    <p className="mt-1 text-sm font-black text-emerald-950">
+                                      {formatMoney(contractPriceRows.totalNetAfterDiscount)}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-xl bg-white/80 px-3 py-3 ring-1 ring-emerald-100">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700/70">
+                                      Brutto przed rabatem
+                                    </p>
+                                    <p className="mt-1 text-sm font-black text-emerald-950">
+                                      {formatMoney(contractPriceRows.totalBeforeDiscount)}
+                                    </p>
+                                  </div>
+
+                                  <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-emerald-200">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                      Brutto po rabacie
+                                    </p>
+                                    <p className="mt-1 text-base font-black text-emerald-700">
+                                      {formatMoney(contractPriceRows.totalAfterDiscount)}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                            Sprzedawca
+                          </p>
+
+                          <p className="font-semibold text-slate-900">
+                            {sellerProfile?.display_name ||
+                              sellerProfile?.email ||
+                              (sale.seller_id
+                                ? `Seller: ${sale.seller_id.slice(0, 8)}`
+                                : "Brak sprzedawcy")}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                            Wartość umowy
+                          </p>
+
+                          <p className="font-semibold text-slate-900">
+                            {sale.contract_value
+                              ? `${sale.contract_value.toLocaleString("pl-PL")} zł`
+                              : "Brak danych"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                            Sprzedane produkty/usługi
+                          </p>
+
+                          {soldItemsList.length > 0 ? (
+                            <div className="space-y-2">
+                              {soldItemsList.map((item, index) => (
+                                <div
+                                  key={`${item}-${index}`}
+                                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800"
+                                >
+                                  {item}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-slate-800">Brak danych</p>
+                          )}
+                        </div>
+
+                        {currentUserRole !== "cc" && (
+                          <div>
+                            <p className="text-xs uppercase font-semibold text-slate-400 mb-1">
+                              Marża doradcy
+                            </p>
+
+                            <p className="text-slate-800">
+                              {sale.margin_value
+                                ? `${sale.margin_value.toLocaleString("pl-PL")} zł`
+                                : "Brak danych"}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
+                          Wartość umowy
+                        </label>
+
+                        <input
+                          value={contractValueInput}
+                          onChange={(e) => setContractValueInput(e.target.value)}
+                          placeholder="np. 48500"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
+                        />
+                      </div>
+
+                      {currentUserRole !== "cc" && (
+                        <div>
+                          <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
+                            Marża doradcy
+                          </label>
+
+                          <input
+                            value={marginValueInput}
+                            onChange={(e) => setMarginValueInput(e.target.value)}
+                            placeholder="np. 3500"
+                            className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
+                          />
+                        </div>
+                      )}
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
+                          Sprzedane produkty/usługi
+                        </label>
+
+                        <textarea
+                          value={soldItemsInput}
+                          onChange={(e) => setSoldItemsInput(e.target.value)}
+                          placeholder="np. PV 9,9 kWp + magazyn energii 14,33 kWh + falownik hybrydowy"
+                          rows={4}
+                          className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white resize-none"
+                        />
+                      </div>
                     </div>
                   )}
-                  </div>
-                </>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                      Wartość umowy
-                    </label>
-
-                    <input
-                      value={contractValueInput}
-                      onChange={(e) => setContractValueInput(e.target.value)}
-                      placeholder="np. 48500"
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
-                    />
-                  </div>
-
-                  {currentUserRole !== "cc" && (
-                    <div>
-                      <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                        Marża doradcy
-                      </label>
-
-                      <input
-                        value={marginValueInput}
-                        onChange={(e) => setMarginValueInput(e.target.value)}
-                        placeholder="np. 3500"
-                        className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white"
-                      />
-                    </div>
-                  )}
-
-                  <div className="md:col-span-2">
-                    <label className="block text-xs uppercase font-semibold text-slate-400 mb-2">
-                      Sprzedane produkty/usługi
-                    </label>
-
-                    <textarea
-                      value={soldItemsInput}
-                      onChange={(e) => setSoldItemsInput(e.target.value)}
-                      placeholder="np. PV 9,9 kWp + magazyn energii 14,33 kWh + falownik hybrydowy"
-                      rows={4}
-                      className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white resize-none"
-                    />
-                  </div>
-                </div>
-              )}
                 </>
               )}
 
@@ -1855,37 +1912,37 @@ function canShowFinancialBreakdownItem(label?: string | null) {
                               <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                                 {groupDocuments.length}
                               </span>
-                            <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                              Limit: {group.maxSizeMb} MB
-                            </span>
-                          </div>
+                              <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                Limit: {group.maxSizeMb} MB
+                              </span>
+                            </div>
 
-                          {canReviewDocuments && groupDocuments.length > 0 && containerStatus !== "rejected" && (
-                            <div className="flex shrink-0 items-center gap-2">
-                              {containerStatus !== "approved" && (
+                            {canReviewDocuments && groupDocuments.length > 0 && containerStatus !== "rejected" && (
+                              <div className="flex shrink-0 items-center gap-2">
+                                {containerStatus !== "approved" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => reviewDocumentContainer(group.key, "approved")}
+                                    disabled={reviewingDocumentContainerKey === group.key}
+                                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                                    title="Zatwierdź kontener"
+                                  >
+                                    ✅
+                                  </button>
+                                )}
+
                                 <button
                                   type="button"
-                                  onClick={() => reviewDocumentContainer(group.key, "approved")}
+                                  onClick={() => reviewDocumentContainer(group.key, "rejected")}
                                   disabled={reviewingDocumentContainerKey === group.key}
-                                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
-                                  title="Zatwierdź kontener"
+                                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+                                  title="Odrzuć kontener"
                                 >
-                                  ✅
+                                  ❌
                                 </button>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => reviewDocumentContainer(group.key, "rejected")}
-                                disabled={reviewingDocumentContainerKey === group.key}
-                                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
-                                title="Odrzuć kontener"
-                              >
-                                ❌
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                              </div>
+                            )}
+                          </div>
 
                           {canUploadToContainer ? (
                             <>
@@ -2166,7 +2223,7 @@ function canShowFinancialBreakdownItem(label?: string | null) {
                 </div>
               )}
 
-{activeTab === "notes" && (
+              {activeTab === "notes" && (
                 <div className="space-y-5">
                   <div>
                     <h3 className="text-lg font-bold text-slate-900">
