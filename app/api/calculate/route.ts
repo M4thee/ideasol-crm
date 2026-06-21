@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { getCurrentProfile } from "@/lib/auth/getCurrentProfile";
 import { calculateOffer } from "@/lib/calculator/calculateOffer";
 
 const supabase = createClient(
@@ -498,15 +497,50 @@ function calculateManagerOverrideNet(params: {
   };
 }
 
+export async function GET() {
+  try {
+    const [{ data: settingsRow, error: settingsError }, catalog] = await Promise.all([
+      supabase
+        .from("pricing_settings")
+        .select(
+          "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent"
+        )
+        .eq("id", 1)
+        .single(),
+      loadCatalogFromSupabase(),
+    ]);
+
+    if (settingsError) {
+      console.warn("Nie udało się pobrać pricing_settings dla katalogu kalkulatora", settingsError);
+    }
+
+    return NextResponse.json({
+      catalog,
+      settingsRow: settingsRow || null,
+    });
+  } catch (error) {
+    console.error("Nie udało się pobrać katalogu kalkulatora", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Nie udało się pobrać katalogu kalkulatora",
+      },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: Request) {
   const body = await request.json();
-  const authProfile = await getCurrentProfile();
   const sellerProfileId =
     body?.advisor?.id ||
     body?.createdBy ||
     null;
   const sellerEmail = body?.advisor?.email || null;
-  let currentUser = authProfile;
+  let currentUser: any = null;
   if (sellerProfileId) {
     const { data: resolvedProfile } = await supabase
       .from("profiles")

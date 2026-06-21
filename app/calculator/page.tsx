@@ -4,7 +4,12 @@ import { supabase } from "@/lib/supabase";
 import { useEffect, useRef, useState } from "react";
 import OfferResult from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
+
 import AdminPanel from "@/components/calculator/AdminPanel";
+import {
+  calculateOffer,
+  type CalculatorCatalog,
+} from "@/lib/calculator/calculateOffer";
 
 
 type Result = {
@@ -152,6 +157,8 @@ type CrmClientOption = {
 
 const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
+const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v1";
+const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
 
 
 type CachedCrmClientsPayload = {
@@ -168,6 +175,13 @@ type OfflineOfferQueueItem = {
   sendMode: "anonymous" | "public";
   offerText: string;
   snapshot: Record<string, unknown>;
+};
+
+type CachedCalculatorCatalogPayload = {
+  savedAt: string;
+  panels: CatalogPanel[];
+  storages: CatalogStorage[];
+  inverters: CatalogInverter[];
 };
 function isCalculatorOnline() {
   if (typeof navigator === "undefined") return true;
@@ -310,7 +324,75 @@ const DEFAULT_PRICING_OVERRIDES = {
     percent: 15,
   },
 };
+function readCachedCalculatorCatalog() {
+  if (typeof window === "undefined") return null as CachedCalculatorCatalogPayload | null;
 
+  try {
+    const rawValue = window.localStorage.getItem(CALCULATOR_CATALOG_CACHE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as CachedCalculatorCatalogPayload;
+
+    if (
+      !Array.isArray(parsedValue.panels) ||
+      !Array.isArray(parsedValue.storages) ||
+      !Array.isArray(parsedValue.inverters)
+    ) {
+      return null;
+    }
+
+    return parsedValue;
+  } catch (error) {
+    console.warn("Nie udało się odczytać cache katalogu kalkulatora", error);
+    return null;
+  }
+}
+
+function writeCachedCalculatorCatalog(payload: Omit<CachedCalculatorCatalogPayload, "savedAt">) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CALCULATOR_CATALOG_CACHE_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        ...payload,
+      })
+    );
+  } catch (error) {
+    console.warn("Nie udało się zapisać cache katalogu kalkulatora", error);
+  }
+}
+
+function readCachedPricingOverrides() {
+  if (typeof window === "undefined") return null as typeof DEFAULT_PRICING_OVERRIDES | null;
+
+  try {
+    const rawValue = window.localStorage.getItem(CALCULATOR_PRICING_CACHE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    return JSON.parse(rawValue) as typeof DEFAULT_PRICING_OVERRIDES;
+  } catch (error) {
+    console.warn("Nie udało się odczytać cache ustawień cen kalkulatora", error);
+    return null;
+  }
+}
+
+function writeCachedPricingOverrides(pricing: typeof DEFAULT_PRICING_OVERRIDES) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(CALCULATOR_PRICING_CACHE_KEY, JSON.stringify(pricing));
+  } catch (error) {
+    console.warn("Nie udało się zapisać cache ustawień cen kalkulatora", error);
+  }
+}
 export default function Home() {
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
@@ -511,13 +593,24 @@ export default function Home() {
     }
 
     async function loadPricingSettings() {
+      const cachedPricing = readCachedPricingOverrides();
+
+      if (cachedPricing) {
+        setPricingOverrides(cachedPricing);
+      }
+
+      if (!isCalculatorOnline()) {
+        console.warn("Kalkulator offline — używam ustawień cen zapisanych w cache");
+        return;
+      }
+
       const { data, error } = await supabase
         .from("pricing_settings")
         .select("*")
         .maybeSingle();
 
       if (error) {
-        console.warn("Nie udało się załadować pricing_settings — kalkulator użyje wartości domyślnych", error);
+        console.warn("Nie udało się załadować pricing_settings — kalkulator użyje wartości domyślnych lub cache", error);
         return;
       }
 
@@ -525,43 +618,41 @@ export default function Home() {
         return;
       }
 
-      setPricingOverrides((current) => ({
-        ...current,
-        installation: {
-          ...current.installation,
-          pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
-        },
-        placeholders: {
-          ...current.placeholders,
-          protections: Number(data.protections_cost ?? current.placeholders.protections),
-          wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
-          transport: Number(data.transport_cost ?? current.placeholders.transport),
-          documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
-          ems: Number(data.ems_cost ?? current.placeholders.ems),
-        },
-        margins: {
-          ...current.margins,
-          marketing: Number(data.marketing_cost ?? current.margins.marketing),
+      setPricingOverrides((current) => {
+        const nextPricing = {
+          ...current,
+          installation: {
+            ...current.installation,
+            pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+          },
+          placeholders: {
+            ...current.placeholders,
+            protections: Number(data.protections_cost ?? current.placeholders.protections),
+            wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
+            transport: Number(data.transport_cost ?? current.placeholders.transport),
+            documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
+            ems: Number(data.ems_cost ?? current.placeholders.ems),
+          },
+          margins: {
+            ...current.margins,
+            marketing: Number(data.marketing_cost ?? current.margins.marketing),
+            ownersCount: Number(data.owners_count ?? current.margins.ownersCount),
+            pvSmallPerKw: Number(data.pv_small_per_kw ?? current.margins.pvSmallPerKw),
+            pvSmallFixed: Number(data.pv_small_fixed ?? current.margins.pvSmallFixed),
+            pvLargePerKw: Number(data.pv_large_per_kw ?? current.margins.pvLargePerKw),
+            pvLargeFixed: Number(data.pv_large_fixed ?? current.margins.pvLargeFixed),
+            storagePerOwner: Number(data.storage_per_owner ?? current.margins.storagePerOwner),
+            managerFeeNet: Number(data.manager_fee_percent ?? current.margins.managerFeeNet),
+          },
+          operator: {
+            ...current.operator,
+            percent: Number(data.warranty_percent ?? current.operator.percent),
+          },
+        };
 
-          ownersCount: Number(data.owners_count ?? current.margins.ownersCount),
-
-          pvSmallPerKw: Number(data.pv_small_per_kw ?? current.margins.pvSmallPerKw),
-          pvSmallFixed: Number(data.pv_small_fixed ?? current.margins.pvSmallFixed),
-
-          pvLargePerKw: Number(data.pv_large_per_kw ?? current.margins.pvLargePerKw),
-          pvLargeFixed: Number(data.pv_large_fixed ?? current.margins.pvLargeFixed),
-
-          storagePerOwner: Number(data.storage_per_owner ?? current.margins.storagePerOwner),
-
-          managerFeeNet: Number(
-            data.manager_fee_percent ?? current.margins.managerFeeNet
-          ),
-        },
-        operator: {
-          ...current.operator,
-          percent: Number(data.warranty_percent ?? current.operator.percent),
-        },
-      }));
+        writeCachedPricingOverrides(nextPricing);
+        return nextPricing;
+      });
     }
 
     async function loadCrmClients() {
@@ -600,42 +691,79 @@ export default function Home() {
     }
 
     async function loadCatalog() {
-      const [panelsResponse, storagesResponse, invertersResponse] = await Promise.all([
-        supabase
-          .from("panels")
-          .select("code, name, display_name, power_wp, price_net")
-          .eq("active", true)
-          .order("power_wp", { ascending: false }),
+      const cachedCatalog = readCachedCalculatorCatalog();
 
-        supabase
-          .from("storages")
-          .select("code, name, display_name, capacity_kwh, price_net, installation_net")
-          .eq("active", true)
-          .neq("code", "none")
-          .order("capacity_kwh", { ascending: true }),
-
-        supabase
-          .from("inverters")
-          .select("name, display_name, type, max_pv_kw, price_net")
-          .eq("active", true)
-          .order("max_pv_kw", { ascending: true }),
-      ]);
-
-      const loadedPanels = panelsResponse.data || [];
-      const loadedStorages = storagesResponse.data || [];
-      const loadedInverters = invertersResponse.data || [];
-
-      if (panelsResponse.error || storagesResponse.error || invertersResponse.error) {
-        console.warn("Nie udało się załadować pełnego katalogu kalkulatora", {
-          panelsError: panelsResponse.error,
-          storagesError: storagesResponse.error,
-          invertersError: invertersResponse.error,
-        });
+      if (cachedCatalog) {
+        setPanels(cachedCatalog.panels);
+        setStorages(cachedCatalog.storages);
+        setInverters(cachedCatalog.inverters);
       }
 
-      setPanels(loadedPanels as CatalogPanel[]);
-      setStorages(loadedStorages as CatalogStorage[]);
-      setInverters(loadedInverters as CatalogInverter[]);
+      if (!isCalculatorOnline()) {
+        console.warn("Kalkulator offline — używam katalogu zapisanego w cache");
+        return;
+      }
+      const catalogResponse = await fetch("/api/calculate", {
+        method: "GET",
+      });
+
+      if (!catalogResponse.ok) {
+        console.warn("Nie udało się pobrać katalogu kalkulatora z API — zostawiam dane z cache/stanu");
+        return;
+      }
+
+      const catalogPayload = await catalogResponse.json();
+      const apiCatalog = catalogPayload?.catalog as CalculatorCatalog | undefined;
+
+      if (!apiCatalog) {
+        console.warn("API kalkulatora nie zwróciło katalogu — zostawiam dane z cache/stanu");
+        return;
+      }
+
+      const loadedPanels = Object.entries(apiCatalog.panels || {}).map(([code, panel]) => ({
+        code,
+        name: panel.name,
+        display_name: panel.displayName || panel.name,
+        power_wp: panel.powerWp,
+        price_net: panel.priceNet,
+      })) as CatalogPanel[];
+
+      const loadedStorages = Object.entries(apiCatalog.storages || {})
+        .filter(([code]) => code !== "none")
+        .map(([code, catalogStorage]) => ({
+          code,
+          name: catalogStorage.name,
+          display_name: catalogStorage.displayName || catalogStorage.name,
+          capacity_kwh: catalogStorage.capacityKwh,
+          price_net: catalogStorage.priceNet,
+          installation_net: catalogStorage.installationNet,
+        })) as CatalogStorage[];
+
+      const loadedInverters = (apiCatalog.inverters || []).map((inverter) => ({
+        name: inverter.name,
+        display_name: inverter.displayName || inverter.name,
+        type: inverter.type,
+        max_pv_kw: inverter.maxPvKw,
+        price_net: inverter.priceNet,
+      })) as CatalogInverter[];
+      if (loadedPanels.length === 0 || loadedStorages.length === 0 || loadedInverters.length === 0) {
+        console.warn("Katalog kalkulatora z Supabase jest pusty — nie nadpisuję cache pustymi danymi", {
+          panels: loadedPanels.length,
+          storages: loadedStorages.length,
+          inverters: loadedInverters.length,
+        });
+        return;
+      }
+
+      setPanels(loadedPanels);
+      setStorages(loadedStorages);
+      setInverters(loadedInverters);
+
+      writeCachedCalculatorCatalog({
+        panels: loadedPanels,
+        storages: loadedStorages,
+        inverters: loadedInverters,
+      });
 
       if (loadedPanels.length > 0) {
         setPanelModel((current) =>
@@ -756,53 +884,152 @@ export default function Home() {
     setResult(null);
   }
 
-  async function calculate() {
-    const res = await fetch("/api/calculate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        offerType,
-        panelModel,
-        panelCount,
-        roofType,
-        storage,
-        withEms,
-        includeSubsidy,
-        isUpsell,
-        existingPvPowerKw: isUpsell
-          ? Number(String(existingPvPowerKw).replace(",", ".")) || 0
-          : 0,
-        billingSystem,
-        selectedInverterName,
-        sellerMarkup,
-        vatRate,
-        pricingOverrides,
-        additionalServices: selectedAdditionalServices,
-        additional_services: selectedAdditionalServices,
-        advisor: {
-          id: userProfile?.id || null,
-          name: advisorName,
-          phone: advisorPhone,
-          email: advisorEmail,
-          role: userProfile?.role || currentUserRole,
-        },
-      }),
-    });
+  function buildCalculatorCatalogFromState(): CalculatorCatalog {
+    const panelCatalog = panels.reduce<CalculatorCatalog["panels"]>((acc, panel) => {
+      const panelName = panel.display_name || panel.name || panel.code;
 
-    const data = await res.json();
-    setResult(data);
-    setCopied(false);
-    setEmailStatus("");
-    setSaveOfferStatus("");
-    setSavedOfferId(null);
-    window.setTimeout(() => {
-      resultSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 100);
+      acc[panel.code] = {
+        name: panelName,
+        displayName: panelName,
+        powerWp: Number(panel.power_wp || 0),
+        priceNet: Number(panel.price_net || 0),
+      };
+
+      return acc;
+    }, {});
+
+    const storageCatalog: CalculatorCatalog["storages"] = storages.reduce<CalculatorCatalog["storages"]>(
+      (acc, catalogStorage) => {
+        const storageName = catalogStorage.display_name || catalogStorage.name || catalogStorage.code;
+
+        acc[catalogStorage.code] = {
+          name: storageName,
+          displayName: storageName,
+          capacityKwh: Number(catalogStorage.capacity_kwh || 0),
+          priceNet: Number(catalogStorage.price_net || 0),
+          installationNet: Number(catalogStorage.installation_net || 0),
+        };
+
+        return acc;
+      },
+      {
+        none: {
+          name: "Brak",
+          displayName: "Brak",
+          capacityKwh: 0,
+          priceNet: 0,
+          installationNet: 0,
+        },
+      } as CalculatorCatalog["storages"]
+    );
+
+    const inverterCatalog = inverters.map((inverter) => ({
+      name: inverter.name,
+      displayName: inverter.display_name || inverter.name,
+      type: String(inverter.type || "ongrid") as any,
+      maxPvKw: Number(inverter.max_pv_kw || 0),
+      priceNet: Number(inverter.price_net || 0),
+    }));
+
+    return {
+      panels: panelCatalog,
+      storages: storageCatalog,
+      inverters: inverterCatalog,
+    };
+  }
+
+  function buildCalculationPayload() {
+    return {
+      offerType,
+      panelModel,
+      panelCount,
+      roofType,
+      storage,
+      withEms,
+      includeSubsidy,
+      isUpsell,
+      existingPvPowerKw: isUpsell
+        ? Number(String(existingPvPowerKw).replace(",", ".")) || 0
+        : 0,
+      billingSystem,
+      selectedInverterName,
+      sellerMarkup,
+      vatRate,
+      pricingOverrides,
+      additionalServices: selectedAdditionalServices,
+      additional_services: selectedAdditionalServices,
+      advisor: {
+        id: userProfile?.id || null,
+        name: advisorName,
+        phone: advisorPhone,
+        email: advisorEmail,
+        role: userProfile?.role || currentUserRole,
+      },
+    };
+  }
+
+  async function calculate() {
+    const calculationPayload = buildCalculationPayload();
+
+    try {
+      let data: Result;
+
+      if (!isCalculatorOnline()) {
+        const offlineCatalog = buildCalculatorCatalogFromState();
+
+        if (
+          Object.keys(offlineCatalog.panels).length === 0 ||
+          offlineCatalog.inverters.length === 0 ||
+          Object.keys(offlineCatalog.storages).length === 0
+        ) {
+          throw new Error(
+            "Brak katalogu offline. Otwórz kalkulator raz przy dostępie do internetu, żeby zapisać katalog w pamięci przeglądarki."
+          );
+        }
+
+        data = calculateOffer({
+          body: calculationPayload,
+          catalog: offlineCatalog,
+          currentUser: userProfile,
+          settingsRow: null,
+          nodeEnv: process.env.NODE_ENV,
+        }) as Result;
+      } else {
+        const res = await fetch("/api/calculate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(calculationPayload),
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => null);
+          throw new Error(
+            errorData?.error || "Nie udało się przeliczyć oferty"
+          );
+        }
+
+        data = await res.json();
+      }
+
+      setResult(data);
+      setCopied(false);
+      setEmailStatus("");
+      setSaveOfferStatus("");
+      setSavedOfferId(null);
+      window.setTimeout(() => {
+        resultSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 100);
+    } catch (error) {
+      console.error("Błąd kalkulacji", error);
+      setEmailStatus(
+        error instanceof Error ? error.message : "Nie udało się przeliczyć oferty"
+      );
+    }
   }
 
   function resetForm() {

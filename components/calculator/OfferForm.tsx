@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+
 import { supabase } from "@/lib/supabase";
+
+function isOfferFormOnline() {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine;
+}
 
 type CatalogPanel = {
   code: string;
@@ -170,20 +176,28 @@ export default function OfferForm({
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   useEffect(() => {
     async function loadAdditionalServices() {
-      const { data, error } = await supabase
-        .from("additional_services")
-        .select("id, name, unit_label, price_net, allows_quantity, active")
-        .eq("active", true)
-        .order("name", { ascending: true });
-
-      if (error) {
-        console.error("OfferForm: błąd ładowania usług dodatkowych", error);
-        setAdditionalServicesStatus(`Błąd ładowania usług dodatkowych: ${error.message}`);
+      if (!isOfferFormOnline()) {
+        setAdditionalServicesStatus("");
         return;
       }
 
-      setAdditionalServices((data || []) as CatalogAdditionalService[]);
-      setAdditionalServicesStatus("");
+      try {
+        const { data, error } = await supabase
+          .from("additional_services")
+          .select("id, name, unit_label, price_net, allows_quantity, active")
+          .eq("active", true)
+          .order("name", { ascending: true });
+
+        if (error) {
+          setAdditionalServicesStatus("");
+          return;
+        }
+
+        setAdditionalServices((data || []) as CatalogAdditionalService[]);
+        setAdditionalServicesStatus("");
+      } catch {
+        setAdditionalServicesStatus("");
+      }
     }
 
     loadAdditionalServices();
@@ -197,6 +211,10 @@ export default function OfferForm({
     async function loadClientsIfNeeded() {
       if (crmClients.length > 0 || internalCrmClients.length > 0) return;
 
+      if (!isOfferFormOnline()) {
+        return;
+      }
+
       setIsLoadingClients(true);
 
       try {
@@ -205,7 +223,6 @@ export default function OfferForm({
         } = await supabase.auth.getUser();
 
         if (!user) {
-          console.warn("OfferForm: brak zalogowanego użytkownika przy ładowaniu klientów CRM");
           return;
         }
 
@@ -260,7 +277,6 @@ export default function OfferForm({
         }
 
         if (clientsError) {
-          console.error("Błąd ładowania klientów w OfferForm", clientsError);
           setInternalCrmClients([]);
           setInternalTodayMeetingClients([]);
           return;
