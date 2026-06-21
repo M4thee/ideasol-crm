@@ -525,6 +525,33 @@ return [streetAddress, cityAddress]
     }
   }
 
+async function findReassignVacationConflict(advisorId: string, eventDateTime: string) {
+  if (!advisorId || !eventDateTime) return null;
+
+  const dateValue = getDateValue(eventDateTime);
+
+  if (!dateValue) return null;
+
+  const dayStart = `${dateValue}T00:00:00`;
+  const dayEnd = `${dateValue}T23:59:59`;
+
+  const { data, error } = await supabase
+    .from("calendar_events")
+    .select("id, title, event_at")
+    .eq("event_type", "vacation")
+    .eq("assigned_user_id", advisorId)
+    .gte("event_at", dayStart)
+    .lte("event_at", dayEnd)
+    .limit(1);
+
+  if (error) {
+    console.error("Nie udało się sprawdzić urlopu doradcy przy przepisywaniu spotkania", error);
+    return null;
+  }
+
+  return data?.[0] || null;
+}
+
 async function reassignEventOwner() {
     if (!event) return;
 
@@ -542,6 +569,18 @@ async function reassignEventOwner() {
 
     if (!targetUser) {
       alert("Wybrany użytkownik nie jest dostępny do przepisania tego spotkania.");
+      return;
+    }
+
+    const vacationConflict = await findReassignVacationConflict(selectedReassignUserId, event.event_at);
+
+    if (vacationConflict) {
+      const conflictDate = new Date(vacationConflict.event_at).toLocaleDateString("pl-PL");
+      const advisorLabel = targetUser.display_name || targetUser.email || "Ten doradca";
+
+      alert(
+        `${advisorLabel} ma urlop w dniu ${conflictDate}. Wybierz innego doradcę albo inny termin.`
+      );
       return;
     }
 
