@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 
-const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{10,}$/;
 
 type UserProfile = {
   id: string;
@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("*")
+      .select("id, email, display_name, full_name, role, default_seller_markup")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -95,7 +95,7 @@ export default function SettingsPage() {
 
     if (!PASSWORD_REGEX.test(newPassword)) {
       setPasswordError(
-        "Nowe hasło musi mieć minimum 8 znaków, 1 małą literę, 1 dużą literę, 1 cyfrę i 1 znak specjalny."
+        "Nowe hasło musi mieć minimum 10 znaków, 1 małą literę, 1 dużą literę, 1 cyfrę i 1 znak specjalny."
       );
       return;
     }
@@ -248,7 +248,7 @@ export default function SettingsPage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-black text-slate-950">Zmiana hasła</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Hasło musi mieć minimum 8 znaków, małą i dużą literę, cyfrę oraz znak specjalny.
+            Hasło musi mieć minimum 10 znaków, małą i dużą literę, cyfrę oraz znak specjalny.
           </p>
 
           <div className="mt-5 grid gap-4">
