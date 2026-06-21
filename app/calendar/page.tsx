@@ -9,11 +9,11 @@ type CalendarItem = {
   id: string;
   event_id: string;
   source_activity_id: string | null;
-  client_id: string;
+  client_id: string | null;
   title: string;
   description: string | null;
   date: string;
-  type: "meeting" | "phone_call" | "reminder";
+  type: "meeting" | "phone_call" | "reminder" | "vacation";
   status: string | null;
   client_name: string;
   owner_id: string | null;
@@ -72,8 +72,10 @@ export default function CalendarPage() {
   const [newEventAdvisorSearch, setNewEventAdvisorSearch] = useState("");
   const [newEventClientId, setNewEventClientId] = useState("");
   const [newEventClientSearch, setNewEventClientSearch] = useState("");
-  const [newEventType, setNewEventType] = useState<"meeting" | "phone_call">("meeting");
+  const [newEventType, setNewEventType] = useState<"meeting" | "phone_call" | "vacation">("meeting");
   const [newEventAt, setNewEventAt] = useState("");
+  const [newVacationStartDate, setNewVacationStartDate] = useState("");
+  const [newVacationEndDate, setNewVacationEndDate] = useState("");
   const [newEventDescription, setNewEventDescription] = useState("");
   const [createEventError, setCreateEventError] = useState("");
   const [creatingEvent, setCreatingEvent] = useState(false);
@@ -326,9 +328,14 @@ export default function CalendarPage() {
             ? "meeting"
             : item.event_type === "phone_call"
               ? "phone_call"
-              : "reminder",
+              : item.event_type === "vacation"
+                ? "vacation"
+                : "reminder",
         status: item.status || null,
-        client_name: clientsById.get(item.client_id) || "Klient",
+        client_name:
+          item.event_type === "vacation"
+            ? ownersById.get(ownerId || "") || "Urlop"
+            : clientsById.get(item.client_id) || "Klient",
         owner_id: ownerId,
         owner_name: ownerId ? ownersById.get(ownerId) || "Użytkownik" : null,
         assigned_user_id: item.assigned_user_id || null,
@@ -551,6 +558,8 @@ async function openCreateEventModal() {
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
+  setNewVacationStartDate("");
+  setNewVacationEndDate("");
   setNewEventDescription(meetingDescriptionTemplate);
 
   if (clientsForEvent.length === 0) {
@@ -639,6 +648,60 @@ async function syncCreatedMeetingToOutlook(params: {
   }
 }
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getInclusiveDateRange(startDateValue: string, endDateValue: string) {
+  const startDate = new Date(`${startDateValue}T00:00:00`);
+  const endDate = new Date(`${endDateValue}T00:00:00`);
+
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  const current = new Date(startDate);
+
+  while (current.getTime() <= endDate.getTime()) {
+    dates.push(formatDateInputValue(current));
+    current.setDate(current.getDate() + 1);
+  }
+
+  return dates;
+}
+
+async function findAdvisorVacationConflict(advisorId: string, eventDateTime: string) {
+  if (!advisorId || !eventDateTime) return null;
+
+  const dateValue = getDateValue(eventDateTime);
+
+  if (!dateValue) return null;
+
+  const dayStart = `${dateValue}T00:00:00`;
+  const dayEnd = `${dateValue}T23:59:59`;
+
+  const { data, error } = await supabase
+    .from("calendar_events")
+    .select("id, title, event_at")
+    .eq("event_type", "vacation")
+    .eq("assigned_user_id", advisorId)
+    .gte("event_at", dayStart)
+    .lte("event_at", dayEnd)
+    .limit(1);
+
+  if (error) {
+    console.error("Nie udało się sprawdzić urlopu doradcy", error);
+    return null;
+  }
+
+  return data?.[0] || null;
+}
+
 async function createCalendarEventFromModal() {
   setCreateEventError("");
 
@@ -647,7 +710,7 @@ async function createCalendarEventFromModal() {
     return;
   }
 
-  if (!newEventClientId) {
+  if (newEventType !== "vacation" && !newEventClientId) {
     setCreateEventError("Wybierz klienta.");
     return;
   }
@@ -657,18 +720,108 @@ async function createCalendarEventFromModal() {
     return;
   }
 
-  if (!newEventAt) {
+  if (newEventType === "vacation") {
+    if (!newVacationStartDate || !newVacationEndDate) {
+      setCreateEventError("Wybierz zakres urlopu od dnia do dnia.");
+      return;
+    }
+
+    if (
+      new Date(`${newVacationEndDate}T00:00:00`).getTime() <
+      new Date(`${newVacationStartDate}T00:00:00`).getTime()
+    ) {
+      setCreateEventError("Data końca urlopu nie może być wcześniejsza niż data początku.");
+      return;
+    }
+  } else if (!newEventAt) {
     setCreateEventError("Wybierz datę i godzinę wydarzenia.");
     return;
   }
 
-  const selectedClient = clientsForEvent.find((client) => client.id === newEventClientId);
+  const selectedClient =
+    newEventType === "vacation"
+      ? null
+      : clientsForEvent.find((client) => client.id === newEventClientId);
   const selectedAdvisor = advisorsForEvent.find((advisor) => advisor.id === newEventAdvisorId) || null;
-  const clientName = selectedClient ? getClientDisplayName(selectedClient) : "Klient";
-  const eventTitle = `${newEventType === "meeting" ? "Spotkanie" : "Kontakt telefoniczny"}: ${clientName}`;
+  const advisorName = selectedAdvisor?.display_name || selectedAdvisor?.email || "doradca";
+  const clientName = selectedClient ? getClientDisplayName(selectedClient) : advisorName;
+  const eventTitle =
+    newEventType === "vacation"
+      ? `Urlop: ${advisorName}`
+      : `${newEventType === "meeting" ? "Spotkanie" : "Kontakt telefoniczny"}: ${clientName}`;
   const eventLocation = selectedClient ? getClientLocation(selectedClient) : "";
   const eventPhone = selectedClient?.phone || "";
+
+  if (newEventType !== "vacation") {
+    const vacationConflict = await findAdvisorVacationConflict(newEventAdvisorId, newEventAt);
+
+    if (vacationConflict) {
+      const conflictDate = new Date(vacationConflict.event_at).toLocaleDateString("pl-PL");
+      const advisorLabel = selectedAdvisor?.display_name || selectedAdvisor?.email || "Ten doradca";
+
+      setCreateEventError(
+        `${advisorLabel} ma urlop w dniu ${conflictDate}. Wybierz innego doradcę albo inny termin.`
+      );
+      return;
+    }
+  }
+
   setCreatingEvent(true);
+
+  if (newEventType === "vacation") {
+    const vacationDates = getInclusiveDateRange(newVacationStartDate, newVacationEndDate);
+
+    if (vacationDates.length === 0) {
+      setCreateEventError("Nieprawidłowy zakres urlopu.");
+      setCreatingEvent(false);
+      return;
+    }
+
+    const vacationDescription = [
+      `Urlop od ${newVacationStartDate} do ${newVacationEndDate}`,
+      newEventDescription || null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const vacationRows = vacationDates.map((dateValue) => ({
+      client_id: null,
+      title: eventTitle,
+      description: vacationDescription || null,
+      event_type: "vacation",
+      event_at: combineDateAndTime(dateValue, "09:00"),
+      status: "planned",
+      created_by: currentUserId,
+      assigned_user_id: newEventAdvisorId,
+      microsoft_sync_status: "not_synced",
+    }));
+
+    const { error } = await supabase
+      .from("calendar_events")
+      .insert(vacationRows);
+
+    if (error) {
+      console.error("Nie udało się utworzyć urlopu", error);
+      setCreateEventError("Nie udało się utworzyć urlopu.");
+      setCreatingEvent(false);
+      return;
+    }
+
+    setCreatingEvent(false);
+    setShowCreateEventModal(false);
+    setNewEventClientId("");
+    setNewEventClientSearch("");
+    setNewEventAdvisorId("");
+    setNewEventAdvisorSearch("");
+    setNewEventType("meeting");
+    setNewEventAt("");
+    setNewVacationStartDate("");
+    setNewVacationEndDate("");
+    setNewEventDescription("");
+
+    await loadCalendarItems();
+    return;
+  }
 
   const { data: createdEvent, error } = await supabase
     .from("calendar_events")
@@ -715,6 +868,8 @@ async function createCalendarEventFromModal() {
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
+  setNewVacationStartDate("");
+  setNewVacationEndDate("");
   setNewEventDescription("");
 
   await loadCalendarItems();
@@ -771,10 +926,19 @@ async function createCalendarEventFromModal() {
   }
 
   function isOverdueEvent(item: CalendarItem) {
+    if (item.type === "vacation") return false;
+
     return !isCompletedEvent(item.status) && new Date(item.date).getTime() < Date.now();
   }
 
   function getCalendarItemStyle(item: CalendarItem) {
+    if (item.type === "vacation") {
+      return {
+        card: "bg-orange-100 border-orange-200 hover:bg-orange-200",
+        time: "text-orange-900",
+        badge: "bg-orange-200 text-orange-900",
+      };
+    }
     if (item.type === "phone_call") {
       return {
         card: "bg-violet-100 border-violet-200 hover:bg-violet-200",
@@ -846,6 +1010,7 @@ async function createCalendarEventFromModal() {
   }
 
   function getCalendarItemLabel(item: CalendarItem) {
+    if (item.type === "vacation") return "Urlop";
     if (item.status?.includes("Zainteresowany")) return "Zainteresowany";
     if (item.status?.includes("Niezainteresowany")) return "Niezainteresowany";
     if (item.status?.includes("Rezygnacja")) return "Rezygnacja";
@@ -1373,70 +1538,126 @@ async function createCalendarEventFromModal() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="block">
-                    <span className="text-sm font-semibold text-slate-700">Klient</span>
-                    <div className="relative mt-2">
-                      <input
-                        type="text"
-                        value={newEventClientSearch}
-                        onChange={(event) => {
-                          setNewEventClientSearch(event.target.value);
-                          setNewEventClientId("");
-                        }}
-                        className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                        placeholder="Wyszukaj po nazwie, telefonie, e-mailu lub mieście..."
-                      />
+                  <div>
+  <span className="text-sm font-semibold text-slate-700">Typ wydarzenia</span>
+  <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <button
+      type="button"
+      onClick={() => {
+        setNewEventType("meeting");
+        setNewEventDescription(meetingDescriptionTemplate);
+      }}
+      className={`rounded-xl border px-4 py-3 text-left transition ${
+        newEventType === "meeting"
+          ? "border-sky-400 bg-sky-50 text-sky-900"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      <div className="font-semibold">Spotkanie</div>
+      <div className="text-xs opacity-70">Z klientem</div>
+    </button>
 
-                      {selectedEventClient && (
-                        <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                          <span className="font-bold">Wybrano:</span> {getClientDisplayName(selectedEventClient)}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewEventClientId("");
-                              setNewEventClientSearch("");
-                            }}
-                            className="ml-3 font-bold text-emerald-700 underline underline-offset-2"
-                          >
-                            zmień
-                          </button>
-                        </div>
-                      )}
+    <button
+      type="button"
+      onClick={() => {
+        setNewEventType("phone_call");
+        setNewEventDescription("");
+      }}
+      className={`rounded-xl border px-4 py-3 text-left transition ${
+        newEventType === "phone_call"
+          ? "border-violet-400 bg-violet-50 text-violet-900"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      <div className="font-semibold">Kontakt telefoniczny</div>
+      <div className="text-xs opacity-70">Telefon / kontakt</div>
+    </button>
 
-                      {!selectedEventClient && (
-                        <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                          {newEventClientSearch.trim().length < 2 ? (
-                            <div className="px-4 py-3 text-sm text-slate-400">
-                              Wpisz minimum 2 znaki, aby wyszukać klienta.
-                            </div>
-                          ) : filteredClientsForEvent.length === 0 ? (
-                            <div className="px-4 py-3 text-sm text-slate-400">
-                              Brak klientów pasujących do wyszukiwania.
-                            </div>
-                          ) : (
-                            filteredClientsForEvent.map((client) => (
-                              <button
-                                key={client.id}
-                                type="button"
-                                onClick={() => {
-                                  setNewEventClientId(client.id);
-                                  setNewEventClientSearch(getClientDisplayName(client));
-                                }}
-                                className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-emerald-50"
-                              >
-                                <span className="block font-bold text-slate-900">
-                                  {getClientDisplayName(client)}
-                                </span>
-                                <span className="mt-1 block text-xs text-slate-500">
-                                  {[client.phone, client.email, client.city].filter(Boolean).join(" • ") || "Brak danych kontaktowych"}
-                                </span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
+    <button
+      type="button"
+      onClick={() => {
+        setNewEventType("vacation");
+        setNewEventClientId("");
+        setNewEventClientSearch("");
+        setNewEventDescription("");
+      }}
+      className={`rounded-xl border px-4 py-3 text-left transition ${
+        newEventType === "vacation"
+          ? "border-orange-400 bg-orange-50 text-orange-900"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      <div className="font-semibold">Urlop</div>
+      <div className="text-xs opacity-70">Nie wymaga klienta</div>
+    </button>
+  </div>
+</div>
+                  {newEventType !== "vacation" && (
+                    <div className="block">
+                      <span className="text-sm font-semibold text-slate-700">Klient</span>
+                      <div className="relative mt-2">
+                        <input
+                          type="text"
+                          value={newEventClientSearch}
+                          onChange={(event) => {
+                            setNewEventClientSearch(event.target.value);
+                            setNewEventClientId("");
+                          }}
+                          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                          placeholder="Wyszukaj po nazwie, telefonie, e-mailu lub mieście..."
+                        />
+
+                        {selectedEventClient && (
+                          <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                            <span className="font-bold">Wybrano:</span> {getClientDisplayName(selectedEventClient)}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewEventClientId("");
+                                setNewEventClientSearch("");
+                              }}
+                              className="ml-3 font-bold text-emerald-700 underline underline-offset-2"
+                            >
+                              zmień
+                            </button>
+                          </div>
+                        )}
+
+                        {!selectedEventClient && (
+                          <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                            {newEventClientSearch.trim().length < 2 ? (
+                              <div className="px-4 py-3 text-sm text-slate-400">
+                                Wpisz minimum 2 znaki, aby wyszukać klienta.
+                              </div>
+                            ) : filteredClientsForEvent.length === 0 ? (
+                              <div className="px-4 py-3 text-sm text-slate-400">
+                                Brak klientów pasujących do wyszukiwania.
+                              </div>
+                            ) : (
+                              filteredClientsForEvent.map((client) => (
+                                <button
+                                  key={client.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewEventClientId(client.id);
+                                    setNewEventClientSearch(getClientDisplayName(client));
+                                  }}
+                                  className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-emerald-50"
+                                >
+                                  <span className="block font-bold text-slate-900">
+                                    {getClientDisplayName(client)}
+                                  </span>
+                                  <span className="mt-1 block text-xs text-slate-500">
+                                    {[client.phone, client.email, client.city].filter(Boolean).join(" • ") || "Brak danych kontaktowych"}
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div className="rounded-2xl border border-[#E7D49A] bg-[#F7EAC1] p-4">
                     <span className="text-sm font-bold text-slate-900">Wybierz doradcę</span>
@@ -1510,46 +1731,51 @@ async function createCalendarEventFromModal() {
                     </div>
                   </div>
 
-                  <div>
-                    <span className="text-sm font-semibold text-slate-700">Typ wydarzenia</span>
-                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewEventType("meeting");
-                          setNewEventDescription(meetingDescriptionTemplate);
-                        }}
-                        className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
-                          newEventType === "meeting"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100"
-                            : "border-slate-300 bg-white text-slate-600 hover:border-emerald-300"
-                        }`}
-                      >
-                        Spotkanie
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewEventType("phone_call");
-                          setNewEventDescription("");
-                        }}
-                        className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
-                          newEventType === "phone_call"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100"
-                            : "border-slate-300 bg-white text-slate-600 hover:border-emerald-300"
-                        }`}
-                      >
-                        Kontakt telefoniczny
-                      </button>
+                  {newEventType === "vacation" ? (
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Zakres urlopu
+                      </label>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            Od dnia
+                          </label>
+                          <input
+                            type="date"
+                            value={newVacationStartDate}
+                            onChange={(event) => {
+                              setNewVacationStartDate(event.target.value);
+                              if (!newVacationEndDate) {
+                                setNewVacationEndDate(event.target.value);
+                              }
+                            }}
+                            className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            Do dnia
+                          </label>
+                          <input
+                            type="date"
+                            value={newVacationEndDate}
+                            onChange={(event) => setNewVacationEndDate(event.target.value)}
+                            className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Urlop zostanie wpisany w kalendarzu na każdy dzień z wybranego zakresu.
+                      </p>
                     </div>
-                  </div>
-
-                  <DateTimePicker
-                    label="Data i godzina"
-                    value={newEventAt}
-                    onChange={setNewEventAt}
-                  />
+                  ) : (
+                    <DateTimePicker
+                      label="Data i godzina"
+                      value={newEventAt}
+                      onChange={setNewEventAt}
+                    />
+                  )}
 
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">Opis / notatka</span>
@@ -1717,9 +1943,16 @@ function CalendarEventCard({ item, onClick, showOwner = false }: CalendarEventCa
   }
 
   const isCompleted = item.status === "done" || item.status?.startsWith("Zakończone");
-  const isOverdue = !isCompleted && new Date(item.date).getTime() < Date.now();
+  const isOverdue = item.type !== "vacation" && !isCompleted && new Date(item.date).getTime() < Date.now();
 
   const itemStyle = (() => {
+    if (item.type === "vacation") {
+      return {
+        card: "bg-orange-100 border-orange-200",
+        time: "text-orange-900",
+        badge: "bg-orange-200 text-orange-900",
+      };
+    }
     if (item.status?.includes("Zainteresowany")) {
       return {
         card: "bg-[#FF4AC1]/10 border-[#FF4AC1]/30",
@@ -1792,6 +2025,7 @@ function CalendarEventCard({ item, onClick, showOwner = false }: CalendarEventCa
   })();
 
   const itemLabel = (() => {
+    if (item.type === "vacation") return "Urlop";
     if (item.status?.includes("Zainteresowany")) return "Zainteresowany";
     if (item.status?.includes("Niezainteresowany")) return "Niezainteresowany";
     if (item.status?.includes("Rezygnacja")) return "Rezygnacja";
