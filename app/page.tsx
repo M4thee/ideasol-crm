@@ -957,7 +957,7 @@ export default function Home() {
     if (ownerIds.length > 0) {
       const { data: ownersData, error: ownersError } = await supabase
         .from("profiles")
-        .select("*")
+        .select("id, full_name, display_name, name, username, email")
         .in("id", ownerIds);
 
       if (ownersError) {
