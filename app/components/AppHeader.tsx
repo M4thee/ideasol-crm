@@ -22,14 +22,14 @@ type AppHeaderProps = {
 };
 
 const navItems = [
-  { href: "/", label: "Dashboard" },
+  { href: "/", label: "Pulpit" },
   { href: "/calendar", label: "Kalendarz" },
   { href: "/clients", label: "Kontakty" },
   { href: "/tasks", label: "Zadania" },
   { href: "/sales", label: "Sprzedaże" },
+  { href: "/reports", label: "Raporty" },
   { href: "/calculator", label: "Kalkulator" },
 ];
-
 
 const roleLabels: Record<string, string> = {
   owner: "Właściciel",
@@ -767,7 +767,7 @@ const canManageUsers = profile?.role === "admin";
 
           {authChecked && profile && (
             <>
-              <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500 sm:text-base">
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 sm:text-xs">
                 <span className="truncate max-w-[220px] sm:max-w-none">
                   Witaj, {profile.display_name || profile.email}
                 </span>
@@ -789,7 +789,7 @@ const canManageUsers = profile?.role === "admin";
                 <button
                   type="button"
                   onClick={installOfflineCalculator}
-                  className="mt-1 inline-block text-left text-[11px] font-semibold text-emerald-700 transition hover:text-emerald-600 hover:underline sm:text-xs"
+                  className="mt-1 inline-block text-left text-[10px] font-semibold text-emerald-700 transition hover:text-emerald-600 hover:underline sm:text-[11px]"
                 >
                   Zainstaluj kalkulator offline na swój pulpit ⬇
                 </button>
@@ -798,7 +798,7 @@ const canManageUsers = profile?.role === "admin";
               {!installPromptEvent && !isInstalledPwa && isSafariBrowser && (
                 <Link
                   href="/calculator-app?install=1"
-                  className="mt-1 inline-block text-[11px] font-semibold text-slate-500 transition hover:text-slate-700 hover:underline sm:text-xs"
+                  className="mt-1 inline-block text-[10px] font-semibold text-slate-500 transition hover:text-slate-700 hover:underline sm:text-[11px]"
                 >
                   Jak zainstalować kalkulator offline w Safari? ⬇
                 </Link>
@@ -981,12 +981,11 @@ const canManageUsers = profile?.role === "admin";
               onClick={cycleThemeMode}
               title={`Motyw: ${activeThemeLabel}. Kliknij, aby zmienić.`}
               aria-label={`Motyw: ${activeThemeLabel}. Kliknij, aby zmienić.`}
-              className="ml-1 inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-bold text-slate-700 transition hover:bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-700 transition hover:bg-slate-50 hover:text-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500 text-[12px] leading-none text-white">
+              <span className="text-base leading-none">
                 {themeMode === "light" ? "☀️" : themeMode === "dark" ? "🌙" : "◐"}
               </span>
-              <span>{activeThemeLabel}</span>
             </button>
 
             <a
@@ -1297,6 +1296,8 @@ const canManageUsers = profile?.role === "admin";
                 </Link>
               );
             })}
+
+
 
             <a
               href="https://outlook.cloud.microsoft/mail/"
