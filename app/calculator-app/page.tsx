@@ -582,6 +582,7 @@ function writeCachedPricingOverrides(pricing: typeof DEFAULT_PRICING_OVERRIDES) 
 export default function Home() {
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
   const [syncingOfflineOffers, setSyncingOfflineOffers] = useState(false);
   const [offlineSyncBanner, setOfflineSyncBanner] = useState<OfflineSyncBannerState | null>(null);
@@ -638,6 +639,33 @@ export default function Home() {
   const advisorEmail = currentUserEmail || "kontakt@ideasol.pl";
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
   const canSeePricingPanel = currentUserRole.includes("admin");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const savedTheme = window.localStorage.getItem("ideasol:calculator-app:theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const shouldUseDarkMode = savedTheme
+      ? savedTheme === "dark"
+      : document.documentElement.classList.contains("dark") || prefersDark;
+
+    document.documentElement.classList.toggle("dark", shouldUseDarkMode);
+    setIsDarkMode(shouldUseDarkMode);
+  }, []);
+
+  function toggleDarkMode() {
+    setIsDarkMode((current) => {
+      const nextValue = !current;
+
+      document.documentElement.classList.toggle("dark", nextValue);
+      window.localStorage.setItem(
+        "ideasol:calculator-app:theme",
+        nextValue ? "dark" : "light"
+      );
+
+      return nextValue;
+    });
+  }
 
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -924,6 +952,78 @@ export default function Home() {
     return offerResult.energyStorage || offerResult.storage || "Brak";
   }
 
+  function inferStorageVoltageType(storageItem: {
+    code?: string | null;
+    name?: string | null;
+    display_name?: string | null;
+    displayName?: string | null;
+    voltage_type?: "low_voltage" | "high_voltage" | null;
+    voltageType?: "low_voltage" | "high_voltage" | null;
+  }) {
+    if (storageItem.voltage_type || storageItem.voltageType) {
+      return (storageItem.voltage_type || storageItem.voltageType) as
+        | "low_voltage"
+        | "high_voltage";
+    }
+
+    const storageLabel = `${storageItem.code || ""} ${storageItem.name || ""} ${storageItem.display_name || ""
+      } ${storageItem.displayName || ""}`
+      .trim()
+      .toUpperCase();
+
+    if (
+      storageLabel.includes("HIGH_VOLTAGE") ||
+      storageLabel.includes("HIGH VOLTAGE") ||
+      storageLabel.includes("HV") ||
+      storageLabel.includes("BOS-G") ||
+      storageLabel.includes("SE-G") ||
+      storageLabel.includes("SIGEN")
+    ) {
+      return "high_voltage";
+    }
+
+    return "low_voltage";
+  }
+
+  function inferInverterBatteryVoltageType(inverterItem: {
+    name?: string | null;
+    display_name?: string | null;
+    displayName?: string | null;
+    type?: string | null;
+    battery_voltage_type?: "low_voltage" | "high_voltage" | null;
+    batteryVoltageType?: "low_voltage" | "high_voltage" | null;
+  }) {
+    if (inverterItem.battery_voltage_type || inverterItem.batteryVoltageType) {
+      return (inverterItem.battery_voltage_type || inverterItem.batteryVoltageType) as
+        | "low_voltage"
+        | "high_voltage";
+    }
+
+    const inverterType = String(inverterItem.type || "").trim().toLowerCase();
+
+    if (inverterType !== "hybrid") {
+      return null;
+    }
+
+    const inverterLabel = `${inverterItem.name || ""} ${inverterItem.display_name || ""
+      } ${inverterItem.displayName || ""}`
+      .trim()
+      .toUpperCase();
+
+    if (
+      inverterLabel.includes("HIGH_VOLTAGE") ||
+      inverterLabel.includes("HIGH VOLTAGE") ||
+      inverterLabel.includes(" HV") ||
+      inverterLabel.includes("(HV") ||
+      inverterLabel.includes("SG01HP3") ||
+      inverterLabel.includes("SIGEN")
+    ) {
+      return "high_voltage";
+    }
+
+    return "low_voltage";
+  }
+
   function calculateNearestPanelCount(powerKwText: string, model: string) {
     const powerKw = Number(powerKwText.replace(",", "."));
 
@@ -1138,9 +1238,16 @@ export default function Home() {
         console.warn("Kalkulator offline — używam katalogu zapisanego w cache");
         return;
       }
-      const catalogResponse = await fetch("/api/calculate", {
-        method: "GET",
-      });
+      let catalogResponse: Response;
+
+      try {
+        catalogResponse = await fetch("/api/calculate", {
+          method: "GET",
+        });
+      } catch (error) {
+        console.warn("Nie udało się pobrać katalogu kalkulatora z API — używam cache/stanu", error);
+        return;
+      }
 
       if (!catalogResponse.ok) {
         console.warn("Nie udało się pobrać katalogu kalkulatora z API — zostawiam dane z cache/stanu");
@@ -1166,9 +1273,14 @@ export default function Home() {
       const loadedStorages = Object.entries(apiCatalog.storages || {})
         .filter(([code]) => code !== "none")
         .map(([code, catalogStorage]) => {
-          const storageVoltageType =
-            (catalogStorage as { voltageType?: "low_voltage" | "high_voltage" | null })
-              .voltageType || "low_voltage";
+          const storageVoltageType = inferStorageVoltageType({
+            code,
+            name: catalogStorage.name,
+            displayName: catalogStorage.displayName,
+            voltageType:
+              (catalogStorage as { voltageType?: "low_voltage" | "high_voltage" | null })
+                .voltageType || null,
+          });
 
           return {
             code,
@@ -1183,9 +1295,14 @@ export default function Home() {
         }) as CatalogStorage[];
 
       const loadedInverters = (apiCatalog.inverters || []).map((inverter) => {
-        const inverterBatteryVoltageType =
-          (inverter as { batteryVoltageType?: "low_voltage" | "high_voltage" | null })
-            .batteryVoltageType || null;
+        const inverterBatteryVoltageType = inferInverterBatteryVoltageType({
+          name: inverter.name,
+          displayName: inverter.displayName,
+          type: inverter.type,
+          batteryVoltageType:
+            (inverter as { batteryVoltageType?: "low_voltage" | "high_voltage" | null })
+              .batteryVoltageType || null,
+        });
 
         return {
           name: inverter.name,
@@ -1364,8 +1481,7 @@ export default function Home() {
     const storageCatalog: CalculatorCatalog["storages"] = storages.reduce<CalculatorCatalog["storages"]>(
       (acc, catalogStorage) => {
         const storageName = catalogStorage.display_name || catalogStorage.name || catalogStorage.code;
-        const storageVoltageType =
-          catalogStorage.voltage_type || catalogStorage.voltageType || "low_voltage";
+        const storageVoltageType = inferStorageVoltageType(catalogStorage);
 
         acc[catalogStorage.code] = {
           name: storageName,
@@ -1394,7 +1510,7 @@ export default function Home() {
       name: inverter.name,
       displayName: inverter.display_name || inverter.name,
       type: String(inverter.type || "ongrid") as any,
-      batteryVoltageType: inverter.battery_voltage_type || inverter.batteryVoltageType || null,
+      batteryVoltageType: inferInverterBatteryVoltageType(inverter),
       maxPvKw: Number(inverter.max_pv_kw || 0),
       priceNet: Number(inverter.price_net || 0),
     }));
@@ -2227,6 +2343,35 @@ IdeaSol`;
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={toggleDarkMode}
+            className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            title={isDarkMode ? "Przełącz na tryb dzienny" : "Przełącz na tryb nocny"}
+          >
+            {isDarkMode ? "☀️ Dzień" : "🌙 Noc"}
+          </button>
+
+          <a
+            href="/"
+            onClick={(event) => {
+              if (isOffline) {
+                event.preventDefault();
+              }
+            }}
+            aria-disabled={isOffline}
+            tabIndex={isOffline ? -1 : 0}
+            title={isOffline ? "Niedostępne w trybie offline" : "Wróć do CRM"}
+            className={`rounded-2xl border px-4 py-2 text-sm font-semibold shadow-sm transition ${isOffline
+              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-600"
+              : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              }`}
+          >
+            Wróć do CRM
+          </a>
+        </div>
+
         {offlineSyncBanner && (
           <div
             className={`rounded-3xl border p-4 text-sm font-semibold shadow-sm ${offlineSyncBanner.status === "syncing"
