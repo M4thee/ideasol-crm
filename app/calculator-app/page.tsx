@@ -157,13 +157,38 @@ type CrmClientOption = {
 
 const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
+const OFFLINE_CRM_OFFER_QUEUE_KEY = "ideasol:calculator:offlineCrmOfferQueue:v1";
+const OFFLINE_SYNC_STATUS_KEY = "ideasol:offlineSyncStatus:v1";
 const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v1";
 const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
+const CALCULATOR_PROFILE_CACHE_KEY = "ideasol:calculator:profile:v1";
 
 
 type CachedCrmClientsPayload = {
   savedAt: string;
   clients: CrmClientOption[];
+};
+type CachedCalculatorProfilePayload = {
+  savedAt: string;
+  email: string;
+  profile: UserProfile;
+};
+
+type OfflineSyncBannerState = {
+  status: "syncing" | "completed";
+  message: string;
+};
+
+type OfflineSyncStatusPayload = OfflineSyncBannerState & {
+  updatedAt: string;
+};
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: "accepted" | "dismissed";
+    platform: string;
+  }>;
 };
 type OfflineOfferQueueItem = {
   id: string;
@@ -177,6 +202,15 @@ type OfflineOfferQueueItem = {
   snapshot: Record<string, unknown>;
 };
 
+type OfflineCrmOfferQueueItem = {
+  id: string;
+  createdAt: string;
+  status: "pending";
+  clientId: string;
+  clientName: string | null;
+  offerPayload: Record<string, unknown>;
+};
+
 type CachedCalculatorCatalogPayload = {
   savedAt: string;
   panels: CatalogPanel[];
@@ -186,6 +220,50 @@ type CachedCalculatorCatalogPayload = {
 function isCalculatorOnline() {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;
+}
+
+function publishOfflineSyncStatus(status: OfflineSyncBannerState["status"], message: string) {
+  if (typeof window === "undefined") return;
+
+  const payload: OfflineSyncStatusPayload = {
+    status,
+    message,
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    window.localStorage.setItem(OFFLINE_SYNC_STATUS_KEY, JSON.stringify(payload));
+  } catch {
+    // Status synchronizacji jest tylko informacją UI.
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("ideasol:offline-sync-status", {
+      detail: payload,
+    })
+  );
+}
+
+function readOfflineSyncStatus() {
+  if (typeof window === "undefined") return null as OfflineSyncStatusPayload | null;
+
+  try {
+    const rawValue = window.localStorage.getItem(OFFLINE_SYNC_STATUS_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as OfflineSyncStatusPayload;
+
+    if (!parsedValue?.status || !parsedValue?.message) {
+      return null;
+    }
+
+    return parsedValue;
+  } catch {
+    return null;
+  }
 }
 
 function readCachedCrmClients() {
@@ -223,6 +301,45 @@ function writeCachedCrmClients(clients: CrmClientOption[]) {
     window.localStorage.setItem(CRM_CLIENTS_CACHE_KEY, JSON.stringify(payload));
   } catch (error) {
     console.warn("Nie udało się zapisać cache klientów CRM kalkulatora", error);
+  }
+}
+
+function readCachedCalculatorProfile() {
+  if (typeof window === "undefined") return null as CachedCalculatorProfilePayload | null;
+
+  try {
+    const rawValue = window.localStorage.getItem(CALCULATOR_PROFILE_CACHE_KEY);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as CachedCalculatorProfilePayload;
+
+    if (!parsedValue?.profile?.id) {
+      return null;
+    }
+
+    return parsedValue;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedCalculatorProfile(profile: UserProfile, email: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CALCULATOR_PROFILE_CACHE_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        email,
+        profile,
+      })
+    );
+  } catch {
+    // Cache profilu jest tylko dodatkiem do PWA offline.
   }
 }
 function createOfflineQueueId() {
@@ -277,6 +394,57 @@ function removeOfflineOfferFromQueue(itemId: string) {
   const nextQueue = currentQueue.filter((item) => item.id !== itemId);
   writeOfflineOfferQueue(nextQueue);
   return nextQueue.length;
+}
+
+function readOfflineCrmOfferQueue() {
+  if (typeof window === "undefined") return [] as OfflineCrmOfferQueueItem[];
+
+  try {
+    const rawValue = window.localStorage.getItem(OFFLINE_CRM_OFFER_QUEUE_KEY);
+
+    if (!rawValue) {
+      return [] as OfflineCrmOfferQueueItem[];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as OfflineCrmOfferQueueItem[];
+
+    if (!Array.isArray(parsedValue)) {
+      return [] as OfflineCrmOfferQueueItem[];
+    }
+
+    return parsedValue;
+  } catch (error) {
+    console.warn("Nie udało się odczytać kolejki zapisów ofert CRM offline", error);
+    return [] as OfflineCrmOfferQueueItem[];
+  }
+}
+
+function writeOfflineCrmOfferQueue(queue: OfflineCrmOfferQueueItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(OFFLINE_CRM_OFFER_QUEUE_KEY, JSON.stringify(queue));
+  } catch (error) {
+    console.warn("Nie udało się zapisać kolejki zapisów ofert CRM offline", error);
+  }
+}
+
+function addOfflineCrmOfferToQueue(item: OfflineCrmOfferQueueItem) {
+  const currentQueue = readOfflineCrmOfferQueue();
+  const nextQueue = [item, ...currentQueue];
+  writeOfflineCrmOfferQueue(nextQueue);
+  return nextQueue.length;
+}
+
+function removeOfflineCrmOfferFromQueue(itemId: string) {
+  const currentQueue = readOfflineCrmOfferQueue();
+  const nextQueue = currentQueue.filter((item) => item.id !== itemId);
+  writeOfflineCrmOfferQueue(nextQueue);
+  return nextQueue.length;
+}
+
+function getOfflineQueueCount() {
+  return readOfflineOfferQueue().length + readOfflineCrmOfferQueue().length;
 }
 
 
@@ -406,6 +574,11 @@ export default function Home() {
   const [isOffline, setIsOffline] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
   const [syncingOfflineOffers, setSyncingOfflineOffers] = useState(false);
+  const [offlineSyncBanner, setOfflineSyncBanner] = useState<OfflineSyncBannerState | null>(null);
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showInstallInstructions, setShowInstallInstructions] = useState(false);
+  const [isInstalledPwa, setIsInstalledPwa] = useState(false);
+  const installRequestedFromUrlRef = useRef(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -455,10 +628,120 @@ export default function Home() {
   const advisorEmail = currentUserEmail || "kontakt@ideasol.pl";
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
   const canSeePricingPanel = currentUserRole.includes("admin");
+
+  useEffect(() => {
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function showSyncStatus(payload: OfflineSyncStatusPayload | null) {
+      if (!payload) return;
+
+      setOfflineSyncBanner({
+        status: payload.status,
+        message: payload.message,
+      });
+
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+
+      if (payload.status === "completed") {
+        hideTimer = setTimeout(() => {
+          setOfflineSyncBanner(null);
+        }, 5000);
+      }
+    }
+
+    const cachedStatus = readOfflineSyncStatus();
+
+    if (cachedStatus?.status === "syncing") {
+      showSyncStatus(cachedStatus);
+    }
+
+    function handleSyncStatus(event: Event) {
+      const customEvent = event as CustomEvent<OfflineSyncStatusPayload>;
+      showSyncStatus(customEvent.detail);
+    }
+
+    window.addEventListener("ideasol:offline-sync-status", handleSyncStatus);
+
+    return () => {
+      window.removeEventListener("ideasol:offline-sync-status", handleSyncStatus);
+
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    function updateInstalledState() {
+      const isStandalone =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+
+      setIsInstalledPwa(isStandalone);
+    }
+
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      setInstallPromptEvent(event as BeforeInstallPromptEvent);
+    }
+
+    function handleAppInstalled() {
+      setIsInstalledPwa(true);
+      setInstallPromptEvent(null);
+      setShowInstallInstructions(false);
+    }
+
+    updateInstalledState();
+
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("install") === "1") {
+      installRequestedFromUrlRef.current = true;
+      setShowInstallInstructions(true);
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  async function installCalculatorApp() {
+    if (isInstalledPwa) {
+      setShowInstallInstructions(true);
+      return;
+    }
+
+    if (!installPromptEvent) {
+      setShowInstallInstructions(true);
+      return;
+    }
+
+    await installPromptEvent.prompt();
+    const choice = await installPromptEvent.userChoice.catch(() => null);
+
+    if (choice?.outcome === "accepted") {
+      setIsInstalledPwa(true);
+      setShowInstallInstructions(false);
+    }
+
+    setInstallPromptEvent(null);
+  }
   useEffect(() => {
     function updateOnlineStatus() {
-      setIsOffline(!isCalculatorOnline());
-      setQueuedOfferCount(readOfflineOfferQueue().length);
+      const online = isCalculatorOnline();
+      setIsOffline(!online);
+      setQueuedOfferCount(getOfflineQueueCount());
+
+      if (online) {
+        void syncOfflineQueues();
+      }
     }
 
     updateOnlineStatus();
@@ -470,6 +753,89 @@ export default function Home() {
       window.removeEventListener("offline", updateOnlineStatus);
     };
   }, []);
+  async function syncOfflineQueues() {
+    if (!isCalculatorOnline() || syncingOfflineOffers) {
+      return;
+    }
+
+    const pendingQueueCount = getOfflineQueueCount();
+
+    if (pendingQueueCount === 0) {
+      return;
+    }
+
+    publishOfflineSyncStatus("syncing", "Trwa synchronizacja danych z trybu offline...");
+
+    await syncOfflineCrmOfferQueue();
+    await syncOfflineOfferQueue();
+
+    const remainingQueueCount = getOfflineQueueCount();
+    setQueuedOfferCount(remainingQueueCount);
+
+    if (remainingQueueCount === 0) {
+      publishOfflineSyncStatus("completed", "Synchronizacja ukończona.");
+    }
+  }
+
+  async function syncOfflineCrmOfferQueue() {
+    if (!isCalculatorOnline()) {
+      return;
+    }
+
+    const queue = readOfflineCrmOfferQueue();
+
+    if (queue.length === 0) {
+      setQueuedOfferCount(getOfflineQueueCount());
+      return;
+    }
+
+    setSyncingOfflineOffers(true);
+
+    try {
+      for (const queuedOffer of queue) {
+        let data: { id: string; offer_public_id?: string | null } | null = null;
+        let error: { message?: string; details?: string; hint?: string; code?: string } | null = null;
+
+        try {
+          const response = await supabase
+            .from("client_offers")
+            .insert(queuedOffer.offerPayload)
+            .select("id, offer_public_id")
+            .single();
+
+          data = response.data as { id: string; offer_public_id?: string | null } | null;
+          error = response.error;
+        } catch (syncError) {
+          console.warn("Nie udało się zsynchronizować kolejki ofert CRM offline", {
+            queueId: queuedOffer.id,
+            error: syncError,
+          });
+          break;
+        }
+
+        if (error) {
+          console.error("Błąd synchronizacji oferty offline z CRM", {
+            queueId: queuedOffer.id,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code,
+          });
+          continue;
+        }
+
+        removeOfflineCrmOfferFromQueue(queuedOffer.id);
+
+        if (data?.id) {
+          setSavedOfferId(data.id);
+        }
+      }
+
+      setQueuedOfferCount(getOfflineQueueCount());
+    } finally {
+      setSyncingOfflineOffers(false);
+    }
+  }
 
   function getPanelPowerWp(model: string) {
     const selectedPanel = panels.find((panel) => panel.code === model);
@@ -557,36 +923,13 @@ export default function Home() {
 
   useEffect(() => {
     async function loadCurrentUserProfile() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const cachedProfile = readCachedCalculatorProfile();
 
-      const user = session?.user;
+      if (cachedProfile?.profile) {
+        setUserProfile(cachedProfile.profile);
+        setCurrentUserEmail(cachedProfile.email || "");
 
-      if (!user) {
-        setUserProfile(null);
-        setCurrentUserEmail("");
-        return null;
-      }
-
-      setCurrentUserEmail(user.email || "");
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, display_name, phone, default_seller_markup, role, is_active")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        console.warn("Nie znaleziono profilu użytkownika kalkulatora", error);
-        return user;
-      }
-
-      if (data) {
-        const profile = data as UserProfile;
-        setUserProfile(profile);
-
-        const defaultMargin = profile.default_seller_markup;
+        const defaultMargin = cachedProfile.profile.default_seller_markup;
 
         if (defaultMargin !== null && defaultMargin !== undefined) {
           const parsedDefaultMargin = Number(defaultMargin);
@@ -597,7 +940,59 @@ export default function Home() {
         }
       }
 
-      return user;
+      if (!isCalculatorOnline()) {
+        return cachedProfile?.profile
+          ? { id: cachedProfile.profile.id, email: cachedProfile.email }
+          : null;
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const user = session?.user;
+
+        if (!user) {
+          return cachedProfile?.profile
+            ? { id: cachedProfile.profile.id, email: cachedProfile.email }
+            : null;
+        }
+
+        setCurrentUserEmail(user.email || "");
+
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, phone, default_seller_markup, role, is_active")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          return user;
+        }
+
+        if (data) {
+          const profile = data as UserProfile;
+          setUserProfile(profile);
+          writeCachedCalculatorProfile(profile, user.email || "");
+
+          const defaultMargin = profile.default_seller_markup;
+
+          if (defaultMargin !== null && defaultMargin !== undefined) {
+            const parsedDefaultMargin = Number(defaultMargin);
+
+            if (Number.isFinite(parsedDefaultMargin)) {
+              setSellerMarkup(parsedDefaultMargin);
+            }
+          }
+        }
+
+        return user;
+      } catch {
+        return cachedProfile?.profile
+          ? { id: cachedProfile.profile.id, email: cachedProfile.email }
+          : null;
+      }
     }
 
     async function loadPricingSettings() {
@@ -710,6 +1105,19 @@ export default function Home() {
         setPanels(cachedCatalog.panels);
         setStorages(cachedCatalog.storages);
         setInverters(cachedCatalog.inverters);
+
+        setPanelModel((current) =>
+          cachedCatalog.panels.some((panel: CatalogPanel) => panel.code === current)
+            ? current
+            : cachedCatalog.panels[0].code
+        );
+
+        setStorage((current) =>
+          current === "none" ||
+            cachedCatalog.storages.some((catalogStorage: CatalogStorage) => catalogStorage.code === current)
+            ? current
+            : cachedCatalog.storages[0].code
+        );
       }
 
       if (!isCalculatorOnline()) {
@@ -802,7 +1210,7 @@ export default function Home() {
       await Promise.all([
         loadCatalog(),
         loadPricingSettings(),
-        user ? loadCrmClients() : Promise.resolve(),
+        loadCrmClients(),
       ]);
     }
 
@@ -996,20 +1404,70 @@ export default function Home() {
   async function calculate() {
     const calculationPayload = buildCalculationPayload();
 
+    if (
+      calculationPayload.offerType !== "storage" &&
+      !panels.some((panel: CatalogPanel) => panel.code === calculationPayload.panelModel)
+    ) {
+      const fallbackPanel = panels[0];
+
+      if (fallbackPanel) {
+        setPanelModel(fallbackPanel.code);
+        calculationPayload.panelModel = fallbackPanel.code;
+      }
+    }
+
+    if (
+      calculationPayload.offerType !== "pv" &&
+      calculationPayload.storage !== "none" &&
+      !storages.some((catalogStorage: CatalogStorage) => catalogStorage.code === calculationPayload.storage)
+    ) {
+      const fallbackStorage = storages[0];
+
+      if (fallbackStorage) {
+        setStorage(fallbackStorage.code);
+        calculationPayload.storage = fallbackStorage.code;
+      }
+    }
+
     try {
       let data: Result;
 
       if (!isCalculatorOnline()) {
         const offlineCatalog = buildCalculatorCatalogFromState();
+        const offlinePanelKeys = Object.keys(offlineCatalog.panels);
+        const offlineStorageKeys = Object.keys(offlineCatalog.storages);
 
         if (
-          Object.keys(offlineCatalog.panels).length === 0 ||
+          offlinePanelKeys.length === 0 ||
           offlineCatalog.inverters.length === 0 ||
-          Object.keys(offlineCatalog.storages).length === 0
+          offlineStorageKeys.length === 0
         ) {
           throw new Error(
             "Brak katalogu offline. Otwórz kalkulator raz przy dostępie do internetu, żeby zapisać katalog w pamięci przeglądarki."
           );
+        }
+
+        if (
+          calculationPayload.offerType !== "storage" &&
+          !offlineCatalog.panels[calculationPayload.panelModel]
+        ) {
+          const fallbackPanelCode = offlinePanelKeys[0];
+
+          if (fallbackPanelCode) {
+            calculationPayload.panelModel = fallbackPanelCode;
+            setPanelModel(fallbackPanelCode);
+          }
+        }
+
+        const requestedStorageKey =
+          calculationPayload.offerType === "pv" ? "none" : calculationPayload.storage;
+
+        if (!offlineCatalog.storages[requestedStorageKey]) {
+          const fallbackStorageCode =
+            offlineStorageKeys.find((storageKey) => storageKey !== "none") || "none";
+
+          calculationPayload.storage = fallbackStorageCode;
+          setStorage(fallbackStorageCode);
         }
 
         data = calculateOffer({
@@ -1182,6 +1640,24 @@ export default function Home() {
       },
     };
 
+    if (!isCalculatorOnline()) {
+      const queueLength = addOfflineCrmOfferToQueue({
+        id: createOfflineQueueId(),
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        clientId: clientIdForSave,
+        clientName: clientName || (selectedClientForOffer ? getClientDisplayName(selectedClientForOffer) : null),
+        offerPayload,
+      });
+
+      setQueuedOfferCount(getOfflineQueueCount());
+      setSaveOfferStatus(
+        `Brak internetu. Oferta została zapisana lokalnie i czeka na synchronizację z CRM. Kolejka: ${queueLength}.`
+      );
+      setSavingOffer(false);
+      return null;
+    }
+
     const { data, error } = await supabase
       .from("client_offers")
       .insert(offerPayload)
@@ -1189,6 +1665,28 @@ export default function Home() {
       .single();
 
     if (error) {
+      const isNetworkSaveError =
+        !isCalculatorOnline() ||
+        String(error.message || "").toLowerCase().includes("fetch") ||
+        String(error.message || "").toLowerCase().includes("load failed");
+
+      if (isNetworkSaveError) {
+        const queueLength = addOfflineCrmOfferToQueue({
+          id: createOfflineQueueId(),
+          createdAt: new Date().toISOString(),
+          status: "pending",
+          clientId: clientIdForSave,
+          clientName: clientName || (selectedClientForOffer ? getClientDisplayName(selectedClientForOffer) : null),
+          offerPayload,
+        });
+
+        setQueuedOfferCount(getOfflineQueueCount());
+        setSaveOfferStatus(
+          `Brak połączenia z CRM. Oferta została zapisana lokalnie i czeka na synchronizację. Kolejka: ${queueLength}.`
+        );
+        setSavingOffer(false);
+        return null;
+      }
       console.error("Błąd zapisu oferty w CRM", {
         message: error.message,
         details: error.details,
@@ -1340,7 +1838,7 @@ IdeaSol`;
       };
 
       const nextQueueLength = addOfflineOfferToQueue(offlineItem);
-      setQueuedOfferCount(nextQueueLength);
+      setQueuedOfferCount(getOfflineQueueCount());
       setSendingEmail(false);
       setEmailStatus(
         `Brak internetu — oferta została dodana do kolejki offline. Liczba oczekujących ofert: ${nextQueueLength}.`
@@ -1479,7 +1977,7 @@ IdeaSol`;
     const queue = readOfflineOfferQueue();
 
     if (queue.length === 0) {
-      setQueuedOfferCount(0);
+      setQueuedOfferCount(getOfflineQueueCount());
       return;
     }
 
@@ -1662,8 +2160,8 @@ IdeaSol`;
           );
         }
 
-        const nextQueueLength = removeOfflineOfferFromQueue(item.id);
-        setQueuedOfferCount(nextQueueLength);
+        removeOfflineOfferFromQueue(item.id);
+        setQueuedOfferCount(getOfflineQueueCount());
       }
 
       setEmailStatus("Zaległe oferty offline zostały zsynchronizowane.");
@@ -1676,7 +2174,7 @@ IdeaSol`;
       );
     } finally {
       setSyncingOfflineOffers(false);
-      setQueuedOfferCount(readOfflineOfferQueue().length);
+      setQueuedOfferCount(getOfflineQueueCount());
     }
   }
 
@@ -1685,7 +2183,7 @@ IdeaSol`;
       return;
     }
 
-    void syncOfflineOfferQueue();
+    void syncOfflineQueues();
   }, [isOffline, queuedOfferCount, userProfile?.id]);
 
 
@@ -1693,6 +2191,72 @@ IdeaSol`;
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
+        {offlineSyncBanner && (
+          <div
+            className={`rounded-3xl border p-4 text-sm font-semibold shadow-sm ${offlineSyncBanner.status === "syncing"
+              ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100"
+              : "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
+              }`}
+          >
+            {offlineSyncBanner.message}
+          </div>
+        )}
+
+        {showInstallInstructions && (
+          <section className="rounded-3xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  PWA offline
+                </p>
+                <h2 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">
+                  Kalkulator IdeaSol w wersji offline
+                </h2>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600 dark:text-slate-300 sm:text-sm">
+                  {isInstalledPwa
+                    ? "Aplikacja jest już uruchomiona w trybie zainstalowanym."
+                    : installPromptEvent
+                      ? "Przeglądarka jest gotowa do instalacji kalkulatora jako aplikacji na pulpicie."
+                      : "Ta przeglądarka nie udostępnia automatycznej instalacji. Skorzystaj z krótkiej instrukcji poniżej."}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {installPromptEvent && !isInstalledPwa && (
+                  <button
+                    type="button"
+                    onClick={installCalculatorApp}
+                    className="rounded-2xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 sm:text-sm"
+                  >
+                    Zainstaluj kalkulator ⬇
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowInstallInstructions(false)}
+                  className="rounded-2xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Zamknij
+                </button>
+              </div>
+            </div>
+
+            {!installPromptEvent && !isInstalledPwa && (
+              <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 sm:text-xs">
+                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
+                  🌐 Chrome/Edge: ikona instalacji w pasku adresu
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
+                  🧭 Safari: Plik → Dodaj do Docka
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
+                  📱 iOS: Udostępnij → Do ekranu początkowego
+                </span>
+              </div>
+            )}
+          </section>
+        )}
 
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -1705,9 +2269,21 @@ IdeaSol`;
                 : "Masz oczekujące oferty zapisane offline."}
             </p>
             {queuedOfferCount > 0 && (
-              <p className="mt-2 font-medium">
-                Oczekujące oferty do synchronizacji: {queuedOfferCount}
-              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="font-medium">
+                  Oczekujące oferty do synchronizacji: {queuedOfferCount}
+                </p>
+                {!isOffline && (
+                  <button
+                    type="button"
+                    onClick={() => void syncOfflineQueues()}
+                    disabled={syncingOfflineOffers}
+                    className="rounded-2xl bg-amber-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-200 dark:text-amber-950 dark:hover:bg-amber-100"
+                  >
+                    {syncingOfflineOffers ? "Synchronizuję..." : "Synchronizuj teraz"}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

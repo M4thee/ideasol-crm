@@ -291,8 +291,23 @@ function buildPricing(
 ) {
   const overrides = body.pricingOverrides || {};
 
+  const effectivePanels =
+    catalog?.panels && Object.keys(catalog.panels).length > 0
+      ? catalog.panels
+      : FALLBACK_PANELS;
+
+  const effectiveInverters =
+    Array.isArray(catalog?.inverters) && catalog.inverters.length > 0
+      ? catalog.inverters
+      : FALLBACK_INVERTERS;
+
+  const effectiveStorages =
+    catalog?.storages && Object.keys(catalog.storages).length > 0
+      ? catalog.storages
+      : FALLBACK_STORAGES;
+
   const panels = Object.fromEntries(
-    Object.entries(catalog.panels).map(([code, panel]) => [
+    Object.entries(effectivePanels).map(([code, panel]) => [
       code,
       {
         ...panel,
@@ -304,7 +319,7 @@ function buildPricing(
     ])
   ) as Record<string, PanelItem>;
 
-  const inverters = catalog.inverters.map((inverter) => ({
+  const inverters = effectiveInverters.map((inverter) => ({
     ...inverter,
     priceNet: getNumberOverride(
       overrides?.inverters?.[inverter.name]?.priceNet,
@@ -313,7 +328,7 @@ function buildPricing(
   }));
 
   const storages = Object.fromEntries(
-    Object.entries(catalog.storages).map(([code, storage]) => [
+    Object.entries(effectiveStorages).map(([code, storage]) => [
       code,
       {
         ...storage,
@@ -601,12 +616,29 @@ export function calculateOffer(input: CalculateOfferInput) {
     additionalServices.reduce((sum, service) => sum + service.totalNet, 0)
   );
 
-  const panel = pricing.panels[body.panelModel as keyof typeof pricing.panels];
+  let panel = pricing.panels[body.panelModel as keyof typeof pricing.panels];
   const requestedStorageKey = isPvOnly ? "none" : body.storage;
-  const storage = pricing.storages[requestedStorageKey as keyof typeof pricing.storages];
+  let storage = pricing.storages[requestedStorageKey as keyof typeof pricing.storages];
+
+  if (!panel && !isStorageOnly) {
+    panel = Object.values(pricing.panels)[0];
+  }
+
+  if (!storage) {
+    const availableStorages = Object.values(pricing.storages);
+
+    storage = isPvOnly
+      ? pricing.storages.none || availableStorages[0]
+      : availableStorages.find(
+        (catalogStorage) =>
+          catalogStorage.displayName !== "Brak" && catalogStorage.capacityKwh > 0
+      ) || pricing.storages.none || availableStorages[0];
+  }
 
   if ((!panel && !isStorageOnly) || !storage) {
-    throw new Error("Nieprawidłowe dane formularza");
+    throw new Error(
+      `Nieprawidłowe dane formularza: panelModel=${String(body.panelModel)}, storage=${String(requestedStorageKey)}, offerType=${String(offerType)}, panelKeys=${Object.keys(pricing.panels).slice(0, 8).join(",")}, storageKeys=${Object.keys(pricing.storages).slice(0, 8).join(",")}`
+    );
   }
 
   const panelCount = Number(body.panelCount || 0);

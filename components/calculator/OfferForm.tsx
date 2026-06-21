@@ -64,6 +64,51 @@ type CrmClientOption = {
   province: string | null;
 };
 
+const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
+
+type CachedCrmClientsPayload = {
+  savedAt: string;
+  clients: CrmClientOption[];
+};
+
+function readCachedOfferFormClients() {
+  if (typeof window === "undefined") return [] as CrmClientOption[];
+
+  try {
+    const rawValue = window.localStorage.getItem(CRM_CLIENTS_CACHE_KEY);
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as CachedCrmClientsPayload;
+
+    if (!Array.isArray(parsedValue.clients)) {
+      return [];
+    }
+
+    return parsedValue.clients;
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedOfferFormClients(clients: CrmClientOption[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CRM_CLIENTS_CACHE_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        clients,
+      })
+    );
+  } catch {
+    // Cache jest tylko dodatkiem do trybu offline, więc błędy ignorujemy.
+  }
+}
+
 
 type OfferFormProps = {
   offerType: string;
@@ -209,6 +254,12 @@ export default function OfferForm({
 
   useEffect(() => {
     async function loadClientsIfNeeded() {
+      const cachedClients = readCachedOfferFormClients();
+
+      if (cachedClients.length > 0 && internalCrmClients.length === 0) {
+        setInternalCrmClients(cachedClients);
+      }
+
       if (crmClients.length > 0 || internalCrmClients.length > 0) return;
 
       if (!isOfferFormOnline()) {
@@ -284,6 +335,7 @@ export default function OfferForm({
 
         const loadedClients = clientsData || [];
         setInternalCrmClients(loadedClients);
+        writeCachedOfferFormClients(loadedClients);
 
         const start = new Date();
         start.setHours(0, 0, 0, 0);

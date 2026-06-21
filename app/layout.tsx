@@ -13,10 +13,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-
 export const metadata: Metadata = {
   title: "IdeaSol CRM",
   description: "",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "IdeaSol Kalkulator",
+    statusBarStyle: "default",
+  },
   icons: {
     icon: "/logo.png",
     shortcut: "/logo.png",
@@ -40,6 +45,20 @@ const themeInitScript = `
   })();
 `;
 
+const serviceWorkerRegistrationScript = `
+  (function () {
+    if (!("serviceWorker" in navigator)) {
+      return;
+    }
+
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function (error) {
+        console.warn("Nie udało się zarejestrować service workera IdeaSol", error);
+      });
+    });
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -53,6 +72,7 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: serviceWorkerRegistrationScript }} />
       </head>
       <body className="min-h-screen w-full bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         <AppShell>{children}</AppShell>
