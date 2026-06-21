@@ -305,10 +305,22 @@ export default function ClientPage() {
       .from("clients")
       .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at, created_by")
       .eq("id", clientId)
-      .single();
+      .maybeSingle();
 
-    if (clientError || !clientData) {
+    if (clientError) {
       console.error("Błąd ładowania klienta:", clientError);
+      setLoading(false);
+      return;
+    }
+
+    if (!clientData) {
+      setClient(null);
+      setEvents([]);
+      setSales([]);
+      setOffers([]);
+      setNotes([]);
+      setActivities([]);
+      setAccessDenied(true);
       setLoading(false);
       return;
     }
