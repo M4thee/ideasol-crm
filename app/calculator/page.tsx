@@ -151,12 +151,24 @@ type CrmClientOption = {
 };
 
 const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
+const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
+
 
 type CachedCrmClientsPayload = {
   savedAt: string;
   clients: CrmClientOption[];
 };
-
+type OfflineOfferQueueItem = {
+  id: string;
+  createdAt: string;
+  status: "pending";
+  clientId: string;
+  clientName: string | null;
+  clientEmail: string;
+  sendMode: "anonymous" | "public";
+  offerText: string;
+  snapshot: Record<string, unknown>;
+};
 function isCalculatorOnline() {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;
@@ -198,6 +210,53 @@ function writeCachedCrmClients(clients: CrmClientOption[]) {
   } catch (error) {
     console.warn("Nie udało się zapisać cache klientów CRM kalkulatora", error);
   }
+}
+function createOfflineQueueId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function readOfflineOfferQueue() {
+  if (typeof window === "undefined") return [] as OfflineOfferQueueItem[];
+
+  try {
+    const rawValue = window.localStorage.getItem(OFFLINE_OFFER_QUEUE_KEY);
+
+    if (!rawValue) {
+      return [] as OfflineOfferQueueItem[];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as OfflineOfferQueueItem[];
+
+    if (!Array.isArray(parsedValue)) {
+      return [] as OfflineOfferQueueItem[];
+    }
+
+    return parsedValue;
+  } catch (error) {
+    console.warn("Nie udało się odczytać kolejki ofert offline", error);
+    return [] as OfflineOfferQueueItem[];
+  }
+}
+
+function writeOfflineOfferQueue(queue: OfflineOfferQueueItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(OFFLINE_OFFER_QUEUE_KEY, JSON.stringify(queue));
+  } catch (error) {
+    console.warn("Nie udało się zapisać kolejki ofert offline", error);
+  }
+}
+
+function addOfflineOfferToQueue(item: OfflineOfferQueueItem) {
+  const currentQueue = readOfflineOfferQueue();
+  const nextQueue = [item, ...currentQueue];
+  writeOfflineOfferQueue(nextQueue);
+  return nextQueue.length;
 }
 
 
@@ -249,6 +308,7 @@ const DEFAULT_PRICING_OVERRIDES = {
 export default function Home() {
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
+  const [queuedOfferCount, setQueuedOfferCount] = useState(0);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
@@ -301,8 +361,9 @@ export default function Home() {
   const canSeePricingPanel = currentUserRole.includes("admin");
   useEffect(() => {
     function updateOnlineStatus() {
-      setIsOffline(!isCalculatorOnline());
-    }
+  setIsOffline(!isCalculatorOnline());
+  setQueuedOfferCount(readOfflineOfferQueue().length);
+}
 
     updateOnlineStatus();
     window.addEventListener("online", updateOnlineStatus);
@@ -972,10 +1033,64 @@ IdeaSol`;
     }
 
     setClientEmail(emailForSend);
-    setSendingEmail(true);
-    setEmailStatus("");
+setSendingEmail(true);
+setEmailStatus("");
 
-    if (!selectedClientEmail && typedClientEmail) {
+if (!isCalculatorOnline()) {
+  const offlineItem: OfflineOfferQueueItem = {
+    id: createOfflineQueueId(),
+    createdAt: new Date().toISOString(),
+    status: "pending",
+    clientId: selectedClientId,
+    clientName: clientName || getClientDisplayName(selectedClient),
+    clientEmail: emailForSend,
+    sendMode: mode,
+    offerText: buildOfferText(result),
+    snapshot: {
+      result,
+      selectedClientId,
+      clientName: clientName || getClientDisplayName(selectedClient),
+      clientEmail: emailForSend,
+      selectedClientEmail,
+      typedClientEmail,
+      offerType,
+      panelModel,
+      panelCount,
+      panelPowerWp: getPanelPowerWp(panelModel),
+      panelName: getPanelDisplayName(panelModel),
+      manualPowerKw,
+      roofType,
+      storage,
+      withEms,
+      includeSubsidy,
+      isUpsell,
+      existingPvPowerKw,
+      billingSystem,
+      selectedInverterName,
+      sellerMarkup,
+      vatRate,
+      selectedAdditionalServices,
+      pricingOverrides,
+      advisor: {
+        id: userProfile?.id || null,
+        name: advisorName,
+        phone: advisorPhone,
+        email: advisorEmail,
+        role: userProfile?.role || currentUserRole,
+      },
+    },
+  };
+
+  const nextQueueLength = addOfflineOfferToQueue(offlineItem);
+  setQueuedOfferCount(nextQueueLength);
+  setSendingEmail(false);
+  setEmailStatus(
+    `Brak internetu — oferta została dodana do kolejki offline. Liczba oczekujących ofert: ${nextQueueLength}.`
+  );
+  return;
+}
+
+if (!selectedClientEmail && typedClientEmail) {
       const { error: updateClientEmailError } = await supabase
         .from("clients")
         .update({ email: typedClientEmail })
@@ -1105,26 +1220,23 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
 
-        {isOffline && (
-          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-            <p className="font-semibold">Tryb offline kalkulatora</p>
-            <p className="mt-1">
-              Korzystasz z klientów zapisanych wcześniej w pamięci tego urządzenia.
-              W kolejnym kroku dodamy kolejkę zapisu ofert i wysyłki maili po odzyskaniu internetu.
-            </p>
-          </div>
-        )}
-        {canSeePricingPanel && (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowAdminPanel((current) => !current)}
-              className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:text-blue-300"
-            >
-              {showAdminPanel ? "Ukryj panel cen" : "Panel cen admina"}
-            </button>
-          </div>
-        )}
+        {(isOffline || queuedOfferCount > 0) && (
+  <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+    <p className="font-semibold">
+      {isOffline ? "Tryb offline kalkulatora" : "Kolejka ofert offline"}
+    </p>
+    <p className="mt-1">
+      {isOffline
+        ? "Korzystasz z klientów zapisanych wcześniej w pamięci tego urządzenia. Wysyłka oferty zostanie dodana do kolejki offline."
+        : "Masz oczekujące oferty zapisane offline."}
+    </p>
+    {queuedOfferCount > 0 && (
+      <p className="mt-2 font-medium">
+        Oczekujące oferty do synchronizacji: {queuedOfferCount}
+      </p>
+    )}
+  </div>
+)}
 
         {canSeePricingPanel && showAdminPanel && (
           <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
