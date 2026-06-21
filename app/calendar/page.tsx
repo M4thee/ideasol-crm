@@ -130,6 +130,18 @@ export default function CalendarPage() {
     setVisibleUserIds(fallbackIds);
     return fallbackIds;
   }
+
+  function getCalendarEventOwnerId(item: { assigned_user_id?: string | null; created_by?: string | null }) {
+    return item.assigned_user_id || item.created_by || null;
+  }
+
+  function normalizeCalendarStatus(status: string | null | undefined) {
+    return String(status || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
   async function initializeCalendar() {
     const {
       data: { user },
@@ -215,11 +227,12 @@ export default function CalendarPage() {
 
     const canSeeAllCalendarEvents = ["admin", "owner", "cc"].includes(currentUserRole);
 
-    if (selectedOwnerIds.length > 0) {
-      query = query.in("assigned_user_id", selectedOwnerIds);
-    } else if (!canSeeAllCalendarEvents && visibleUserIds && visibleUserIds.length > 0) {
-      query = query.in("assigned_user_id", visibleUserIds);
-    }
+    // DELETED: Filtering by assigned_user_id at query level. Now handled after fetch.
+    // if (selectedOwnerIds.length > 0) {
+    //   query = query.in("assigned_user_id", selectedOwnerIds);
+    // } else if (!canSeeAllCalendarEvents && visibleUserIds && visibleUserIds.length > 0) {
+    //   query = query.in("assigned_user_id", visibleUserIds);
+    // }
 
     const { data, error } = await query;
 
@@ -229,14 +242,28 @@ export default function CalendarPage() {
       return;
     }
 
-    if (!data || data.length === 0) {
+    const visibleCalendarRows = (data || []).filter((item) => {
+      const ownerId = getCalendarEventOwnerId(item);
+
+      if (selectedOwnerIds.length > 0) {
+        return Boolean(ownerId && selectedOwnerIds.includes(ownerId));
+      }
+
+      if (!canSeeAllCalendarEvents && visibleUserIds && visibleUserIds.length > 0) {
+        return Boolean(ownerId && visibleUserIds.includes(ownerId));
+      }
+
+      return true;
+    });
+
+    if (visibleCalendarRows.length === 0) {
       setCalendarItems([]);
       setLoading(false);
       return;
     }
 
     const clientIds = [
-      ...new Set(data.map((item) => item.client_id).filter(Boolean)),
+      ...new Set(visibleCalendarRows.map((item) => item.client_id).filter(Boolean)),
     ];
 
     const { data: clientsData, error: clientsError } = clientIds.length > 0
@@ -258,10 +285,11 @@ export default function CalendarPage() {
     );
 
     const ownerIds = [
-      ...new Set([
-        ...data.map((item) => item.created_by).filter(Boolean),
-        ...data.map((item) => item.assigned_user_id).filter(Boolean),
-      ]),
+      ...new Set(
+        visibleCalendarRows
+          .flatMap((item) => [item.assigned_user_id, item.created_by])
+          .filter((item): item is string => Boolean(item))
+      ),
     ];
 
     const { data: ownersData, error: ownersError } = ownerIds.length > 0
@@ -282,27 +310,31 @@ export default function CalendarPage() {
       ])
     );
 
-    const parsedItems: CalendarItem[] = data.map((item: any) => ({
-      id: item.id,
-      event_id: `EV-${String(item.id).slice(0, 8).toUpperCase()}`,
-      source_activity_id: item.source_activity_id || null,
-      client_id: item.client_id,
-      title: item.title,
-      description: item.description,
-      date: item.event_at,
-      type:
-        item.event_type === "meeting"
-          ? "meeting"
-          : item.event_type === "phone_call"
-            ? "phone_call"
-            : "reminder",
-      status: item.status || null,
-      client_name: clientsById.get(item.client_id) || "Klient",
-      owner_id: item.created_by || null,
-      owner_name: item.created_by ? ownersById.get(item.created_by) || "Użytkownik" : null,
-      assigned_user_id: item.assigned_user_id || null,
-      assigned_user_name: item.assigned_user_id ? ownersById.get(item.assigned_user_id) || "Doradca" : null,
-    }));
+    const parsedItems: CalendarItem[] = visibleCalendarRows.map((item: any) => {
+      const ownerId = getCalendarEventOwnerId(item);
+
+      return {
+        id: item.id,
+        event_id: `EV-${String(item.id).slice(0, 8).toUpperCase()}`,
+        source_activity_id: item.source_activity_id || null,
+        client_id: item.client_id,
+        title: item.title,
+        description: item.description,
+        date: item.event_at,
+        type:
+          item.event_type === "meeting"
+            ? "meeting"
+            : item.event_type === "phone_call"
+              ? "phone_call"
+              : "reminder",
+        status: item.status || null,
+        client_name: clientsById.get(item.client_id) || "Klient",
+        owner_id: ownerId,
+        owner_name: ownerId ? ownersById.get(ownerId) || "Użytkownik" : null,
+        assigned_user_id: item.assigned_user_id || null,
+        assigned_user_name: item.assigned_user_id ? ownersById.get(item.assigned_user_id) || "Doradca" : null,
+      };
+    });
 
     setCalendarItems(parsedItems);
     setLoading(false);
@@ -716,7 +748,26 @@ async function createCalendarEventFromModal() {
   }
 
   function isCompletedEvent(status: string | null) {
-    return status === "done" || status?.startsWith("Zakończone");
+    const normalizedStatus = normalizeCalendarStatus(status);
+
+    return (
+      normalizedStatus === "done" ||
+      normalizedStatus === "completed" ||
+      normalizedStatus === "complete" ||
+      normalizedStatus === "finished" ||
+      normalizedStatus === "closed" ||
+      normalizedStatus === "resolved" ||
+      normalizedStatus === "wykonane" ||
+      normalizedStatus === "wykonano" ||
+      normalizedStatus === "zrobione" ||
+      normalizedStatus === "zamkniete" ||
+      normalizedStatus === "zakonczone" ||
+      normalizedStatus.startsWith("wykonane") ||
+      normalizedStatus.startsWith("wykonano") ||
+      normalizedStatus.startsWith("zrobione") ||
+      normalizedStatus.startsWith("zamkniete") ||
+      normalizedStatus.startsWith("zakonczone")
+    );
   }
 
   function isOverdueEvent(item: CalendarItem) {

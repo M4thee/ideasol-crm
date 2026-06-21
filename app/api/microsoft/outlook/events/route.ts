@@ -24,6 +24,8 @@ type CreateOutlookEventPayload = {
   endDateTime?: string;
   timeZone?: string;
   reminderMinutesBeforeStart?: number;
+  notificationType?: "meeting_reassigned";
+  previousUserEmail?: string;
 };
 
 type UpdateOutlookEventPayload = CreateOutlookEventPayload & {
@@ -97,8 +99,20 @@ function buildTeamsMessage(payload: CreateOutlookEventPayload) {
     .join("\n");
 }
 
-async function sendTeamsNotification(payload: CreateOutlookEventPayload, targetUserEmail: string) {
-  const message = buildTeamsMessage(payload);
+function buildRemovedMeetingTeamsMessage(payload: CreateOutlookEventPayload) {
+  const meetingDate = payload.startDateTime
+    ? new Date(payload.startDateTime).toLocaleString("pl-PL", {
+        dateStyle: "short",
+        timeStyle: "short",
+      })
+    : "brak terminu";
+
+  const clientName = payload.clientName?.trim() || "klientem";
+
+  return `Twoje spotkanie z klientem ${clientName} w dniu ${meetingDate} zostało przypisane do innego doradcy.`;
+}
+
+async function sendTeamsRawNotification(targetUserEmail: string, message: string) {
   const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
 
   if (delegatedRefreshToken) {
@@ -123,10 +137,67 @@ async function sendTeamsNotification(payload: CreateOutlookEventPayload, targetU
   });
 }
 
+async function trySendTeamsRawNotification(targetUserEmail: string, message: string) {
+  try {
+    const result = await sendTeamsRawNotification(targetUserEmail, message);
+
+    return {
+      ok: true,
+      result,
+    };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Nieznany błąd wysyłki Teams.";
+
+    console.error("Teams notification error:", error);
+
+    return {
+      ok: false,
+      error: errorMessage,
+    };
+  }
+}
+
+async function sendTeamsNotification(payload: CreateOutlookEventPayload, targetUserEmail: string) {
+  return sendTeamsRawNotification(targetUserEmail, buildTeamsMessage(payload));
+}
+
 export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as CreateOutlookEventPayload;
     const targetUserEmail = (payload.assignedUserEmail || payload.userEmail || "").trim();
+
+    if (payload.notificationType === "meeting_reassigned") {
+      if (!targetUserEmail) {
+        return badRequest("Brakuje adresu e-mail nowego doradcy dla powiadomienia Teams.");
+      }
+
+      const newAdvisorTeamsNotification = await trySendTeamsRawNotification(
+        targetUserEmail,
+        buildTeamsMessage(payload)
+      );
+
+      const previousUserEmail = payload.previousUserEmail?.trim() || "";
+      const previousAdvisorTeamsNotification =
+        previousUserEmail && previousUserEmail !== targetUserEmail
+          ? await trySendTeamsRawNotification(
+              previousUserEmail,
+              buildRemovedMeetingTeamsMessage(payload)
+            )
+          : {
+              ok: false,
+              error: "Previous advisor notification not attempted.",
+            };
+
+      return NextResponse.json({
+        ok: true,
+        notificationType: payload.notificationType,
+        targetUserEmail,
+        previousUserEmail: previousUserEmail || null,
+        teamsNotification: newAdvisorTeamsNotification,
+        previousAdvisorTeamsNotification,
+      });
+    }
 
     if (!targetUserEmail) {
       return badRequest("Brakuje adresu e-mail przypisanego użytkownika Outlook.");

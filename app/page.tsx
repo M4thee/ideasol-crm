@@ -39,6 +39,7 @@ type Meeting = {
   client_name: string;
   meeting_address: string;
   created_by: string | null;
+  assigned_user_id: string | null;
   owner_name: string;
 };
 
@@ -47,6 +48,13 @@ type SalesSummary = {
   meetingsWithSalesCount: number;
   conversionRate: number;
   monthlySellerMargin: number;
+};
+
+type CcSummary = {
+  callsCount: number;
+  scheduledMeetingsCount: number;
+  conversionRate: number;
+  signedContractsFromMeetingsCount: number;
 };
 
 type ResolutionStatus =
@@ -134,6 +142,12 @@ export default function Home() {
     meetingsWithSalesCount: 0,
     conversionRate: 0,
     monthlySellerMargin: 0,
+  });
+  const [ccSummary, setCcSummary] = useState<CcSummary>({
+    callsCount: 0,
+    scheduledMeetingsCount: 0,
+    conversionRate: 0,
+    signedContractsFromMeetingsCount: 0,
   });
   const [loadingSalesSummary, setLoadingSalesSummary] = useState(false);
   const [calendarMode, setCalendarMode] = useState<"mine" | "team">("mine");
@@ -342,6 +356,10 @@ export default function Home() {
       }
 
       if (session?.user) {
+        if (typeof window !== "undefined" && ["SIGNED_IN", "TOKEN_REFRESHED"].includes(event)) {
+          saveAuthExpiry(window.localStorage.getItem(AUTH_REMEMBER_STORAGE_KEY) === "true");
+        }
+
         setCurrentUser(session.user as AuthUser);
         setAuthLoading(false);
 
@@ -413,7 +431,11 @@ export default function Home() {
     loadClients();
     loadFollowUps();
     loadMeetings();
-    loadSalesSummary();
+    if (currentUserRole === "cc") {
+      loadCcSummary();
+    } else {
+      loadSalesSummary();
+    }
   }, [
     currentUser?.id,
     currentUserRole,
@@ -450,8 +472,16 @@ export default function Home() {
     setLoadingClients(false);
   }
 
-  function isEventDone(status: string | null) {
-    const normalizedStatus = (status || "").trim().toLowerCase();
+  function normalizeEventStatus(status: string | null | undefined) {
+    return String(status || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function isEventDone(status: string | null | undefined) {
+    const normalizedStatus = normalizeEventStatus(status);
 
     return (
       normalizedStatus === "done" ||
@@ -460,15 +490,66 @@ export default function Home() {
       normalizedStatus === "finished" ||
       normalizedStatus === "closed" ||
       normalizedStatus === "resolved" ||
-      normalizedStatus === "zrobione" ||
       normalizedStatus === "wykonane" ||
-      normalizedStatus === "zamknięte" ||
+      normalizedStatus === "wykonano" ||
+      normalizedStatus === "zrobione" ||
       normalizedStatus === "zamkniete" ||
-      normalizedStatus.startsWith("zakończone") ||
-      normalizedStatus.startsWith("zakonczone") ||
-      normalizedStatus.startsWith("zakończony") ||
-      normalizedStatus.startsWith("zakonczony") 
+      normalizedStatus === "zakonczone" ||
+      normalizedStatus.startsWith("wykonane") ||
+      normalizedStatus.startsWith("wykonano") ||
+      normalizedStatus.startsWith("zrobione") ||
+      normalizedStatus.startsWith("zamkniete") ||
+      normalizedStatus.startsWith("zakonczone")
     );
+  }
+
+  function isClosedMeetingStatus(status: string | null | undefined) {
+    const normalizedStatus = normalizeEventStatus(status);
+
+    return (
+      normalizedStatus.startsWith("zakonczone") ||
+      normalizedStatus === "done" ||
+      normalizedStatus === "completed" ||
+      normalizedStatus === "complete" ||
+      normalizedStatus === "finished" ||
+      normalizedStatus === "closed" ||
+      normalizedStatus === "resolved"
+    );
+  }
+
+  function isSignedContractStatus(status: string | null | undefined) {
+    const normalizedStatus = normalizeEventStatus(status);
+
+    return (
+      normalizedStatus === "zakonczona" ||
+      normalizedStatus === "zakonczone" ||
+      normalizedStatus === "podpisana" ||
+      normalizedStatus === "podpisane" ||
+      normalizedStatus === "spisana" ||
+      normalizedStatus === "spisane" ||
+      normalizedStatus === "completed" ||
+      normalizedStatus === "complete" ||
+      normalizedStatus === "done" ||
+      normalizedStatus.startsWith("zakoncz") ||
+      normalizedStatus.startsWith("podpis") ||
+      normalizedStatus.startsWith("spisan")
+    );
+  }
+
+  function getEventOwnerId(item: { created_by?: string | null; assigned_user_id?: string | null }) {
+    return item.assigned_user_id || item.created_by || null;
+  }
+
+  function isEventVisibleForUsers(
+    item: { created_by?: string | null; assigned_user_id?: string | null },
+    allowedUserIds: string[] | null
+  ) {
+    if (!allowedUserIds) return true;
+
+    const ownerId = getEventOwnerId(item);
+    if (!ownerId) return false;
+
+    return allowedUserIds.includes(ownerId);
   }
 
   function parseMaybeJson(value: unknown): unknown {
@@ -682,16 +763,12 @@ export default function Home() {
 
     let query = supabase
       .from("calendar_events")
-      .select("id, client_id, title, description, event_at, status, created_by")
+      .select("id, client_id, title, description, event_at, status, created_by, assigned_user_id")
       .eq("event_type", "reminder")
       .not("client_id", "is", null)
       .gte("event_at", followUpsRangeStart.toISOString())
       .order("event_at", { ascending: true })
       .limit(200);
-
-    if (visibleUserIds && visibleUserIds.length > 0) {
-      query = query.in("created_by", visibleUserIds);
-    }
 
     const { data, error } = await query;
 
@@ -702,7 +779,7 @@ export default function Home() {
     }
 
     const activeReminders = (data || []).filter(
-      (item) => !isEventDone(item.status)
+      (item) => isEventVisibleForUsers(item, visibleUserIds) && !isEventDone(item.status)
     );
 
     if (activeReminders.length === 0) {
@@ -754,19 +831,13 @@ export default function Home() {
 
     let query = supabase
       .from("calendar_events")
-      .select("id, client_id, title, description, event_at, status, created_by")
+      .select("id, client_id, title, description, event_at, status, created_by, assigned_user_id")
       .eq("event_type", "meeting")
       .not("client_id", "is", null)
       .gte("event_at", nowIso)
       .lte("event_at", meetingsRangeEnd.toISOString())
       .order("event_at", { ascending: true })
       .limit(100);
-
-    if (calendarMode === "mine" && currentUser?.id) {
-      query = query.eq("created_by", currentUser.id);
-    } else if (visibleUserIds && visibleUserIds.length > 0) {
-      query = query.in("created_by", visibleUserIds);
-    }
 
     const { data, error } = await query;
 
@@ -776,8 +847,11 @@ export default function Home() {
       return;
     }
 
+    const meetingVisibleUserIds =
+      calendarMode === "mine" && currentUser?.id ? [currentUser.id] : visibleUserIds;
+
     const activeMeetings = (data || []).filter(
-      (item) => !isEventDone(item.status)
+      (item) => isEventVisibleForUsers(item, meetingVisibleUserIds) && !isEventDone(item.status)
     );
 
     if (activeMeetings.length === 0) {
@@ -816,6 +890,7 @@ export default function Home() {
       ...new Set(
         activeMeetings
           .flatMap((item) => [
+            item.assigned_user_id,
             item.created_by,
             clientsById.get(item.client_id)?.assigned_user_id,
           ])
@@ -849,27 +924,32 @@ export default function Home() {
     }
 
     setMeetings(
-      activeMeetings.map((item) => ({
-        id: item.id,
-        client_id: item.client_id,
-        title: item.title || "Spotkanie",
-        description: item.description,
-        meeting_at: item.event_at,
-        status: item.status,
-        client_name: clientsById.get(item.client_id)?.name || "Klient",
-        meeting_address:
-          clientsById.get(item.client_id)?.address || "Brak adresu spotkania",
-        created_by: item.created_by,
-        owner_name:
-          (item.created_by && ownersById.get(item.created_by)) ||
-          (clientsById.get(item.client_id)?.assigned_user_id &&
-            ownersById.get(clientsById.get(item.client_id)?.assigned_user_id || "")) ||
-          (item.created_by === currentUser?.id
-            ? currentUser?.user_metadata?.display_name || currentUser?.email || "Ja"
-            : item.created_by
-              ? `Użytkownik ${item.created_by.slice(0, 8)}`
-              : "Brak opiekuna"),
-      }))
+      activeMeetings.map((item) => {
+        const meetingOwnerId = getEventOwnerId(item);
+        const clientAssignedUserId = clientsById.get(item.client_id)?.assigned_user_id || null;
+        const fallbackOwnerId = meetingOwnerId || clientAssignedUserId;
+
+        return {
+          id: item.id,
+          client_id: item.client_id,
+          title: item.title || "Spotkanie",
+          description: item.description,
+          meeting_at: item.event_at,
+          status: item.status,
+          client_name: clientsById.get(item.client_id)?.name || "Klient",
+          meeting_address:
+            clientsById.get(item.client_id)?.address || "Brak adresu spotkania",
+          created_by: item.created_by,
+          assigned_user_id: item.assigned_user_id,
+          owner_name:
+            (fallbackOwnerId && ownersById.get(fallbackOwnerId)) ||
+            (fallbackOwnerId === currentUser?.id
+              ? currentUser?.user_metadata?.display_name || currentUser?.email || "Ja"
+              : fallbackOwnerId
+                ? `Użytkownik ${fallbackOwnerId.slice(0, 8)}`
+                : "Brak opiekuna"),
+        };
+      })
     );
 
     setLoadingMeetings(false);
@@ -890,23 +970,20 @@ export default function Home() {
     const shouldShowCompanySalesSummary =
       canViewCompanySalesSummary && salesSummaryMode === "team";
 
-    let closedMeetingsQuery = supabase
+    const salesSummaryVisibleUserIds =
+      shouldShowCompanySalesSummary
+        ? null
+        : salesSummaryMode === "mine" && currentUser?.id
+          ? [currentUser.id]
+          : visibleUserIds;
+
+    const closedMeetingsQuery = supabase
       .from("calendar_events")
-      .select("id, status, created_by")
+      .select("id, status, created_by, assigned_user_id")
       .eq("event_type", "meeting")
-      .like("status", "Zakończone - %")
       .gte("event_at", monthStart.toISOString())
       .lt("event_at", nextMonthStart.toISOString())
       .limit(1000);
-
-    if (!shouldShowCompanySalesSummary) {
-      if (visibleUserIds && visibleUserIds.length > 0) {
-        closedMeetingsQuery = closedMeetingsQuery.in(
-          "created_by",
-          visibleUserIds
-        );
-      }
-    }
 
     const { data: closedMeetings, error: closedMeetingsError } = await closedMeetingsQuery;
 
@@ -914,11 +991,17 @@ export default function Home() {
       console.error("Błąd ładowania zamkniętych spotkań", closedMeetingsError);
     }
 
-    const closedMeetingsCount = closedMeetings?.length || 0;
+    const visibleClosedMeetings = (closedMeetings || []).filter(
+      (meeting) =>
+        isClosedMeetingStatus(meeting.status) &&
+        isEventVisibleForUsers(meeting, salesSummaryVisibleUserIds)
+    );
+
+    const closedMeetingsCount = visibleClosedMeetings.length;
 
     const { data: allSales, error: monthlySalesError } = await supabase
       .from("sales")
-      .select("id, status, sale_date, created_at, deleted_at, seller_id, user_id, advisor_id, owner_id, offer_snapshot, offer_data, financial_summary, customer_data")
+      .select("*")
       .eq("status", "Zakończona")
       .gte("created_at", monthStart.toISOString())
       .lt("created_at", nextMonthStart.toISOString())
@@ -936,8 +1019,6 @@ export default function Home() {
       const isCurrentMonth = saleDate >= monthStart && saleDate < nextMonthStart;
 
       if (!isCurrentMonth) return false;
-
-      if ((sale as any).deleted_at) return false;
 
       if (shouldShowCompanySalesSummary) return true;
 
@@ -971,6 +1052,90 @@ export default function Home() {
     setLoadingSalesSummary(false);
   }
 
+  async function loadCcSummary() {
+    if (!currentUser?.id) return;
+
+    setLoadingSalesSummary(true);
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const nextMonthStart = new Date(monthStart);
+    nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+
+    const { data: activities, error: activitiesError } = await supabase
+      .from("client_activities")
+      .select("id, client_id, activity_type, phone_status, meeting_at, created_at")
+      .eq("created_by", currentUser.id)
+      .gte("created_at", monthStart.toISOString())
+      .lt("created_at", nextMonthStart.toISOString())
+      .limit(1000);
+
+    if (activitiesError) {
+      console.error("Błąd ładowania wyników CC", activitiesError);
+      setLoadingSalesSummary(false);
+      return;
+    }
+
+    const monthlyActivities = activities || [];
+
+    const phoneActivities = monthlyActivities.filter((activity) => {
+      const activityType = normalizeEventStatus(activity.activity_type);
+      const phoneStatus = normalizeEventStatus(activity.phone_status);
+
+      return activityType === "phone" || Boolean(phoneStatus);
+    });
+
+    const scheduledMeetingActivities = phoneActivities.filter((activity) => {
+      const phoneStatus = normalizeEventStatus(activity.phone_status);
+
+      return phoneStatus === "meeting_scheduled" || phoneStatus === "umowione spotkanie" || Boolean(activity.meeting_at);
+    });
+
+    const scheduledMeetingClientIds = [
+      ...new Set(
+        scheduledMeetingActivities
+          .map((activity) => activity.client_id)
+          .filter((clientId): clientId is string => Boolean(clientId))
+      ),
+    ];
+
+    let signedContractsFromMeetingsCount = 0;
+
+    if (scheduledMeetingClientIds.length > 0) {
+      const { data: salesData, error: salesError } = await supabase
+        .from("sales")
+        .select("id, client_id, status, created_at, sale_date")
+        .in("client_id", scheduledMeetingClientIds)
+        .gte("created_at", monthStart.toISOString())
+        .lt("created_at", nextMonthStart.toISOString())
+        .limit(1000);
+
+      if (salesError) {
+        console.warn("Nie udało się pobrać umów z umówionych spotkań CC", salesError);
+      }
+
+      signedContractsFromMeetingsCount = (salesData || []).filter((sale) =>
+        isSignedContractStatus(sale.status)
+      ).length;
+    }
+
+    const callsCount = phoneActivities.length;
+    const scheduledMeetingsCount = scheduledMeetingActivities.length;
+    const conversionRate =
+      callsCount > 0 ? Math.round((scheduledMeetingsCount / callsCount) * 100) : 0;
+
+    setCcSummary({
+      callsCount,
+      scheduledMeetingsCount,
+      conversionRate,
+      signedContractsFromMeetingsCount,
+    });
+
+    setLoadingSalesSummary(false);
+  }
+
   const visibleMeetingsLimit = calendarShowMore ? 12 : calendarExpanded ? 6 : 3;
   const visibleMeetings = meetings.slice(0, visibleMeetingsLimit);
 
@@ -986,9 +1151,11 @@ export default function Home() {
   const visibleFollowUps = followUps.slice(0, visibleFollowUpsCount);
   const salesSummaryCircleRadius = 42;
   const salesSummaryCircleCircumference = 2 * Math.PI * salesSummaryCircleRadius;
+  const dashboardSummaryConversionRate =
+    currentUserRole === "cc" ? ccSummary.conversionRate : salesSummary.conversionRate;
   const salesSummaryCircleOffset =
     salesSummaryCircleCircumference -
-    (salesSummary.conversionRate / 100) * salesSummaryCircleCircumference;
+    (dashboardSummaryConversionRate / 100) * salesSummaryCircleCircumference;
 
   function startResolvingFollowUp(followUp: FollowUp) {
     setResolvingFollowUp(followUp);
@@ -1269,6 +1436,7 @@ export default function Home() {
         event_at: resolutionFollowUpAt,
         status: "planned",
         created_by: currentUser.id,
+        assigned_user_id: currentUser.id,
       });
 
       if (reminderError) {
@@ -1293,6 +1461,7 @@ export default function Home() {
           event_at: resolutionMeetingAt,
           status: "planned",
           created_by: currentUser.id,
+          assigned_user_id: currentUser.id,
           microsoft_sync_status: "pending",
         })
         .select("id")
@@ -1436,6 +1605,8 @@ export default function Home() {
       setAuthLoading(false);
       return;
     }
+
+    saveAuthExpiry(rememberMe);
 
     const {
       data: { user },
@@ -1855,13 +2026,17 @@ export default function Home() {
             <div className="self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <h2 className="text-xl font-bold">Podsumowanie sprzedaży</h2>
+                  <h2 className="text-xl font-bold">
+                    {currentUserRole === "cc" ? "Wyniki CC" : "Podsumowanie sprzedaży"}
+                  </h2>
                   <p className="text-slate-500 text-xs mt-1">
-                    {salesSummaryMode === "team"
-  ? currentUserRole === "manager"
-    ? "Konwersja spotkań i marża zespołu managera w tym miesiącu."
-    : "Konwersja spotkań i marża całej firmy w tym miesiącu."
-  : "Konwersja spotkań i marża doradcy w tym miesiącu."}
+                    {currentUserRole === "cc"
+                      ? "Telefony, umówione spotkania i umowy z tych spotkań w tym miesiącu."
+                      : salesSummaryMode === "team"
+                        ? currentUserRole === "manager"
+                          ? "Konwersja spotkań i marża zespołu managera w tym miesiącu."
+                          : "Konwersja spotkań i marża całej firmy w tym miesiącu."
+                        : "Konwersja spotkań i marża doradcy w tym miesiącu."}
                   </p>
                 </div>
 
@@ -1899,7 +2074,7 @@ export default function Home() {
                   {!salesSummaryCollapsed && (
                     <button
                       type="button"
-                      onClick={loadSalesSummary}
+                      onClick={currentUserRole === "cc" ? loadCcSummary : loadSalesSummary}
                       className="bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-xl text-xs"
                     >
                       Odśwież
@@ -1948,7 +2123,7 @@ export default function Home() {
 
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
                         <p className="text-3xl font-black text-slate-900">
-                          {salesSummary.conversionRate}%
+                          {dashboardSummaryConversionRate}%
                         </p>
                         <p className="text-xs text-slate-500">konwersji</p>
                       </div>
@@ -1957,32 +2132,40 @@ export default function Home() {
 
                   <div className="grid w-36 shrink-0 grid-cols-1 gap-2">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] text-slate-500 leading-tight">Odbyte spotkania</p>
+                      <p className="text-[11px] text-slate-500 leading-tight">
+                        {currentUserRole === "cc" ? "Wykonane telefony" : "Odbyte spotkania"}
+                      </p>
                       <p className="text-lg font-bold text-slate-900 leading-tight mt-1">
-                        {salesSummary.closedMeetingsCount}
+                        {currentUserRole === "cc" ? ccSummary.callsCount : salesSummary.closedMeetingsCount}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                      <p className="text-[11px] text-emerald-700 leading-tight">Sprzedaże</p>
+                      <p className="text-[11px] text-emerald-700 leading-tight">
+                        {currentUserRole === "cc" ? "Umówione spotkania" : "Sprzedaże"}
+                      </p>
                       <p className="text-lg font-bold text-emerald-900 leading-tight mt-1">
-                        {salesSummary.meetingsWithSalesCount}
+                        {currentUserRole === "cc" ? ccSummary.scheduledMeetingsCount : salesSummary.meetingsWithSalesCount}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] text-slate-500 leading-tight">
-                        {salesSummaryMode === "team"
-                          ? currentUserRole === "manager"
-                            ? "Marża zespołu"
-                            : "Marża firmy"
-                          : "Zarobek"}
+                        {currentUserRole === "cc"
+                          ? "Umowy z tych spotkań"
+                          : salesSummaryMode === "team"
+                            ? currentUserRole === "manager"
+                              ? "Marża zespołu"
+                              : "Marża firmy"
+                            : "Zarobek"}
                       </p>
                       <p className="text-lg font-black text-slate-900 leading-tight mt-1">
-                        {salesSummary.monthlySellerMargin.toLocaleString("pl-PL", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })} zł
+                        {currentUserRole === "cc"
+                          ? ccSummary.signedContractsFromMeetingsCount
+                          : `${salesSummary.monthlySellerMargin.toLocaleString("pl-PL", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} zł`}
                       </p>
                     </div>
                   </div>

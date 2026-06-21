@@ -23,6 +23,37 @@ type TaskOwner = {
   role: string | null;
 };
 
+function normalizeReminderStatus(status: string | null | undefined) {
+  return String(status || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isCompletedReminderStatus(status: string | null | undefined) {
+  const normalizedStatus = normalizeReminderStatus(status);
+
+  return (
+    normalizedStatus === "done" ||
+    normalizedStatus === "completed" ||
+    normalizedStatus === "complete" ||
+    normalizedStatus === "closed" ||
+    normalizedStatus === "resolved" ||
+    normalizedStatus === "finished" ||
+    normalizedStatus === "wykonane" ||
+    normalizedStatus === "wykonano" ||
+    normalizedStatus === "zrobione" ||
+    normalizedStatus === "zamkniete" ||
+    normalizedStatus === "zakonczone" ||
+    normalizedStatus.startsWith("wykonane") ||
+    normalizedStatus.startsWith("wykonano") ||
+    normalizedStatus.startsWith("zrobione") ||
+    normalizedStatus.startsWith("zamkniete") ||
+    normalizedStatus.startsWith("zakonczone")
+  );
+}
+
 export default function TasksPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,18 +203,7 @@ export default function TasksPage() {
       return;
     }
 
-    const activeReminders = data.filter((item) => {
-      const status = String(item.status || "").toLowerCase();
-
-      return !(
-        status === "done" ||
-        status === "completed" ||
-        status === "zakończone" ||
-        status === "zakonczone" ||
-        status.startsWith("zakończone") ||
-        status.startsWith("zakonczone")
-      );
-    });
+    const activeReminders = data.filter((item) => !isCompletedReminderStatus(item.status));
 
     if (activeReminders.length === 0) {
       setReminders([]);

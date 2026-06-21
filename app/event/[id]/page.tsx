@@ -14,6 +14,7 @@ type CalendarEvent = {
   event_at: string;
   status: string | null;
   created_by: string | null;
+  assigned_user_id: string | null;
   microsoft_event_id: string | null;
   microsoft_event_url: string | null;
   microsoft_sync_status: string | null;
@@ -37,12 +38,14 @@ type EventOwner = {
   id: string;
   display_name: string | null;
   role: string | null;
+  email?: string | null;
 };
 
 type AssignableUser = {
   id: string;
   display_name: string | null;
   role: string | null;
+  email?: string | null;
   manager_id?: string | null;
 };
 
@@ -112,6 +115,9 @@ export default function EventPage() {
   const [nextContactAt, setNextContactAt] = useState("");
   const [savingMeetingEffect, setSavingMeetingEffect] = useState(false);
   const [rescheduledMeetingAt, setRescheduledMeetingAt] = useState("");
+  const [showReassignPanel, setShowReassignPanel] = useState(false);
+  const [selectedReassignUserId, setSelectedReassignUserId] = useState("");
+  const [savingReassign, setSavingReassign] = useState(false);
 
   function getClientAddress() {
     if (!client) return "Brak adresu";
@@ -340,6 +346,50 @@ return [streetAddress, cityAddress]
     return ["cc", "admin", "owner", "manager"].includes(currentUserRole || "");
   }
 
+  function canReassignEvent() {
+    if (!event || !currentUserId || event.event_type !== "meeting") return false;
+
+    const role = currentUserRole || "";
+
+    if (["admin", "owner", "cc"].includes(role)) return true;
+
+    const eventOwnerId = event.assigned_user_id || event.created_by;
+
+    if (role === "seller") {
+      return eventOwnerId === currentUserId;
+    }
+
+    if (role === "manager") {
+      return Boolean(eventOwnerId && visibleUserIds?.includes(eventOwnerId));
+    }
+
+    return false;
+  }
+
+  function getReassignableUsers() {
+    const role = currentUserRole || "";
+    const allowedTargetRoles = ["seller", "manager", "owner", "admin"];
+
+    return assignableUsers.filter((assignableUser) => {
+      if (!assignableUser.id) return false;
+      const eventOwnerId = event?.assigned_user_id || event?.created_by;
+      if (eventOwnerId && assignableUser.id === eventOwnerId) return false;
+
+      const targetRole = assignableUser.role || "";
+      if (!allowedTargetRoles.includes(targetRole)) return false;
+
+      if (role === "manager") {
+        return Boolean(visibleUserIds?.includes(assignableUser.id)) && !["owner", "admin"].includes(targetRole);
+      }
+
+      if (role === "seller") {
+        return event?.created_by === currentUserId;
+      }
+
+      return ["admin", "owner", "cc"].includes(role);
+    });
+  }
+
   function canViewAllEvents() {
     return ["admin", "owner"].includes(currentUserRole || "");
   }
@@ -430,6 +480,132 @@ return [streetAddress, cityAddress]
     return "bg-slate-100 text-slate-700 border-slate-200";
   }
 
+  async function sendMeetingReassignmentTeamsNotifications(params: {
+    newAdvisorEmail: string;
+    previousAdvisorEmail: string;
+    eventId: string;
+    title: string;
+    eventAt: string;
+    description: string | null;
+  }) {
+    if (!params.newAdvisorEmail) return;
+
+    const eventStart = new Date(params.eventAt);
+    const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+
+    try {
+      const response = await fetch("/api/microsoft/outlook/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          notificationType: "meeting_reassigned",
+          assignedUserEmail: params.newAdvisorEmail,
+          previousUserEmail: params.previousAdvisorEmail || undefined,
+          subject: params.title,
+          clientName,
+          clientPhone: client?.phone || undefined,
+          clientAddress: getClientAddress() || undefined,
+          meetingNote: params.description || undefined,
+          crmUrl: `${window.location.origin}/event/${params.eventId}`,
+          startDateTime: eventStart.toISOString(),
+          endDateTime: eventEnd.toISOString(),
+          timeZone: "Europe/Warsaw",
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.ok) {
+        console.warn("Spotkanie przepisane, ale nie udało się wysłać powiadomień Teams", result);
+      }
+    } catch (teamsError) {
+      console.warn("Spotkanie przepisane, ale nie udało się wysłać powiadomień Teams", teamsError);
+    }
+  }
+
+async function reassignEventOwner() {
+    if (!event) return;
+
+    if (!canReassignEvent()) {
+      alert("Nie masz uprawnień do przepisania tego spotkania.");
+      return;
+    }
+
+    if (!selectedReassignUserId) {
+      alert("Wybierz nowego doradcę.");
+      return;
+    }
+
+    const targetUser = getReassignableUsers().find((assignableUser) => assignableUser.id === selectedReassignUserId);
+
+    if (!targetUser) {
+      alert("Wybrany użytkownik nie jest dostępny do przepisania tego spotkania.");
+      return;
+    }
+
+    const previousOwnerId = event.assigned_user_id || event.created_by;
+    let previousAdvisorEmail =
+      eventOwner?.id === previousOwnerId ? eventOwner.email || "" : "";
+
+    if (!previousAdvisorEmail && previousOwnerId) {
+      const { data: previousOwnerProfile } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("id", previousOwnerId)
+        .maybeSingle();
+
+      previousAdvisorEmail = previousOwnerProfile?.email || "";
+    }
+
+    const newAdvisorEmail = targetUser.email || "";
+
+    setSavingReassign(true);
+
+    const { data: updatedEvent, error: updateError } = await supabase
+      .from("calendar_events")
+      .update({
+        created_by: selectedReassignUserId,
+        assigned_user_id: selectedReassignUserId,
+      })
+      .eq("id", event.id)
+      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+      .single();
+
+    if (updateError || !updatedEvent) {
+      console.error("Nie udało się przepisać spotkania", updateError);
+      alert(
+        `Nie udało się przepisać spotkania.\n\n${
+          updateError?.message || "Brak szczegółów błędu."
+        }`
+      );
+      setSavingReassign(false);
+      return;
+    }
+
+    setEvent(updatedEvent as CalendarEvent);
+    setEventOwner({
+      id: targetUser.id,
+      display_name: targetUser.display_name,
+      role: targetUser.role,
+      email: targetUser.email || null,
+    });
+    setSelectedReassignUserId("");
+    setShowReassignPanel(false);
+    setSavingReassign(false);
+
+    void sendMeetingReassignmentTeamsNotifications({
+      newAdvisorEmail,
+      previousAdvisorEmail,
+      eventId: updatedEvent.id,
+      title: updatedEvent.title || "Spotkanie CRM",
+      eventAt: updatedEvent.event_at,
+      description: updatedEvent.description,
+    });
+
+    alert("Spotkanie zostało przepisane na innego doradcę.");
+  }
 
   async function saveTaskEffect() {
     if (!event) return;
@@ -719,7 +895,7 @@ return [streetAddress, cityAddress]
             `Spotkanie przełożone z terminu ${new Date(event.event_at).toLocaleString("pl-PL")}.`,
         })
         .eq("id", event.id)
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
         .single();
 
       if (rescheduleError || !rescheduledEvent) {
@@ -736,7 +912,7 @@ return [streetAddress, cityAddress]
       await updateOutlookEventAfterReschedule({
         calendarEventId: rescheduledEvent.id,
         microsoftEventId: rescheduledEvent.microsoft_event_id || event.microsoft_event_id,
-        ownerId: rescheduledEvent.created_by || event.created_by,
+        ownerId: rescheduledEvent.assigned_user_id || rescheduledEvent.created_by || event.assigned_user_id || event.created_by,
         title: rescheduledEvent.title,
         description: rescheduledEvent.description,
         eventAt: rescheduledEvent.event_at,
@@ -858,15 +1034,17 @@ return [streetAddress, cityAddress]
 
       visibleIds = await loadVisibleUserIds(user.id, loadedRole);
 
-      if (["cc", "admin", "owner", "manager"].includes(loadedRole || "")) {
+      if (["cc", "admin", "owner", "manager", "seller"].includes(loadedRole || "")) {
         let usersQuery = supabase
           .from("profiles")
-          .select("id, display_name, role, manager_id")
+          .select("id, display_name, role, email, manager_id")
           .eq("hidden_from_assignment", false)
           .order("display_name", { ascending: true });
 
         if (loadedRole === "manager" && visibleIds?.length) {
           usersQuery = usersQuery.in("id", visibleIds);
+        } else if (loadedRole === "seller") {
+          usersQuery = usersQuery.in("role", ["seller", "manager", "owner", "admin"]);
         } else {
           usersQuery = usersQuery.in("role", [
             "seller",
@@ -877,6 +1055,8 @@ return [streetAddress, cityAddress]
           ]);
         }
 
+  
+
         const { data: usersData } = await usersQuery;
 
         setAssignableUsers((usersData || []) as AssignableUser[]);
@@ -886,7 +1066,7 @@ return [streetAddress, cityAddress]
     let { data: eventData, error: eventError } = await supabase
       .from("calendar_events")
       .select(
-        "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
+        "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
       )
       .eq("id", eventId)
       .maybeSingle();
@@ -895,7 +1075,7 @@ return [streetAddress, cityAddress]
       const { data: fallbackEventData, error: fallbackEventError } = await supabase
         .from("calendar_events")
         .select(
-          "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
+          "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
         )
         .eq("source_activity_id", eventId)
         .maybeSingle();
@@ -915,10 +1095,12 @@ return [streetAddress, cityAddress]
     }
 
     // Permissions check: if user has visibleUserIds, restrict access
+    const loadedEventOwnerId = eventData.assigned_user_id || eventData.created_by;
+
     if (
       visibleUserIds &&
-      eventData.created_by &&
-      !visibleUserIds.includes(eventData.created_by)
+      loadedEventOwnerId &&
+      !visibleUserIds.includes(loadedEventOwnerId)
     ) {
       setErrorMessage("Nie masz uprawnień do podglądu tego wydarzenia.");
       setLoading(false);
@@ -926,11 +1108,12 @@ return [streetAddress, cityAddress]
     }
 
     setEvent(eventData as CalendarEvent);
-    if (eventData.created_by) {
+    const loadedOwnerProfileId = eventData.assigned_user_id || eventData.created_by;
+    if (loadedOwnerProfileId) {
       const { data: ownerData, error: ownerError } = await supabase
         .from("profiles")
-        .select("id, display_name, role")
-        .eq("id", eventData.created_by)
+        .select("id, display_name, role, email")
+        .eq("id", loadedOwnerProfileId)
         .maybeSingle();
 
       if (ownerError) {
@@ -1130,6 +1313,16 @@ return [streetAddress, cityAddress]
                 </button>
               )}
 
+              {isMeetingEvent && !isDoneEvent && canReassignEvent() ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReassignPanel((current) => !current)}
+                  className="px-4 py-2 rounded-xl border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-800 font-semibold transition"
+                >
+                  {showReassignPanel ? "Zwiń przepisywanie" : "Przepisz spotkanie"}
+                </button>
+              ) : null}
+
               {isReminderEvent && !isDoneEvent ? (
                 <button
                   type="button"
@@ -1158,6 +1351,66 @@ return [streetAddress, cityAddress]
             </div>
           </div>
         </section>
+        {isMeetingEvent && !isDoneEvent && showReassignPanel && canReassignEvent() && (
+          <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
+            <div className="mb-5">
+              <p className="text-sm font-semibold text-blue-700">Przepisanie spotkania</p>
+              <h2 className="text-xl font-bold text-slate-900">Zmień doradcę przypisanego do spotkania</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Zmiana dotyczy CRM. Synchronizację Outlook/Teams zostawiamy bez zmian na późniejszy etap.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Obecny doradca</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {eventOwner?.display_name || event.assigned_user_id || event.created_by || "Brak przypisania"}
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase text-blue-700">
+                  Nowy doradca
+                </label>
+                <select
+                  value={selectedReassignUserId}
+                  onChange={(input) => setSelectedReassignUserId(input.target.value)}
+                  className="w-full rounded-xl border border-blue-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-400"
+                >
+                  <option value="">Wybierz nowego doradcę</option>
+                  {getReassignableUsers().map((assignableUser) => (
+                    <option key={assignableUser.id} value={assignableUser.id}>
+                      {assignableUser.display_name || assignableUser.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReassignPanel(false);
+                  setSelectedReassignUserId("");
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Anuluj
+              </button>
+
+              <button
+                type="button"
+                onClick={reassignEventOwner}
+                disabled={savingReassign || !selectedReassignUserId}
+                className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {savingReassign ? "Przepisywanie..." : "Przepisz spotkanie"}
+              </button>
+            </div>
+          </section>
+        )}
 
         {isReminderEvent && !isDoneEvent && showTaskEffectPanel && (
           <section className="bg-white rounded-2xl shadow-sm border border-amber-200 p-6">
