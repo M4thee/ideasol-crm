@@ -20,6 +20,8 @@ type CatalogStorage = {
   name: string;
   display_name: string | null;
   capacity_kwh: number;
+  voltage_type?: "low_voltage" | "high_voltage" | null;
+  voltageType?: "low_voltage" | "high_voltage" | null;
   price_net: number;
   installation_net: number;
 };
@@ -49,6 +51,16 @@ type SelectedAdditionalService = {
   allows_quantity: boolean;
   quantity: number;
 };
+
+type StorageVoltageFilter = "all" | "low_voltage" | "high_voltage";
+
+function getStorageVoltageType(storageItem: CatalogStorage) {
+  return storageItem.voltage_type || storageItem.voltageType || "low_voltage";
+}
+
+function getStorageVoltageLabel(voltageType: "low_voltage" | "high_voltage") {
+  return voltageType === "high_voltage" ? "wysokonapięciowy" : "niskonapięciowy";
+}
 
 type CrmClientOption = {
   id: string;
@@ -170,14 +182,14 @@ export default function OfferForm({
   setPanelCount,
   manualPowerKw,
   identicalSetCount = 1,
-  setIdenticalSetCount = () => {},
+  setIdenticalSetCount = () => { },
   clientName,
   setClientName,
   setClientEmail,
   crmClients = [],
   todayMeetingClients = [],
   selectedClientId = "",
-  setSelectedClientId = () => {},
+  setSelectedClientId = () => { },
   setManualPowerKw,
   calculateNearestPanelCount,
   roofType,
@@ -209,11 +221,14 @@ export default function OfferForm({
   sellerMarkup,
   setSellerMarkup,
   selectedAdditionalServices = [],
-  setSelectedAdditionalServices = () => {},
+  setSelectedAdditionalServices = () => { },
 }: OfferFormProps) {
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [existingPvAnswer, setExistingPvAnswer] = useState<"yes" | "no" | "">("");
+
+  const [storageVoltageFilter, setStorageVoltageFilter] =
+    useState<StorageVoltageFilter>("all");
 
   const [additionalServices, setAdditionalServices] = useState<CatalogAdditionalService[]>([]);
   const [showAdditionalServices, setShowAdditionalServices] = useState(false);
@@ -486,9 +501,9 @@ export default function OfferForm({
       selectedAdditionalServices.map((service) =>
         service.id === serviceId
           ? {
-              ...service,
-              quantity: safeQuantity,
-            }
+            ...service,
+            quantity: safeQuantity,
+          }
           : service
       )
     );
@@ -497,27 +512,35 @@ export default function OfferForm({
 
   const panelsToShow = panels;
 
-  const storagesToShow = storages;
+  const storagesToShow = useMemo(() => {
+    if (storageVoltageFilter === "all") {
+      return storages;
+    }
+
+    return storages.filter(
+      (storageItem) => getStorageVoltageType(storageItem) === storageVoltageFilter
+    );
+  }, [storages, storageVoltageFilter]);
 
   const invertersToShow =
     inverters.length > 0
       ? inverters
       : [
-          {
-            name: "Deye SUN-10K-SG05LP3-EU",
-            display_name: "Deye SUN-10K-SG05LP3-EU",
-            type: "hybrid",
-            max_pv_kw: 10.8,
-            price_net: 5631.25,
-          },
-          {
-            name: "Falownik Sieciowy 10K",
-            display_name: "Falownik Sieciowy 10K",
-            type: "ongrid",
-            max_pv_kw: 10.8,
-            price_net: 1000,
-          },
-        ];
+        {
+          name: "Deye SUN-10K-SG05LP3-EU",
+          display_name: "Deye SUN-10K-SG05LP3-EU",
+          type: "hybrid",
+          max_pv_kw: 10.8,
+          price_net: 5631.25,
+        },
+        {
+          name: "Falownik Sieciowy 10K",
+          display_name: "Falownik Sieciowy 10K",
+          type: "ongrid",
+          max_pv_kw: 10.8,
+          price_net: 1000,
+        },
+      ];
 
   const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
   const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
@@ -525,6 +548,28 @@ export default function OfferForm({
   const canConfigureOffer =
     existingPvAnswer === "no" ||
     (existingPvAnswer === "yes" && Number.isFinite(existingPvPowerNumber) && existingPvPowerNumber > 0);
+  useEffect(() => {
+    if (!hasStorageSelected) return;
+    if (storage === "none") return;
+    if (storagesToShow.length === 0) return;
+
+    const selectedStorageIsVisible = storagesToShow.some(
+      (storageItem) => storageItem.code === storage
+    );
+
+    if (!selectedStorageIsVisible) {
+      setStorage(storagesToShow[0].code);
+      setSelectedInverterName("auto");
+      setResult(null);
+    }
+  }, [
+    hasStorageSelected,
+    setResult,
+    setSelectedInverterName,
+    setStorage,
+    storage,
+    storagesToShow,
+  ]);
 
   function updateOfferModules(nextHasPv: boolean, nextHasStorage: boolean) {
     if (!nextHasPv && !nextHasStorage) {
@@ -780,11 +825,10 @@ export default function OfferForm({
                 setResult(null);
                 setEmailStatus("");
               }}
-              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
-                existingPvAnswer === "yes"
+              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "yes"
                   ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
                   : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
-              }`}
+                }`}
             >
               TAK
             </button>
@@ -798,11 +842,10 @@ export default function OfferForm({
                 setResult(null);
                 setEmailStatus("");
               }}
-              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
-                existingPvAnswer === "no"
+              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "no"
                   ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
                   : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
-              }`}
+                }`}
             >
               NIE
             </button>
@@ -842,11 +885,10 @@ export default function OfferForm({
 
         <div className="mt-3 space-y-3">
           <div
-            className={`rounded-2xl border p-4 transition ${
-              hasPvSelected
+            className={`rounded-2xl border p-4 transition ${hasPvSelected
                 ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
                 : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
-            }`}
+              }`}
           >
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <label className="flex cursor-pointer items-center gap-3">
@@ -939,11 +981,10 @@ export default function OfferForm({
                     ].map((option) => (
                       <label
                         key={option.value}
-                        className={`cursor-pointer rounded-[18px] border px-4 py-3 transition ${
-                          roofType === option.value
+                        className={`cursor-pointer rounded-[18px] border px-4 py-3 transition ${roofType === option.value
                             ? "border-blue-500 bg-white shadow-sm ring-1 ring-blue-100 dark:bg-blue-950/30 dark:ring-blue-500/20"
                             : "border-slate-200 bg-white/70 hover:border-blue-200 hover:bg-white dark:border-slate-700 dark:bg-slate-950 dark:hover:border-blue-500/40 dark:hover:bg-slate-900"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-3">
                           <input
@@ -970,11 +1011,10 @@ export default function OfferForm({
           </div>
 
           <div
-            className={`rounded-2xl border p-4 transition ${
-              hasStorageSelected
+            className={`rounded-2xl border p-4 transition ${hasStorageSelected
                 ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-950/30"
                 : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
-            }`}
+              }`}
           >
             <label className="flex cursor-pointer items-start gap-3">
               <input
@@ -990,15 +1030,47 @@ export default function OfferForm({
               <div>
                 <div className="font-semibold text-slate-900 dark:text-slate-100">Magazyn Energii</div>
                 <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                
+
                 </div>
               </div>
             </label>
 
             {hasStorageSelected && (
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-white/80 p-3 dark:border-emerald-500/30 dark:bg-slate-950 lg:col-span-2">
+                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    Typ magazynu energii
+                  </div>
+
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    {[
+                      { value: "all", label: "Wszystkie" },
+                      { value: "low_voltage", label: "LV - niskonapięciowe" },
+                      { value: "high_voltage", label: "HV - wysokonapięciowe" },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setStorageVoltageFilter(option.value as StorageVoltageFilter);
+                          setResult(null);
+                        }}
+                        className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-500/20"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
+                          }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <label className="block">
-                  
+                  <span className="text-sm text-slate-700 dark:text-slate-200">
+                    Model magazynu energii
+                  </span>
+
 
                   <select
                     className="mt-2 h-[104px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
@@ -1011,7 +1083,7 @@ export default function OfferForm({
                   >
                     {storagesToShow.map((storageItem) => (
                       <option key={storageItem.code} value={storageItem.code}>
-                        {storageItem.name}
+                        {storageItem.name} ({getStorageVoltageLabel(getStorageVoltageType(storageItem))})
                       </option>
                     ))}
                   </select>
@@ -1178,43 +1250,43 @@ export default function OfferForm({
         </div>
       )}
       {(hasPvSelected || hasStorageSelected) && (
-<label className="mb-5 block">
-        <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
+        <label className="mb-5 block">
+          <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
 
-        <select
-          className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-          value={selectedInverterName}
-          onChange={(e) => {
-            setSelectedInverterName(e.target.value);
-            setResult(null);
-          }}
-        >
-          <option value="auto">
-            {hasStorageSelected
-              ? "Automatycznie dobierz falownik hybrydowy"
-              : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
-          </option>
+          <select
+            className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
+            value={selectedInverterName}
+            onChange={(e) => {
+              setSelectedInverterName(e.target.value);
+              setResult(null);
+            }}
+          >
+            <option value="auto">
+              {hasStorageSelected
+                ? "Automatycznie dobierz falownik hybrydowy"
+                : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
+            </option>
 
-          {hasStorageSelected && (
-            <option value="none">Brak — klient ma już falownik hybrydowy</option>
-          )}
+            {hasStorageSelected && (
+              <option value="none">Brak — klient ma już falownik hybrydowy</option>
+            )}
 
-          {invertersToShow
-            .filter((inverterItem) => {
-              if (hasStorageSelected) return inverterItem.type === "hybrid";
-              return inverterItem.type !== "hybrid";
-            })
-            .map((inverterItem, index) => (
-              <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
-                {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
-              </option>
-            ))}
-        </select>
+            {invertersToShow
+              .filter((inverterItem) => {
+                if (hasStorageSelected) return inverterItem.type === "hybrid";
+                return inverterItem.type !== "hybrid";
+              })
+              .map((inverterItem, index) => (
+                <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
+                  {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
+                </option>
+              ))}
+          </select>
 
-        <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
-          Funkcja automatyczna dobiera falownik po mocyinstalacji. Ręczny wybór pozwala zmienić model i typ falownika np. sieciowy na hybrydowy.”.
-        </p>
-      </label>
+          <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
+            Funkcja automatyczna dobiera falownik po mocyinstalacji. Ręczny wybór pozwala zmienić model i typ falownika np. sieciowy na hybrydowy.”.
+          </p>
+        </label>
       )}
 
       {hasStorageSelected && (
@@ -1254,63 +1326,61 @@ export default function OfferForm({
             <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Forma rozliczeń</span>
           </div>
 
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label
-            className={`cursor-pointer rounded-2xl border p-4 transition ${
-              billingSystem === "net_billing"
-                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
-                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <input
-                type="radio"
-                name="billingSystem"
-                checked={billingSystem === "net_billing"}
-                onChange={() => {
-                  setBillingSystem("net_billing");
-                  setResult(null);
-                }}
-                className="mt-1 h-4 w-4"
-              />
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label
+              className={`cursor-pointer rounded-2xl border p-4 transition ${billingSystem === "net_billing"
+                  ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
+                  : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
+                }`}
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="billingSystem"
+                  checked={billingSystem === "net_billing"}
+                  onChange={() => {
+                    setBillingSystem("net_billing");
+                    setResult(null);
+                  }}
+                  className="mt-1 h-4 w-4"
+                />
 
-              <div>
-                <div className="font-semibold text-slate-900 dark:text-slate-100">Net Billing</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Limit dotacji magazynu: 16 000 zł.
+                <div>
+                  <div className="font-semibold text-slate-900 dark:text-slate-100">Net Billing</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Limit dotacji magazynu: 16 000 zł.
+                  </div>
                 </div>
               </div>
-            </div>
-          </label>
+            </label>
 
-          <label
-            className={`cursor-pointer rounded-2xl border p-4 transition ${
-              billingSystem === "net_metering"
-                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
-                : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <input
-                type="radio"
-                name="billingSystem"
-                checked={billingSystem === "net_metering"}
-                onChange={() => {
-                  setBillingSystem("net_metering");
-                  setResult(null);
-                }}
-                className="mt-1 h-4 w-4"
-              />
+            <label
+              className={`cursor-pointer rounded-2xl border p-4 transition ${billingSystem === "net_metering"
+                  ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
+                  : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
+                }`}
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="billingSystem"
+                  checked={billingSystem === "net_metering"}
+                  onChange={() => {
+                    setBillingSystem("net_metering");
+                    setResult(null);
+                  }}
+                  className="mt-1 h-4 w-4"
+                />
 
-              <div>
-                <div className="font-semibold text-slate-900 dark:text-slate-100">Net Metering</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Limit dotacji magazynu: 8 000 zł.
+                <div>
+                  <div className="font-semibold text-slate-900 dark:text-slate-100">Net Metering</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Limit dotacji magazynu: 8 000 zł.
+                  </div>
                 </div>
               </div>
-            </div>
-          </label>
-        </div>
+            </label>
+          </div>
         </div>
       )}
 

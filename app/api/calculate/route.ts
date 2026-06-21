@@ -23,15 +23,17 @@ type PanelItem = {
 type InverterItem = {
   name: string;
   displayName: string;
-  type: string;
   maxPvKw: number;
   priceNet: number;
+  type: "ongrid" | "hybrid";
+  batteryVoltageType?: "low_voltage" | "high_voltage" | null;
 };
 
 type StorageItem = {
   name: string;
   displayName: string;
   capacityKwh: number;
+  voltageType: "low_voltage" | "high_voltage";
   priceNet: number;
   installationNet: number;
 };
@@ -87,6 +89,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "Brak",
     displayName: "Brak",
     capacityKwh: 0,
+    voltageType: "low_voltage",
     priceNet: 0,
     installationNet: 0,
   },
@@ -94,6 +97,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "ZBPOWER ZB-G512200 10 kWh",
     displayName: "ZBPOWER ZB-G512200 10 kWh",
     capacityKwh: 10,
+    voltageType: "low_voltage",
     priceNet: 4394.5,
     installationNet: 1500,
   },
@@ -101,6 +105,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "ZBPOWER ZB-G512314 16 kWh",
     displayName: "ZBPOWER ZB-G512314 16 kWh",
     capacityKwh: 16,
+    voltageType: "low_voltage",
     priceNet: 5372,
     installationNet: 1500,
   },
@@ -265,12 +270,12 @@ async function loadCatalogFromSupabase() {
       .eq("active", true),
     supabase
       .from("inverters")
-      .select("name, display_name, type, max_pv_kw, price_net, active")
+      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
     supabase
       .from("storages")
-      .select("code, name, display_name, capacity_kwh, price_net, installation_net, active")
+      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, active")
       .eq("active", true),
   ]);
 
@@ -297,6 +302,7 @@ async function loadCatalogFromSupabase() {
       name: inverter.name,
       displayName: inverter.display_name || inverter.name,
       type: inverter.type,
+      batteryVoltageType: inverter.battery_voltage_type || null,
       maxPvKw: Number(inverter.max_pv_kw),
       priceNet: Number(inverter.price_net),
     }))
@@ -310,6 +316,7 @@ async function loadCatalogFromSupabase() {
           name: storage.name,
           displayName: storage.display_name || storage.name,
           capacityKwh: Number(storage.capacity_kwh),
+          voltageType: storage.voltage_type || "low_voltage",
           priceNet: Number(storage.price_net),
           installationNet: Number(storage.installation_net),
         },

@@ -23,6 +23,7 @@ type InverterItem = {
   display_name: string;
   name: string;
   type: string;
+  battery_voltage_type: "low_voltage" | "high_voltage" | null;
   max_pv_kw: number;
   price_net: number;
   active: boolean;
@@ -36,6 +37,7 @@ type StorageItem = {
   display_name: string;
   name: string;
   capacity_kwh: number;
+  voltage_type: "low_voltage" | "high_voltage";
   price_net: number;
   installation_net: number;
   active: boolean;
@@ -74,6 +76,7 @@ const EMPTY_INVERTER_FORM = {
   display_name: "",
   name: "",
   type: "ongrid",
+  battery_voltage_type: "",
   max_pv_kw: "10",
   price_net: "0",
 };
@@ -85,6 +88,7 @@ const EMPTY_STORAGE_FORM = {
   display_name: "",
   name: "",
   capacity_kwh: "10",
+  voltage_type: "low_voltage",
   price_net: "0",
   installation_net: "1500",
 };
@@ -144,7 +148,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, manufacturer, model, display_name, name, type, max_pv_kw, price_net, active")
+      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
@@ -160,8 +164,9 @@ export default function AdminPanel({
   async function loadStorages() {
     const { data, error } = await supabase
       .from("storages")
-      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, price_net, installation_net, active")
+      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, active")
       .eq("active", true)
+      .order("voltage_type", { ascending: true })
       .order("capacity_kwh", { ascending: true });
 
     if (error) {
@@ -198,15 +203,15 @@ export default function AdminPanel({
   async function updateAdditionalService(
     serviceId: number,
     field: keyof AdditionalServiceItem,
-    value: string | number | boolean
+    value: string | number | boolean | null
   ) {
     setAdditionalServices((current) =>
       current.map((service) =>
         service.id === serviceId
           ? {
-              ...service,
-              [field]: value,
-            }
+            ...service,
+            [field]: value,
+          }
           : service
       )
     );
@@ -289,9 +294,9 @@ export default function AdminPanel({
       current.map((panel) =>
         panel.id === panelId
           ? {
-              ...panel,
-              [field]: value,
-            }
+            ...panel,
+            [field]: value,
+          }
           : panel
       )
     );
@@ -378,15 +383,15 @@ export default function AdminPanel({
   async function updateInverter(
     inverterId: number,
     field: keyof InverterItem,
-    value: string | number | boolean
+    value: string | number | boolean | null
   ) {
     setInverters((current) =>
       current.map((inverter) =>
         inverter.id === inverterId
           ? {
-              ...inverter,
-              [field]: value,
-            }
+            ...inverter,
+            [field]: value,
+          }
           : inverter
       )
     );
@@ -406,6 +411,8 @@ export default function AdminPanel({
           display_name: inverter.display_name,
           name: inverter.display_name || inverter.model || inverter.manufacturer,
           type: inverter.type,
+          battery_voltage_type:
+            inverter.type === "hybrid" ? inverter.battery_voltage_type || null : null,
           max_pv_kw: Number(inverter.max_pv_kw),
           price_net: Number(inverter.price_net),
           active: Boolean(inverter.active),
@@ -437,6 +444,8 @@ export default function AdminPanel({
       display_name: inverterForm.display_name.trim(),
       name: inverterForm.display_name.trim() || inverterForm.model.trim() || inverterForm.manufacturer.trim(),
       type: inverterForm.type,
+      battery_voltage_type:
+        inverterForm.type === "hybrid" ? inverterForm.battery_voltage_type || null : null,
       max_pv_kw: Number(inverterForm.max_pv_kw),
       price_net: Number(inverterForm.price_net),
       active: true,
@@ -479,9 +488,9 @@ export default function AdminPanel({
       current.map((storage) =>
         storage.id === storageId
           ? {
-              ...storage,
-              [field]: value,
-            }
+            ...storage,
+            [field]: value,
+          }
           : storage
       )
     );
@@ -502,6 +511,7 @@ export default function AdminPanel({
           display_name: storage.display_name,
           name: storage.display_name || storage.model || storage.code,
           capacity_kwh: parseDecimal(storage.capacity_kwh),
+          voltage_type: storage.voltage_type || "low_voltage",
           price_net: parseDecimal(storage.price_net),
           installation_net: parseDecimal(storage.installation_net),
           active: Boolean(storage.active),
@@ -534,6 +544,7 @@ export default function AdminPanel({
       display_name: storageForm.display_name.trim(),
       name: storageForm.display_name.trim() || storageForm.model.trim() || storageForm.code.trim(),
       capacity_kwh: parseDecimal(storageForm.capacity_kwh),
+      voltage_type: storageForm.voltage_type,
       price_net: parseDecimal(storageForm.price_net),
       installation_net: parseDecimal(storageForm.installation_net),
       active: true,
@@ -650,11 +661,10 @@ export default function AdminPanel({
         <button
           type="button"
           onClick={() => setActiveTab("global")}
-          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-            activeTab === "global"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-          }`}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "global"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
         >
           Koszty globalne
         </button>
@@ -662,11 +672,10 @@ export default function AdminPanel({
         <button
           type="button"
           onClick={() => setActiveTab("panels")}
-          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-            activeTab === "panels"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-          }`}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "panels"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
         >
           Panele
         </button>
@@ -674,11 +683,10 @@ export default function AdminPanel({
         <button
           type="button"
           onClick={() => setActiveTab("inverters")}
-          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-            activeTab === "inverters"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-          }`}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "inverters"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
         >
           Falowniki
         </button>
@@ -686,11 +694,10 @@ export default function AdminPanel({
         <button
           type="button"
           onClick={() => setActiveTab("storages")}
-          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-            activeTab === "storages"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-          }`}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "storages"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
         >
           Magazyny energii
         </button>
@@ -698,11 +705,10 @@ export default function AdminPanel({
         <button
           type="button"
           onClick={() => setActiveTab("additionalServices")}
-          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-            activeTab === "additionalServices"
-              ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-          }`}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "additionalServices"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
         >
           Usługi dodatkowe
         </button>
@@ -939,7 +945,7 @@ export default function AdminPanel({
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj panel</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 placeholder="Kod, np. JA_SOLAR_455"
@@ -1005,7 +1011,7 @@ export default function AdminPanel({
               {panels.map((panel) => (
                 <div
                   key={panel.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-9"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-10"
                 >
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1031,7 +1037,7 @@ export default function AdminPanel({
                     onChange={(e) => updatePanel(panel.id, "display_name", e.target.value)}
                   />
 
-                  
+
 
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1050,11 +1056,10 @@ export default function AdminPanel({
                   <button
                     type="button"
                     onClick={() => updatePanel(panel.id, "active", !panel.active)}
-                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
-                      panel.active
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-500 border border-slate-200"
-                    }`}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${panel.active
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
                   >
                     {panel.active ? "Aktywny" : "Nieaktywny"}
                   </button>
@@ -1114,6 +1119,18 @@ export default function AdminPanel({
                 <option value="hybrid">Hybrydowy</option>
               </select>
 
+              <select
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                value={inverterForm.battery_voltage_type}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, battery_voltage_type: e.target.value })
+                }
+              >
+                <option value="">Nie dotyczy</option>
+                <option value="low_voltage">LV - niskonapięciowy</option>
+                <option value="high_voltage">HV - wysokonapięciowy</option>
+              </select>
+
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 type="number"
@@ -1154,7 +1171,7 @@ export default function AdminPanel({
               {inverters.map((inverter) => (
                 <div
                   key={inverter.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-8"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-9"
                 >
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1187,9 +1204,28 @@ export default function AdminPanel({
                       updateInverter(inverter.id, "type", e.target.value)
                     }
                   >
+
                     <option value="ongrid">Sieciowy</option>
                     <option value="hybrid">Hybrydowy</option>
                   </select>
+
+                  <select
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={inverter.battery_voltage_type || ""}
+                    onChange={(e) =>
+                      updateInverter(
+                        inverter.id,
+                        "battery_voltage_type",
+                        e.target.value ? e.target.value : null
+                      )
+                    }
+                  >
+                    <option value="">Nie dotyczy</option>
+                    <option value="low_voltage">LV</option>
+                    <option value="high_voltage">HV</option>
+                  </select>
+
+
 
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1222,11 +1258,10 @@ export default function AdminPanel({
                     onClick={() =>
                       updateInverter(inverter.id, "active", !inverter.active)
                     }
-                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
-                      inverter.active
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-500 border border-slate-200"
-                    }`}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${inverter.active
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
                   >
                     {inverter.active ? "Aktywny" : "Nieaktywny"}
                   </button>
@@ -1247,7 +1282,7 @@ export default function AdminPanel({
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj magazyn energii</h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 placeholder="Kod, np. ZBPOWER_10"
@@ -1291,12 +1326,22 @@ export default function AdminPanel({
                 step="0.01"
                 min="0"
                 placeholder="Pojemność kWh"
+
                 value={storageForm.capacity_kwh}
                 onChange={(e) =>
                   setStorageForm({ ...storageForm, capacity_kwh: e.target.value })
                 }
               />
-
+              <select
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                value={storageForm.voltage_type}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, voltage_type: e.target.value })
+                }
+              >
+                <option value="low_voltage">LV - niskonapięciowy</option>
+                <option value="high_voltage">HV - wysokonapięciowy</option>
+              </select>
               <input
                 className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                 type="number"
@@ -1341,7 +1386,7 @@ export default function AdminPanel({
               {storages.map((storage) => (
                 <div
                   key={storage.id}
-                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-9"
+                  className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-10"
                 >
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1375,7 +1420,7 @@ export default function AdminPanel({
                     }
                   />
 
-                  
+
 
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
@@ -1391,7 +1436,20 @@ export default function AdminPanel({
                       )
                     }
                   />
-
+                  <select
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    value={storage.voltage_type || "low_voltage"}
+                    onChange={(e) =>
+                      updateStorage(
+                        storage.id,
+                        "voltage_type",
+                        e.target.value as "low_voltage" | "high_voltage"
+                      )
+                    }
+                  >
+                    <option value="low_voltage">LV</option>
+                    <option value="high_voltage">HV</option>
+                  </select>
                   <input
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                     type="number"
@@ -1427,11 +1485,10 @@ export default function AdminPanel({
                     onClick={() =>
                       updateStorage(storage.id, "active", !storage.active)
                     }
-                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
-                      storage.active
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-500 border border-slate-200"
-                    }`}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${storage.active
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
                   >
                     {storage.active ? "Aktywny" : "Nieaktywny"}
                   </button>
@@ -1499,11 +1556,10 @@ export default function AdminPanel({
                     allows_quantity: !additionalServiceForm.allows_quantity,
                   })
                 }
-                className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${
-                  additionalServiceForm.allows_quantity
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-100"
-                    : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                }`}
+                className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${additionalServiceForm.allows_quantity
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-100"
+                  : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
               >
                 {additionalServiceForm.allows_quantity
                   ? `Ilość ${additionalServiceForm.unit_label || "szt."}: tak`
@@ -1571,11 +1627,10 @@ export default function AdminPanel({
                         !service.allows_quantity
                       )
                     }
-                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
-                      service.allows_quantity
-                        ? "bg-blue-600 text-white"
-                        : "bg-slate-100 text-slate-500 border border-slate-200"
-                    }`}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${service.allows_quantity
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
                   >
                     {service.allows_quantity ? `Ilość ${service.unit_label || "szt."}` : "Bez ilości"}
                   </button>
@@ -1585,11 +1640,10 @@ export default function AdminPanel({
                     onClick={() =>
                       updateAdditionalService(service.id, "active", !service.active)
                     }
-                    className={`px-3 py-2 rounded-xl text-sm font-bold ${
-                      service.active
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-100 text-slate-500 border border-slate-200"
-                    }`}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold ${service.active
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
+                      }`}
                   >
                     {service.active ? "Aktywna" : "Nieaktywna"}
                   </button>

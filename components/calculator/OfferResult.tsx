@@ -9,6 +9,9 @@ type Result = {
   pvPowerKw: number;
   inverter: string;
   energyStorage: string;
+  storage?: string;
+  storageVoltageType?: "low_voltage" | "high_voltage";
+  storageVoltageLabel?: string;
   storageCapacityKwh?: number;
   offerType: string;
   billingSystem?: "net_billing" | "net_metering";
@@ -218,6 +221,7 @@ export default function OfferResult({
   const hasSelectedCrmClient = Boolean(selectedClientId);
   const hasSelectedCrmClientEmail = Boolean(selectedCrmClientEmail);
   const canSendOfferEmail = hasSelectedCrmClient && Boolean(normalizedClientEmail);
+  const storageDisplayName = result.energyStorage || result.storage || "Brak";
 
   useEffect(() => {
     if (!selectedClientId) {
@@ -404,7 +408,7 @@ export default function OfferResult({
           inverterPowerKw: inverterPdfParts.inverterPowerKw,
           inverterNet: inverterNetFromBreakdown,
           inverterGross: inverterGrossFromBreakdown,
-          energyStorage: result.energyStorage,
+          energyStorage: storageDisplayName,
           pvNet: pvNetForPdf,
           pvGross: pvGrossForPdf,
           storageNet: storageNetForPdf,
@@ -547,10 +551,10 @@ export default function OfferResult({
           </div>
         )}
 
-        {result.energyStorage !== "Brak" && (
+        {storageDisplayName !== "Brak" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
             <p className="text-sm text-slate-500 dark:text-slate-400">Magazyn energii</p>
-            <p className="break-words text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">{result.energyStorage}</p>
+            <p className="break-words text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">{storageDisplayName}</p>
           </div>
         )}
 
@@ -788,7 +792,7 @@ export default function OfferResult({
           </div>
         )}
 
-        {result.energyStorage !== "Brak" &&
+        {storageDisplayName !== "Brak" &&
           (result.includeSubsidy || result.subsidyAllocation?.requested) && (
           <SubsidyOptimizer
             storageCapacity={result.storageCapacityKwh || result.subsidyAllocation?.storageCapacityKwh || 0}

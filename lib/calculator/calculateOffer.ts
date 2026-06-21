@@ -48,6 +48,7 @@ export type InverterItem = {
   name: string;
   displayName: string;
   type: string;
+  batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   maxPvKw: number;
   priceNet: number;
 };
@@ -56,6 +57,7 @@ export type StorageItem = {
   name: string;
   displayName: string;
   capacityKwh: number;
+  voltageType?: "low_voltage" | "high_voltage";
   priceNet: number;
   installationNet: number;
 };
@@ -111,6 +113,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "Brak",
     displayName: "Brak",
     capacityKwh: 0,
+    voltageType: "low_voltage",
     priceNet: 0,
     installationNet: 0,
   },
@@ -118,6 +121,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "ZBPOWER ZB-G512200 10 kWh",
     displayName: "ZBPOWER ZB-G512200 10 kWh",
     capacityKwh: 10,
+    voltageType: "low_voltage",
     priceNet: 4394.5,
     installationNet: 1500,
   },
@@ -125,6 +129,7 @@ const FALLBACK_STORAGES: Record<string, StorageItem> = {
     name: "ZBPOWER ZB-G512314 16 kWh",
     displayName: "ZBPOWER ZB-G512314 16 kWh",
     capacityKwh: 16,
+    voltageType: "low_voltage",
     priceNet: 5372,
     installationNet: 1500,
   },
@@ -162,8 +167,55 @@ function grossFromNet(netValue: number, vatRate: number) {
   return roundMoney(netValue * (1 + vatRate / 100));
 }
 
+
 function beforeDiscountFromAfterDiscountGross(grossAfterDiscount: number) {
   return roundMoney(grossAfterDiscount * 1.1111);
+}
+
+function getStorageVoltageDescription(storage: StorageItem) {
+  return storage.voltageType === "high_voltage"
+    ? "wysokonapięciowy"
+    : "niskonapięciowy";
+}
+
+function getStorageDisplayName(storage: StorageItem) {
+  const baseName = storage.displayName || storage.name;
+
+  if (!storage.capacityKwh || storage.capacityKwh <= 0 || baseName === "Brak") {
+    return baseName;
+  }
+
+  return `${baseName} (${getStorageVoltageDescription(storage)})`;
+}
+
+function getInverterBatteryVoltageType(inverter: InverterItem) {
+  if (inverter.type !== "hybrid") {
+    return null;
+  }
+  return inverter.batteryVoltageType || "low_voltage";
+}
+
+function getBatteryVoltageDescription(voltageType: "low_voltage" | "high_voltage" | null) {
+  if (voltageType === "high_voltage") {
+    return "wysokonapięciowy";
+  }
+  if (voltageType === "low_voltage") {
+    return "niskonapięciowy";
+  }
+  return "nie dotyczy";
+}
+
+function isInverterCompatibleWithStorage(
+  inverter: InverterItem,
+  storageVoltageType: "low_voltage" | "high_voltage" | null
+) {
+  if (!storageVoltageType) {
+    return true;
+  }
+  if (inverter.type !== "hybrid") {
+    return false;
+  }
+  return getInverterBatteryVoltageType(inverter) === storageVoltageType;
 }
 
 function buildContractBreakdown(params: {
@@ -650,7 +702,15 @@ export function calculateOffer(input: CalculateOfferInput) {
     ? 0
     : Number(((panelCount * panel.powerWp) / 1000).toFixed(2));
 
+  // Do kosztów PV i marż używamy tylko nowej mocy PV.
+  // Do automatycznego doboru falownika przy rozbudowie używamy łącznej mocy:
+  // istniejąca instalacja PV + nowa rozbudowa.
+  const inverterSizingPvPowerKw = Number((existingPvPowerKw + pvPowerKw).toFixed(2));
+
   const hasStorageSelected = storage.displayName !== "Brak";
+  const selectedStorageVoltageType = hasStorageSelected
+    ? storage.voltageType || "low_voltage"
+    : null;
   const selectedInverterName = String(body.selectedInverterName || "auto");
 
   const manuallySelectedInverter =
@@ -658,17 +718,30 @@ export function calculateOffer(input: CalculateOfferInput) {
       ? pricing.inverters.find((item) => item.name === selectedInverterName)
       : null;
 
+  const compatibleManuallySelectedInverter =
+    manuallySelectedInverter &&
+    isInverterCompatibleWithStorage(manuallySelectedInverter, selectedStorageVoltageType)
+      ? manuallySelectedInverter
+      : null;
+
   const autoInverterType = isStorageOnly || hasStorageSelected ? "hybrid" : "ongrid";
 
-  const automaticallySelectedInverter =
-    pricing.inverters.find(
-      (item) => item.type === autoInverterType && pvPowerKw <= item.maxPvKw
-    ) || pricing.inverters.find((item) => pvPowerKw <= item.maxPvKw);
+  const compatibleAutomaticInverters = pricing.inverters.filter(
+    (item) =>
+      item.type === autoInverterType &&
+      isInverterCompatibleWithStorage(item, selectedStorageVoltageType)
+  );
+
+  const automaticallySelectedInverter = compatibleAutomaticInverters.find(
+    (item) => inverterSizingPvPowerKw <= item.maxPvKw
+  );
 
   const inverter =
     selectedInverterName === "none"
       ? { name: "Brak", priceNet: 0 }
-      : manuallySelectedInverter || automaticallySelectedInverter || { name: "Brak", priceNet: 0 };
+      : compatibleManuallySelectedInverter ||
+        automaticallySelectedInverter ||
+        { name: "Brak", priceNet: 0 };
 
   const panelsCostNet = isStorageOnly ? 0 : panelCount * panel.priceNet;
   const inverterCostNet = inverter.priceNet;
@@ -867,10 +940,24 @@ export function calculateOffer(input: CalculateOfferInput) {
     subsidyAllocation,
   });
 
+  const storageDisplayName = getStorageDisplayName(storage);
+
   return {
     pvPowerKw,
+    inverterSizingPvPowerKw,
     inverter: "displayName" in inverter ? inverter.displayName : inverter.name,
-    energyStorage: storage.displayName,
+    inverterBatteryVoltageType:
+      "type" in inverter && inverter.type === "hybrid"
+        ? getInverterBatteryVoltageType(inverter as InverterItem)
+        : null,
+    inverterBatteryVoltageLabel:
+      "type" in inverter && inverter.type === "hybrid"
+        ? getBatteryVoltageDescription(getInverterBatteryVoltageType(inverter as InverterItem))
+        : "nie dotyczy",
+    energyStorage: storageDisplayName,
+    storage: storageDisplayName,
+    storageVoltageType: storage.voltageType || "low_voltage",
+    storageVoltageLabel: getStorageVoltageDescription(storage),
     storageCapacityKwh: storage.capacityKwh,
     offerType,
     billingSystem,

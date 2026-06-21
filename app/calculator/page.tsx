@@ -16,6 +16,9 @@ type Result = {
   pvPowerKw: number;
   inverter: string;
   energyStorage: string;
+  storage?: string;
+  storageVoltageType?: "low_voltage" | "high_voltage";
+  storageVoltageLabel?: string;
   offerType: string;
 
   billingSystem?: "net_billing" | "net_metering";
@@ -104,6 +107,8 @@ type CatalogStorage = {
   name: string;
   display_name: string | null;
   capacity_kwh: number;
+  voltage_type?: "low_voltage" | "high_voltage" | null;
+  voltageType?: "low_voltage" | "high_voltage" | null;
   price_net: number;
   installation_net: number;
 };
@@ -543,6 +548,9 @@ export default function Home() {
 
     return "falownik";
   }
+  function getResultStorageDisplayName(offerResult: Result) {
+    return offerResult.energyStorage || offerResult.storage || "Brak";
+  }
 
   function calculateNearestPanelCount(powerKwText: string, model: string) {
     const powerKw = Number(powerKwText.replace(",", "."));
@@ -743,14 +751,22 @@ export default function Home() {
 
       const loadedStorages = Object.entries(apiCatalog.storages || {})
         .filter(([code]) => code !== "none")
-        .map(([code, catalogStorage]) => ({
-          code,
-          name: catalogStorage.name,
-          display_name: catalogStorage.displayName || catalogStorage.name,
-          capacity_kwh: catalogStorage.capacityKwh,
-          price_net: catalogStorage.priceNet,
-          installation_net: catalogStorage.installationNet,
-        })) as CatalogStorage[];
+        .map(([code, catalogStorage]) => {
+          const storageVoltageType =
+            (catalogStorage as { voltageType?: "low_voltage" | "high_voltage" | null })
+              .voltageType || "low_voltage";
+
+          return {
+            code,
+            name: catalogStorage.name,
+            display_name: catalogStorage.displayName || catalogStorage.name,
+            capacity_kwh: catalogStorage.capacityKwh,
+            voltage_type: storageVoltageType,
+            voltageType: storageVoltageType,
+            price_net: catalogStorage.priceNet,
+            installation_net: catalogStorage.installationNet,
+          };
+        }) as CatalogStorage[];
 
       const loadedInverters = (apiCatalog.inverters || []).map((inverter) => ({
         name: inverter.name,
@@ -926,11 +942,14 @@ export default function Home() {
     const storageCatalog: CalculatorCatalog["storages"] = storages.reduce<CalculatorCatalog["storages"]>(
       (acc, catalogStorage) => {
         const storageName = catalogStorage.display_name || catalogStorage.name || catalogStorage.code;
+        const storageVoltageType =
+          catalogStorage.voltage_type || catalogStorage.voltageType || "low_voltage";
 
         acc[catalogStorage.code] = {
           name: storageName,
           displayName: storageName,
           capacityKwh: Number(catalogStorage.capacity_kwh || 0),
+          voltageType: storageVoltageType,
           priceNet: Number(catalogStorage.price_net || 0),
           installationNet: Number(catalogStorage.installation_net || 0),
         };
@@ -942,6 +961,7 @@ export default function Home() {
           name: "Brak",
           displayName: "Brak",
           capacityKwh: 0,
+          voltageType: "low_voltage",
           priceNet: 0,
           installationNet: 0,
         },
@@ -1145,7 +1165,7 @@ export default function Home() {
       panel_count: panelCount,
       panel_power_wp: getPanelPowerWp(panelModel),
       inverter: result.inverter,
-      energy_storage: result.energyStorage,
+      energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
       offer_data: {
         result,
@@ -1220,8 +1240,9 @@ export default function Home() {
 
   function buildOfferText(result: Result) {
     const isStorageOnly = result.offerType === "storage";
-    const hasStorage = result.energyStorage !== "Brak";
-    const hasInverter = result.inverter && result.inverter !== "Brak";
+const storageDisplayName = getResultStorageDisplayName(result);
+const hasStorage = storageDisplayName !== "Brak";
+const hasInverter = result.inverter && result.inverter !== "Brak";
 
     const intro = isStorageOnly
       ? "przesyłam wstępną ofertę magazynu energii."
@@ -1233,7 +1254,7 @@ export default function Home() {
     const inverterLine = hasInverter
       ? `- ${getInverterLabel(result.inverter)}: ${result.inverter}\n`
       : "";
-    const storageLine = hasStorage ? `- magazyn energii: ${result.energyStorage}\n` : "";
+    const storageLine = hasStorage ? `- magazyn energii: ${storageDisplayName}\n` : "";
 
     return `Dzień dobry,
 
