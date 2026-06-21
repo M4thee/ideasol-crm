@@ -11,7 +11,6 @@ type UserProfile = {
   id: string;
   email?: string | null;
   display_name?: string | null;
-  full_name?: string | null;
   role?: string | null;
   default_seller_markup?: number | null;
 };
@@ -50,7 +49,7 @@ export default function SettingsPage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, email, display_name, full_name, role, default_seller_markup")
+      .select("id, email, display_name, role, default_seller_markup")
       .eq("id", user.id)
       .maybeSingle();
 

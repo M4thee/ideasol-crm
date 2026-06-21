@@ -957,7 +957,7 @@ export default function Home() {
     if (ownerIds.length > 0) {
       const { data: ownersData, error: ownersError } = await supabase
         .from("profiles")
-        .select("id, full_name, display_name, name, username, email")
+        .select("id, display_name, name, username, email")
         .in("id", ownerIds);
 
       if (ownersError) {
@@ -967,8 +967,7 @@ export default function Home() {
       ownersById = new Map(
         (ownersData || []).map((owner) => [
           owner.id,
-          owner.full_name ||
-            owner.display_name ||
+          owner.display_name ||
             owner.name ||
             owner.username ||
             owner.email ||
