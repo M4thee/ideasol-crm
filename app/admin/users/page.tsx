@@ -167,7 +167,9 @@ export default function AdminUsersPage() {
   async function loadPricingSettings() {
     const { data, error } = await supabase
       .from("pricing_settings")
-      .select("*")
+      .select(
+        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent"
+      )
       .eq("id", 1)
       .maybeSingle();
 
@@ -1022,8 +1024,13 @@ export default function AdminUsersPage() {
       return;
     }
 
-    if (resetPasswordValue.length < 8) {
-      alert("Hasło musi mieć minimum 8 znaków.");
+    if (resetPasswordValue.length < 10) {
+      alert("Hasło musi mieć minimum 10 znaków.");
+      return;
+    }
+
+    if (!/[a-z]/.test(resetPasswordValue)) {
+      alert("Hasło musi zawierać minimum 1 małą literę.");
       return;
     }
 
@@ -1034,6 +1041,11 @@ export default function AdminUsersPage() {
 
     if (!/[0-9]/.test(resetPasswordValue)) {
       alert("Hasło musi zawierać minimum 1 cyfrę.");
+      return;
+    }
+
+    if (!/[^A-Za-z0-9]/.test(resetPasswordValue)) {
+      alert("Hasło musi zawierać minimum 1 znak specjalny.");
       return;
     }
 
