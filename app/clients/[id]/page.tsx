@@ -935,18 +935,12 @@ export default function ClientPage() {
     const clientName = client.full_name || client.company_name || "Nowy klient";
     const clientCity = client.city || "Brak miejscowości";
 
-    const notificationPayload = {
-      user_id: selectedUserId,
-      title: "Przypisano Ci nowego klienta",
-      body: `${clientName}, ${clientCity}`,
-      client_id: client.id,
-    };
-
-    console.log("Tworzenie powiadomienia z karty klienta:", notificationPayload);
-
-    const { error: notificationError } = await supabase
-      .from("notifications")
-      .insert(notificationPayload);
+    const { error: notificationError } = await supabase.rpc("create_notification", {
+      p_user_id: selectedUserId,
+      p_title: "Przypisano Ci nowego klienta",
+      p_body: `${clientName}, ${clientCity}`,
+      p_client_id: client.id,
+    });
 
     if (notificationError) {
       console.error("Błąd tworzenia powiadomienia z karty klienta:", {
@@ -958,7 +952,6 @@ export default function ClientPage() {
         clientId: client.id,
       });
     } else {
-      console.log("Powiadomienie utworzone z karty klienta dla użytkownika:", selectedUserId);
       window.dispatchEvent(new Event("ideasol-notifications-refresh"));
     }
 
