@@ -540,6 +540,17 @@ function ClientsPageContent() {
     setSubStatusFilter("Wszystkie");
   }
 
+  function clearAllClientFilters() {
+    setStatusFilter("Wszystkie");
+    setSubStatusFilter("Wszystkie");
+    setSelectedAdvisorIds([]);
+    setSelectedClientTypes([]);
+    setSelectedProvinces([]);
+    setSelectedCities([]);
+    setSelectedTagIds([]);
+    setVisibleClientsLimit(15);
+  }
+
   function toggleSelectedClient(clientId: string) {
     setSelectedClientIds((current) =>
       current.includes(clientId)
@@ -1380,6 +1391,13 @@ function ClientsPageContent() {
     selectedCities.length +
     selectedTagIds.length;
 
+  const activeClientFiltersCount =
+    (statusFilter !== "Wszystkie" ? 1 : 0) +
+    (subStatusFilter !== "Wszystkie" ? 1 : 0) +
+    activeAdvancedFiltersCount;
+
+  const hasActiveClientFilters = activeClientFiltersCount > 0;
+
   const filteredClients = clients.filter((client) => {
     const matchesStatus =
       statusFilter === "Wszystkie" || client.status === statusFilter;
@@ -1741,6 +1759,27 @@ function ClientsPageContent() {
           </div>
         </section>
 
+        {hasActiveClientFilters && !loading && (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-bold">Lista jest filtrowana</p>
+                <p className="mt-1 text-amber-900">
+                  Pokazano {filteredClients.length} z {clients.length} klientów.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={clearAllClientFilters}
+                className="inline-flex justify-center rounded-xl bg-amber-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-800 sm:text-sm"
+              >
+                Wyczyść wszystkie filtry
+              </button>
+            </div>
+          </section>
+        )}
+
         {(canAssignClients() || canAnonymizeClients()) && (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1828,7 +1867,11 @@ function ClientsPageContent() {
           {loading ? (
             <div className="p-6 text-slate-500">Ładowanie klientów...</div>
           ) : filteredClients.length === 0 ? (
-            <div className="p-6 text-slate-500">Brak klientów.</div>
+            <div className="p-6 text-slate-500">
+              {hasActiveClientFilters
+                ? "Brak klientów pasujących do aktywnych filtrów."
+                : "Brak klientów."}
+            </div>
           ) : (
             <div>
               <div className="overflow-x-auto">
@@ -1986,7 +2029,9 @@ function ClientsPageContent() {
               <div className="border-t border-slate-100 px-4 py-3 text-center text-xs font-semibold text-slate-400">
                 {hasMoreClients
                   ? `Wyświetlono ${visibleClients.length} z ${filteredClients.length}. Przewiń niżej, aby doczytać kolejne.`
-                  : `Wyświetlono wszystkie rekordy: ${filteredClients.length}.`}
+                  : hasActiveClientFilters
+                    ? `Wyświetlono wszystkie pasujące rekordy: ${filteredClients.length} z ${clients.length}.`
+                    : `Wyświetlono wszystkie rekordy: ${filteredClients.length}.`}
               </div>
             </div>
           )}
