@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
-import { sendTeamsDelegatedDirectCalendarNotification } from "@/lib/microsoftTeams";
+import { sendTeamsSaleChannelNotification } from "@/lib/microsoftTeams";
 
 type ActivityRow = {
   id: string;
@@ -304,19 +303,8 @@ function getSupabaseAdminClient() {
 }
 
 async function sendTeamsReport(message: string) {
-  const recipient = process.env.REPORTS_TEAMS_RECIPIENT || "mateusz.rapczewski@ideasol.pl";
-  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
-
-  if (!delegatedRefreshToken) {
-    throw new Error("Brakuje MICROSOFT_DELEGATED_REFRESH_TOKEN.");
-  }
-
-  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
-
-  return sendTeamsDelegatedDirectCalendarNotification({
-    userEmail: recipient,
+  return sendTeamsSaleChannelNotification({
     message,
-    accessToken: delegatedToken.access_token || "",
   });
 }
 
