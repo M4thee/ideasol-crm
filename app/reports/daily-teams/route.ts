@@ -11,6 +11,18 @@ type ActivityRow = {
   contact_type: string | null;
 };
 
+type CalendarEventRow = {
+  id: string;
+  created_at: string | null;
+  created_by: string | null;
+  assigned_user_id?: string | null;
+  source_activity_id?: string | null;
+  event_type?: string | null;
+  status?: string | null;
+  title?: string | null;
+  event_at?: string | null;
+};
+
 type ProfileRow = {
   id: string;
   display_name: string | null;
@@ -195,15 +207,51 @@ function isMarketingContact(row: ActivityRow) {
 }
 
 function isMeetingScheduled(row: ActivityRow) {
+  const activityType = normalizeText(row.activity_type);
   const status = normalizeText(row.status);
-  return status === "umowione spotkanie" || status === "meeting_scheduled";
+
+  return (
+    activityType === "meeting" ||
+    activityType === "spotkanie" ||
+    activityType === "calendar_event" ||
+    status === "umowione spotkanie" ||
+    status === "meeting_scheduled" ||
+    status.includes("umowione spotkanie") ||
+    status.includes("umowiono spotkanie")
+  );
+}
+
+function isMeetingCalendarEvent(row: CalendarEventRow) {
+  const eventType = normalizeText(row.event_type);
+  const status = normalizeText(row.status);
+  const title = normalizeText(row.title);
+
+  return (
+    eventType.includes("meeting") ||
+    eventType.includes("spotkanie") ||
+    status.includes("meeting") ||
+    status.includes("spotkanie") ||
+    title.includes("spotkanie") ||
+    title.includes("wizyta")
+  );
+}
+
+function buildMeetingActivityFromCalendarEvent(row: CalendarEventRow): ActivityRow {
+  return {
+    id: `calendar-event-${row.id}`,
+    created_at: row.created_at || row.event_at || new Date().toISOString(),
+    created_by: row.created_by,
+    activity_type: "meeting",
+    status: "Umówione spotkanie",
+    contact_type: "Kontakt marketingowy",
+  };
 }
 
 function buildAdvisorStats(rows: ActivityRow[], profiles: ProfileRow[]) {
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
   const statsMap = new Map<string, AdvisorStats>();
 
-  rows.filter(isPhone).forEach((row) => {
+  rows.filter((row) => isPhone(row) || isMeetingScheduled(row)).forEach((row) => {
     const userId = row.created_by || "unknown";
     const profile = profileMap.get(userId);
 
@@ -215,7 +263,9 @@ function buildAdvisorStats(rows: ActivityRow[], profiles: ProfileRow[]) {
       conversion: 0,
     };
 
-    current.phones += 1;
+    if (isPhone(row)) {
+      current.phones += 1;
+    }
 
     if (isMeetingScheduled(row)) {
       current.meetings += 1;
@@ -227,7 +277,7 @@ function buildAdvisorStats(rows: ActivityRow[], profiles: ProfileRow[]) {
     statsMap.set(userId, current);
   });
 
-  return Array.from(statsMap.values()).sort((a, b) => b.phones - a.phones);
+  return Array.from(statsMap.values()).sort((a, b) => b.phones - a.phones || b.meetings - a.meetings);
 }
 
 function buildTeamsMessage(
@@ -280,7 +330,7 @@ function buildTeamsMessage(
     `Porównanie: ${conversionComparison}`,
     "",
     "━━━━━━━━━━━━━━",
-    "TELEFONY PER DORADCA",
+    "AKTYWNOŚĆ PER DORADCA / CC",
     "━━━━━━━━━━━━━━",
     ...advisorLines,
   ].join("\n");
@@ -358,6 +408,16 @@ export async function GET(request: NextRequest) {
       throw activitiesError;
     }
 
+    const { data: calendarEventRows, error: calendarEventsError } = await supabase
+      .from("calendar_events")
+      .select("id, created_at, created_by, assigned_user_id, source_activity_id, event_type, status, title, event_at")
+      .gte("created_at", previousRange.startIso)
+      .lte("created_at", endIso);
+
+    if (calendarEventsError) {
+      throw calendarEventsError;
+    }
+
     const { data: profileRows, error: profilesError } = await supabase
       .from("profiles")
       .select("id, display_name, email, role");
@@ -366,7 +426,14 @@ export async function GET(request: NextRequest) {
       throw profilesError;
     }
 
-    const allRows = (activityRows || []) as ActivityRow[];
+    const baseRows = (activityRows || []) as ActivityRow[];
+    const calendarRows = (calendarEventRows || []) as CalendarEventRow[];
+    const baseActivityIds = new Set(baseRows.map((row) => row.id));
+    const meetingRows = calendarRows  
+      .filter(isMeetingCalendarEvent)
+      .filter((event) => !event.source_activity_id || !baseActivityIds.has(event.source_activity_id))
+      .map(buildMeetingActivityFromCalendarEvent);
+    const allRows = [...baseRows, ...meetingRows];
     const profiles = (profileRows || []) as ProfileRow[];
     const rows = allRows.filter((row) => {
       const createdAt = new Date(row.created_at).getTime();

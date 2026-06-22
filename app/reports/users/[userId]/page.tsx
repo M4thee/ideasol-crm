@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-type InteractionFilter = "all" | "phone" | "mail" | "sms";
+type InteractionFilter = "all" | "phone" | "mail" | "sms" | "meeting";
 
 
 type ActivityRow = {
@@ -36,6 +36,7 @@ type CalendarEventRow = {
   created_at: string | null;
   created_by?: string | null;
   assigned_user_id?: string | null;
+  client_id?: string | null;
   source_activity_id?: string | null;
   event_type?: string | null;
   status?: string | null;
@@ -109,6 +110,7 @@ function getInteractionType(row: ActivityRow): InteractionFilter {
   if (activityType === "email") return "mail";
   if (activityType === "sms") return "sms";
   if (activityType === "phone") return "phone";
+  if (activityType === "meeting" || activityType === "spotkanie" || activityType === "calendar_event") return "meeting";
 
   return "phone";
 }
@@ -117,12 +119,18 @@ function getInteractionTypeLabel(type: InteractionFilter) {
   if (type === "phone") return "Telefon";
   if (type === "mail") return "Mail";
   if (type === "sms") return "SMS";
+  if (type === "meeting") return "Spotkanie";
   return "Wszystkie";
 }
 
 function getStatusLabel(row: ActivityRow) {
   const rawStatus = row.status || row.phone_status || row.contact_status || row.outcome || row.result || "brak_statusu";
   const status = getContactStatus(row);
+  const activityType = getActivityType(row);
+
+  if (activityType === "meeting" || activityType === "spotkanie" || activityType === "calendar_event") {
+    return "Umówione spotkanie";
+  }
 
   if (status.includes("meeting_scheduled") || status.includes("umowione spotkanie") || status.includes("umowiono spotkanie")) {
     return "Umówione spotkanie";
@@ -153,6 +161,19 @@ function getStatusLabel(row: ActivityRow) {
   }
 
   return rawStatus && rawStatus !== "brak_statusu" ? String(rawStatus) : "Brak statusu";
+}
+function buildMeetingActivityFromCalendarEvent(row: CalendarEventRow): ActivityRow {
+  return {
+    id: `calendar-event-${row.id}`,
+    created_at: row.created_at || row.event_at || null,
+    created_by: row.created_by,
+    assigned_user_id: row.assigned_user_id,
+    client_id: row.client_id,
+    activity_type: "meeting",
+    contact_type: "Kalendarz",
+    status: "Umówione spotkanie",
+    title: row.title || "Spotkanie w kalendarzu",
+  };
 }
 
 function isNoAnswer(row: ActivityRow) {
@@ -302,8 +323,8 @@ export default function UserReportDetailsPage() {
   }, [activeStatusLabel, statusSlices]);
 
   const interactionSummary = useMemo(
-    () => getInteractionSummary(filteredActivities, calendarEvents),
-    [filteredActivities, calendarEvents]
+    () => getInteractionSummary(filteredActivities),
+    [filteredActivities]
   );
 
   function handleExportToExcel() {
@@ -407,15 +428,37 @@ export default function UserReportDetailsPage() {
 
       const { data: calendarEventRows, error: calendarEventsError } = await supabase
         .from("calendar_events")
-        .select("id, created_at, created_by, assigned_user_id, source_activity_id, event_type, status, title, event_at")
+        .select("id, created_at, created_by, assigned_user_id, client_id, source_activity_id, event_type, status, title, event_at")
         .eq("created_by", userId)
         .gte("created_at", startIso)
         .lte("created_at", endIso);
 
       if (calendarEventsError) throw calendarEventsError;
-      setCalendarEvents((calendarEventRows || []) as CalendarEventRow[]);
 
-      const clientIds = Array.from(new Set(rows.map((row) => row.client_id).filter(Boolean))) as string[];
+      const events = (calendarEventRows || []) as CalendarEventRow[];
+      setCalendarEvents(events);
+
+      const scheduledActivityIds = new Set(
+        rows
+          .filter((row) => getStatusLabel(row) === "Umówione spotkanie")
+          .map((row) => row.id)
+          .filter(Boolean)
+      );
+
+      const meetingActivityRows = events
+        .filter(isMeetingCalendarEvent)
+        .filter((event) => !event.source_activity_id || !scheduledActivityIds.has(event.source_activity_id))
+        .map(buildMeetingActivityFromCalendarEvent);
+
+      const reportRows = [...rows, ...meetingActivityRows].sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      setActivities(reportRows);
+
+      const clientIds = Array.from(new Set(reportRows.map((row) => row.client_id).filter(Boolean))) as string[];
 
       if (clientIds.length === 0) {
         setClientMap(new Map());
@@ -610,6 +653,7 @@ export default function UserReportDetailsPage() {
                   ["phone", "Telefon"],
                   ["mail", "Mail"],
                   ["sms", "SMS"],
+                  ["meeting", "Spotkanie"],
                 ] as Array<[InteractionFilter, string]>).map(([value, label]) => (
                   <button
                     key={value}
