@@ -1,57 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTeamsSaleChannelNotification } from "@/lib/microsoftTeams";
+import type { ActivityRow, CalendarEventRow, ProfileRow } from "../types";
+import {
+  getActivityOwnerId,
+  getCalendarEventOwnerId,
+  getConversationClientKey,
+  isAnsweredPhoneActivity,
+  isEmailActivity,
+  isMeetingCalendarEvent,
+  isMeetingScheduled,
+  isPhoneActivity,
+  isSmsActivity,
+  normalizeText,
+} from "../utils";
 
-type ActivityRow = {
-  id: string;
-  created_at: string;
-  created_by: string | null;
-  activity_type: string | null;
-  status: string | null;
-  contact_type: string | null;
-};
+type ReportGroup = "cc" | "advisor";
 
-type CalendarEventRow = {
-  id: string;
-  created_at: string | null;
-  created_by: string | null;
-  assigned_user_id?: string | null;
-  source_activity_id?: string | null;
-  event_type?: string | null;
-  status?: string | null;
-  title?: string | null;
-  event_at?: string | null;
-};
-
-type ProfileRow = {
-  id: string;
-  display_name: string | null;
-  email: string | null;
-  role: string | null;
-};
-
-type AdvisorStats = {
+type DailyUserStats = {
   userId: string;
   name: string;
-  phones: number;
-  meetings: number;
-  conversion: number;
+  phoneCalls: number;
+  uniqueClientConversations: number;
+  emails: number;
+  sms: number;
+  meetingsScheduled: number;
+  conversionRate: number;
 };
 
-function normalizeText(value: unknown) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replaceAll("ą", "a")
-    .replaceAll("ć", "c")
-    .replaceAll("ę", "e")
-    .replaceAll("ł", "l")
-    .replaceAll("ń", "n")
-    .replaceAll("ó", "o")
-    .replaceAll("ś", "s")
-    .replaceAll("ż", "z")
-    .replaceAll("ź", "z");
-}
+type DailyGroupSummary = {
+  phoneCalls: number;
+  uniqueClientConversations: number;
+  emails: number;
+  sms: number;
+  meetingsScheduled: number;
+  conversionRate: number;
+  users: DailyUserStats[];
+};
+
+type SalesRow = Record<string, unknown>;
+
+type DailySalesSummary = {
+  contracts: number;
+  pvContracts: number;
+  pvKwpTotal: number;
+  storageUnits: number;
+};
 
 function formatDatePl(date: Date) {
   return date.toLocaleDateString("pl-PL", {
@@ -136,6 +130,16 @@ function isNonWorkingDayInPoland(dateString: string) {
   return isWeekendInWarsaw(dateString) || isPolishPublicHoliday(dateString);
 }
 
+function getPreviousBusinessDate(date: string) {
+  let previous = addDaysToDateString(date, -1);
+
+  while (isNonWorkingDayInPoland(previous)) {
+    previous = addDaysToDateString(previous, -1);
+  }
+
+  return previous;
+}
+
 function getReportDateFromRequest(request: NextRequest) {
   const url = new URL(request.url);
   const dateFromQuery = url.searchParams.get("date");
@@ -157,22 +161,373 @@ function getWarsawDateRangeIso(date: string) {
   };
 }
 
-function getPreviousBusinessDate(date: string) {
-  let previous = addDaysToDateString(date, -1);
-
-  while (isNonWorkingDayInPoland(previous)) {
-    previous = addDaysToDateString(previous, -1);
-  }
-
-  return previous;
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
-function getTeamConversion(rows: ActivityRow[]) {
-  const marketingRows = rows.filter(isMarketingContact);
-  const phones = marketingRows.filter(isPhone).length;
-  const meetings = marketingRows.filter(isMeetingScheduled).length;
+function toArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
 
-  return phones > 0 ? (meetings / phones) * 100 : 0;
+function toNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(",", ".").replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function formatKwp(value: number) {
+  return value.toLocaleString("pl-PL", {
+    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getSaleOwnerId(row: SalesRow) {
+  return String(
+    row.seller_id ||
+      row.selling_user_id ||
+      row.assigned_user_id ||
+      row.created_by ||
+      ""
+  );
+}
+
+function getSaleDate(row: SalesRow) {
+  return String(row.sale_date || row.sold_at || row.created_at || "");
+}
+
+function isInDateRange(value: string, startIso: string, endIso: string) {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) && time >= new Date(startIso).getTime() && time <= new Date(endIso).getTime();
+}
+
+function getSoldItems(row: SalesRow) {
+  const directItems = toArray(row.sold_items);
+
+  if (directItems.length > 0) {
+    return directItems;
+  }
+
+  const offerData = toRecord(row.offer_data);
+  const offerItems = offerData ? toArray(offerData.sold_items || offerData.soldItems) : [];
+
+  if (offerItems.length > 0) {
+    return offerItems;
+  }
+
+  return [];
+}
+
+function getItemText(item: unknown) {
+  if (typeof item === "string") {
+    return item;
+  }
+
+  const record = toRecord(item);
+
+  if (!record) {
+    return "";
+  }
+
+  return [
+    record.type,
+    record.category,
+    record.name,
+    record.label,
+    record.title,
+    record.product,
+    record.description,
+    record.model,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isPvItem(item: unknown) {
+  const text = normalizeText(getItemText(item));
+  return text.includes("instalacja pv") || text.includes("fotowoltaika") || /\bpv\b/.test(text);
+}
+
+function isStorageItem(item: unknown) {
+  const text = normalizeText(getItemText(item));
+  return (
+    text.includes("magazyn energii") ||
+    text.includes("storage") ||
+    text.includes("battery") ||
+    text.includes("akumulator") ||
+    /\bme\b/.test(text)
+  );
+}
+
+function extractKwpFromText(value: string) {
+  const matches = Array.from(value.matchAll(/(\d+(?:[,.]\d+)?)\s*kWp/gi));
+
+  if (matches.length === 0) {
+    return 0;
+  }
+
+  return matches.reduce((sum, match) => sum + toNumber(match[1]), 0);
+}
+
+function getPvKwpFromSale(row: SalesRow) {
+  const directPower =
+    toNumber(row.pv_power_kwp) ||
+    toNumber(row.pvPowerKwp) ||
+    toNumber(row.pv_power) ||
+    toNumber(row.pvPower) ||
+    toNumber(row.system_power_kwp) ||
+    toNumber(row.systemPowerKwp);
+
+  if (directPower > 0) {
+    return directPower;
+  }
+
+  const soldItems = getSoldItems(row);
+  const pvItems = soldItems.filter(isPvItem);
+  const pvPowerFromItems = pvItems.reduce<number>(
+    (sum, item) => sum + extractKwpFromText(getItemText(item)),
+    0
+  );
+
+  if (pvPowerFromItems > 0) {
+    return pvPowerFromItems;
+  }
+
+  const offerData = toRecord(row.offer_data);
+  const form = offerData ? toRecord(offerData.form) : null;
+
+  return form
+    ? toNumber(form.pvPowerKwp) || toNumber(form.pv_power_kwp) || toNumber(form.pvPower) || toNumber(form.pv_power)
+    : 0;
+}
+
+function getStorageUnitsFromSale(row: SalesRow) {
+  const directUnits =
+    toNumber(row.storage_units) ||
+    toNumber(row.storageUnits) ||
+    toNumber(row.energy_storage_units) ||
+    toNumber(row.energyStorageUnits);
+
+  if (directUnits > 0) {
+    return directUnits;
+  }
+
+  const soldItems = getSoldItems(row);
+  const storageItems = soldItems.filter(isStorageItem);
+
+  if (storageItems.length > 0) {
+    return storageItems.reduce<number>((sum, item) => {
+      const record = toRecord(item);
+      const quantity = record
+        ? toNumber(record.quantity) || toNumber(record.qty) || toNumber(record.count)
+        : 0;
+
+      return sum + (quantity > 0 ? quantity : 1);
+    }, 0);
+  }
+
+  const offerData = toRecord(row.offer_data);
+  const form = offerData ? toRecord(offerData.form) : null;
+  const hasStorage = form
+    ? Boolean(
+        form.storageId ||
+          form.storage_id ||
+          form.storageModel ||
+          form.storage_model ||
+          toNumber(form.storageCapacityKwh) > 0 ||
+          toNumber(form.storage_capacity_kwh) > 0
+      )
+    : false;
+
+  return hasStorage ? 1 : 0;
+}
+
+function summarizeSales(rows: SalesRow[]): DailySalesSummary {
+  const pvContracts = rows.filter((row) => getPvKwpFromSale(row) > 0);
+
+  return {
+    contracts: rows.length,
+    pvContracts: pvContracts.length,
+    pvKwpTotal: pvContracts.reduce<number>((sum, row) => sum + getPvKwpFromSale(row), 0),
+    storageUnits: rows.reduce<number>((sum, row) => sum + getStorageUnitsFromSale(row), 0),
+  };
+}
+
+function summarizeSalesByUser(rows: SalesRow[]) {
+  const grouped = new Map<string, SalesRow[]>();
+
+  rows.forEach((row) => {
+    const userId = getSaleOwnerId(row);
+
+    if (!userId) {
+      return;
+    }
+
+    const current = grouped.get(userId) || [];
+    current.push(row);
+    grouped.set(userId, current);
+  });
+
+  return new Map(
+    Array.from(grouped.entries()).map(([userId, userSales]) => [
+      userId,
+      summarizeSales(userSales),
+    ])
+  );
+}
+
+function filterSalesByUserGroup(rows: SalesRow[], profiles: ProfileRow[], group: ReportGroup) {
+  const userIds = getUserIdsForGroup(profiles, group);
+  return rows.filter((row) => userIds.has(getSaleOwnerId(row)));
+}
+
+function isMarketingContact(row: ActivityRow) {
+  return normalizeText(row.contact_type) === "kontakt marketingowy";
+}
+
+function getUserIdsForGroup(profiles: ProfileRow[], group: ReportGroup) {
+  return new Set(
+    profiles
+      .filter((profile) => {
+        const role = normalizeText(profile.role);
+
+        if (group === "cc") {
+          return role === "cc";
+        }
+
+        return ["seller", "manager", "owner", "admin"].includes(role);
+      })
+      .map((profile) => profile.id)
+  );
+}
+
+function filterActivitiesByUserGroup(rows: ActivityRow[], profiles: ProfileRow[], group: ReportGroup) {
+  const userIds = getUserIdsForGroup(profiles, group);
+  return rows.filter((row) => userIds.has(getActivityOwnerId(row)));
+}
+
+function filterCalendarEventsByUserGroup(rows: CalendarEventRow[], profiles: ProfileRow[], group: ReportGroup) {
+  const userIds = getUserIdsForGroup(profiles, group);
+  return rows.filter((row) => userIds.has(getCalendarEventOwnerId(row)));
+}
+
+function summarizeDailyGroup(
+  rows: ActivityRow[],
+  profileMap: Map<string, ProfileRow>,
+  calendarEvents: CalendarEventRow[] = []
+): DailyGroupSummary {
+  const phoneRows = rows.filter(isPhoneActivity);
+  const emailRows = rows.filter(isEmailActivity);
+  const smsRows = rows.filter(isSmsActivity);
+  const interactionRows = rows.filter(
+    (row) => isPhoneActivity(row) || isEmailActivity(row) || isSmsActivity(row)
+  );
+
+  const scheduledPhoneRows = phoneRows.filter(isMeetingScheduled);
+  const scheduledPhoneActivityIds = new Set(
+    scheduledPhoneRows.map((row) => row.id).filter(Boolean) as string[]
+  );
+  const meetingEventRows = calendarEvents
+    .filter(isMeetingCalendarEvent)
+    .filter((event) => !event.source_activity_id || !scheduledPhoneActivityIds.has(event.source_activity_id));
+
+  const answeredPhoneRows = phoneRows.filter(isAnsweredPhoneActivity);
+  const uniqueClientConversations = new Set(
+    answeredPhoneRows.map(getConversationClientKey)
+  ).size;
+  const userConversationClientKeys = new Map<string, Set<string>>();
+
+  const phoneCalls = phoneRows.length;
+  const emails = emailRows.length;
+  const sms = smsRows.length;
+  const meetingsScheduled = scheduledPhoneRows.length + meetingEventRows.length;
+  const userMap = new Map<string, DailyUserStats>();
+
+  interactionRows.forEach((row) => {
+    const userId = getActivityOwnerId(row);
+    const profile = profileMap.get(userId);
+    const current = userMap.get(userId) || {
+      userId,
+      name: profile?.display_name || profile?.email || "Nieznany użytkownik",
+      phoneCalls: 0,
+      uniqueClientConversations: 0,
+      emails: 0,
+      sms: 0,
+      meetingsScheduled: 0,
+      conversionRate: 0,
+    };
+
+    if (isPhoneActivity(row)) {
+      current.phoneCalls += 1;
+
+      if (isAnsweredPhoneActivity(row)) {
+        const clientKey = getConversationClientKey(row);
+        const userClientKeys = userConversationClientKeys.get(userId) || new Set<string>();
+        userClientKeys.add(clientKey);
+        userConversationClientKeys.set(userId, userClientKeys);
+        current.uniqueClientConversations = userClientKeys.size;
+      }
+
+      if (isMeetingScheduled(row)) {
+        current.meetingsScheduled += 1;
+      }
+    }
+
+    if (isEmailActivity(row)) {
+      current.emails += 1;
+    }
+
+    if (isSmsActivity(row)) {
+      current.sms += 1;
+    }
+
+    current.conversionRate = current.phoneCalls > 0
+      ? Math.round((current.meetingsScheduled / current.phoneCalls) * 100)
+      : 0;
+
+    userMap.set(userId, current);
+  });
+
+  meetingEventRows.forEach((event) => {
+    const userId = getCalendarEventOwnerId(event);
+    const profile = profileMap.get(userId);
+    const current = userMap.get(userId) || {
+      userId,
+      name: profile?.display_name || profile?.email || "Nieznany użytkownik",
+      phoneCalls: 0,
+      uniqueClientConversations: 0,
+      emails: 0,
+      sms: 0,
+      meetingsScheduled: 0,
+      conversionRate: 0,
+    };
+
+    current.meetingsScheduled += 1;
+    current.conversionRate = current.phoneCalls > 0
+      ? Math.round((current.meetingsScheduled / current.phoneCalls) * 100)
+      : 0;
+
+    userMap.set(userId, current);
+  });
+
+  return {
+    phoneCalls,
+    uniqueClientConversations,
+    emails,
+    sms,
+    meetingsScheduled,
+    conversionRate: phoneCalls > 0 ? Math.round((meetingsScheduled / phoneCalls) * 100) : 0,
+    users: Array.from(userMap.values()).sort((a, b) => b.phoneCalls - a.phoneCalls),
+  };
 }
 
 function formatConversionComparison(currentConversion: number, previousConversion: number) {
@@ -190,149 +545,103 @@ function formatConversionComparison(currentConversion: number, previousConversio
   return "⚪ Bez zmian względem poprzedniego dnia roboczego";
 }
 
-function isPhone(row: ActivityRow) {
-  return normalizeText(row.activity_type) === "phone";
-}
-
-function isEmail(row: ActivityRow) {
-  return normalizeText(row.activity_type) === "email";
-}
-
-function isSms(row: ActivityRow) {
-  return normalizeText(row.activity_type) === "sms";
-}
-
-function isMarketingContact(row: ActivityRow) {
-  return normalizeText(row.contact_type) === "kontakt marketingowy";
-}
-
-function isMeetingScheduled(row: ActivityRow) {
-  const activityType = normalizeText(row.activity_type);
-  const status = normalizeText(row.status);
-
-  return (
-    activityType === "meeting" ||
-    activityType === "spotkanie" ||
-    activityType === "calendar_event" ||
-    status === "umowione spotkanie" ||
-    status === "meeting_scheduled" ||
-    status.includes("umowione spotkanie") ||
-    status.includes("umowiono spotkanie")
+function buildReportSection(
+  title: string,
+  summary: DailyGroupSummary,
+  previousSummary: DailyGroupSummary,
+  emptyRankingText: string,
+  salesSummary?: DailySalesSummary,
+  salesByUser?: Map<string, DailySalesSummary>
+) {
+  const conversionComparison = formatConversionComparison(
+    summary.conversionRate,
+    previousSummary.conversionRate
   );
-}
 
-function isMeetingCalendarEvent(row: CalendarEventRow) {
-  const eventType = normalizeText(row.event_type);
-  const status = normalizeText(row.status);
-  const title = normalizeText(row.title);
+  const rankingLines = summary.users.length > 0
+    ? summary.users.flatMap((user, index) => {
+        const userSales = salesByUser?.get(user.userId) || {
+          contracts: 0,
+          pvContracts: 0,
+          pvKwpTotal: 0,
+          storageUnits: 0,
+        };
 
-  return (
-    eventType.includes("meeting") ||
-    eventType.includes("spotkanie") ||
-    status.includes("meeting") ||
-    status.includes("spotkanie") ||
-    title.includes("spotkanie") ||
-    title.includes("wizyta")
-  );
-}
+        return [
+          `${index + 1}. ${user.name}`,
+          `   📞 Telefony: ${user.phoneCalls}`,
+          `   🗣️ Odbyte rozmowy: ${user.uniqueClientConversations}`,
+          `   ✉️ Maile: ${user.emails}`,
+          `   💬 SMS-y: ${user.sms}`,
+          `   📅 Spotkania: ${user.meetingsScheduled}`,
+          `   📈 Konwersja: ${user.conversionRate}%`,
+          ...(salesByUser
+            ? [
+                `   📃 Umowy: ${userSales.contracts}`,
+                `   ☀️ PV: ${userSales.pvContracts} umowy, ${formatKwp(userSales.pvKwpTotal)} kWp`,
+                `   🔋 ME: ${userSales.storageUnits} szt. ME`,
+              ]
+            : []),
+          "",
+        ];
+      })
+    : [emptyRankingText, ""];
 
-function buildMeetingActivityFromCalendarEvent(row: CalendarEventRow): ActivityRow {
-  return {
-    id: `calendar-event-${row.id}`,
-    created_at: row.created_at || row.event_at || new Date().toISOString(),
-    created_by: row.created_by,
-    activity_type: "meeting",
-    status: "Umówione spotkanie",
-    contact_type: "Kontakt marketingowy",
-  };
-}
-
-function buildAdvisorStats(rows: ActivityRow[], profiles: ProfileRow[]) {
-  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
-  const statsMap = new Map<string, AdvisorStats>();
-
-  rows.filter((row) => isPhone(row) || isMeetingScheduled(row)).forEach((row) => {
-    const userId = row.created_by || "unknown";
-    const profile = profileMap.get(userId);
-
-    const current = statsMap.get(userId) || {
-      userId,
-      name: profile?.display_name || profile?.email || "Nieznany użytkownik",
-      phones: 0,
-      meetings: 0,
-      conversion: 0,
-    };
-
-    if (isPhone(row)) {
-      current.phones += 1;
-    }
-
-    if (isMeetingScheduled(row)) {
-      current.meetings += 1;
-    }
-
-    current.conversion =
-      current.phones > 0 ? Math.round((current.meetings / current.phones) * 100) : 0;
-
-    statsMap.set(userId, current);
-  });
-
-  return Array.from(statsMap.values()).sort((a, b) => b.phones - a.phones || b.meetings - a.meetings);
+  return [
+    "━━━━━━━━━━━━━━",
+    title,
+    "━━━━━━━━━━━━━━",
+    `📞 Telefony: ${summary.phoneCalls}`,
+    `🗣️ Odbyte rozmowy: ${summary.uniqueClientConversations}`,
+    `✉️ Maile: ${summary.emails}`,
+    `💬 SMS-y: ${summary.sms}`,
+    `📅 Umówione spotkania: ${summary.meetingsScheduled}`,
+    `📈 Konwersja: ${summary.conversionRate}%`,
+    `Porównanie: ${conversionComparison}`,
+    ...(salesSummary
+      ? [
+          "",
+          `📃 Umowy: ${salesSummary.contracts}`,
+          `☀️ PV: ${salesSummary.pvContracts} umowy, ${formatKwp(salesSummary.pvKwpTotal)} kWp w sumie`,
+          `🔋 ME: ${salesSummary.storageUnits} szt. ME`,
+        ]
+      : []),
+    "",
+    "Ranking:",
+    ...rankingLines,
+  ];
 }
 
 function buildTeamsMessage(
   reportDate: string,
-  rows: ActivityRow[],
-  advisorStats: AdvisorStats[],
-  previousBusinessRows: ActivityRow[]
+  ccSummary: DailyGroupSummary,
+  previousCcSummary: DailyGroupSummary,
+  advisorSummary: DailyGroupSummary,
+  previousAdvisorSummary: DailyGroupSummary,
+  advisorSalesSummary: DailySalesSummary,
+  advisorSalesByUser: Map<string, DailySalesSummary>
 ) {
-  const marketingRows = rows.filter(isMarketingContact);
-  const phones = marketingRows.filter(isPhone).length;
-  const emails = marketingRows.filter(isEmail).length;
-  const sms = marketingRows.filter(isSms).length;
-  const meetings = marketingRows.filter(isMeetingScheduled).length;
-  const currentConversionValue = getTeamConversion(rows);
-  const previousConversionValue = getTeamConversion(previousBusinessRows);
-  const teamConversion = currentConversionValue.toFixed(1).replace(".", ",");
-  const conversionComparison = formatConversionComparison(
-    currentConversionValue,
-    previousConversionValue
-  );
   const reportDateLabel = formatDatePl(new Date(`${reportDate}T12:00:00+02:00`));
 
-  const advisorLines = advisorStats.length > 0
-    ? advisorStats.flatMap((advisor, index) => [
-        `${index + 1}. ${advisor.name}`,
-        `   📞 Telefony: ${advisor.phones}`,
-        `   📅 Spotkania: ${advisor.meetings}`,
-        `   📈 Konwersja: ${advisor.conversion}%`,
-        "",
-      ])
-    : ["Brak telefonów w wybranym dniu."];
-
   return [
-    `📊 Raport kontaktów marketingowych`,
+    "📊 Daily CRM Report",
     `📅 ${reportDateLabel}`,
     "",
-    "━━━━━━━━━━━━━━",
-    "INTERAKCJE",
-    "━━━━━━━━━━━━━━",
-    `📞 Telefony: ${phones}`,
-    `✉️ Maile: ${emails}`,
-    `💬 SMS-y: ${sms}`,
+    ...buildReportSection(
+      "RAPORT CC — KONTAKTY ZDALNE",
+      ccSummary,
+      previousCcSummary,
+      "Brak kontaktów CC w wybranym dniu."
+    ),
     "",
-    "━━━━━━━━━━━━━━",
-    "SKUTECZNOŚĆ ZESPOŁU",
-    "━━━━━━━━━━━━━━",
-    `📞 Telefony: ${phones}`,
-    `📅 Spotkania: ${meetings}`,
-    `📈 Konwersja: ${teamConversion}%`,
-    `Porównanie: ${conversionComparison}`,
-    "",
-    "━━━━━━━━━━━━━━",
-    "AKTYWNOŚĆ PER DORADCA / CC",
-    "━━━━━━━━━━━━━━",
-    ...advisorLines,
+    ...buildReportSection(
+      "RAPORT DORADCÓW",
+      advisorSummary,
+      previousAdvisorSummary,
+      "Brak aktywności doradców w wybranym dniu.",
+      advisorSalesSummary,
+      advisorSalesByUser
+    ),
   ].join("\n");
 }
 
@@ -378,6 +687,7 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
     }
+
     const reportDate = getReportDateFromRequest(request);
     const previousBusinessDate = getPreviousBusinessDate(reportDate);
     const { startIso, endIso } = getWarsawDateRangeIso(reportDate);
@@ -400,7 +710,7 @@ export async function GET(request: NextRequest) {
 
     const { data: activityRows, error: activitiesError } = await supabase
       .from("client_activities")
-      .select("id, created_at, created_by, activity_type, status, contact_type")
+      .select("*")
       .gte("created_at", previousRange.startIso)
       .lte("created_at", endIso);
 
@@ -418,41 +728,94 @@ export async function GET(request: NextRequest) {
       throw calendarEventsError;
     }
 
+    const { data: salesRows, error: salesError } = await supabase
+      .from("sales")
+      .select("*")
+      .gte("created_at", startIso)
+      .lte("created_at", endIso);
+
+    if (salesError) {
+      throw salesError;
+    }
+
     const { data: profileRows, error: profilesError } = await supabase
       .from("profiles")
-      .select("id, display_name, email, role");
+      .select("id, display_name, email, role, manager_id");
 
     if (profilesError) {
       throw profilesError;
     }
 
-    const baseRows = (activityRows || []) as ActivityRow[];
-    const calendarRows = (calendarEventRows || []) as CalendarEventRow[];
-    const baseActivityIds = new Set(baseRows.map((row) => row.id));
-    const meetingRows = calendarRows  
-      .filter(isMeetingCalendarEvent)
-      .filter((event) => !event.source_activity_id || !baseActivityIds.has(event.source_activity_id))
-      .map(buildMeetingActivityFromCalendarEvent);
-    const allRows = [...baseRows, ...meetingRows];
     const profiles = (profileRows || []) as ProfileRow[];
-    const rows = allRows.filter((row) => {
-      const createdAt = new Date(row.created_at).getTime();
+    const profileMap = new Map<string, ProfileRow>(
+      profiles.map((profile) => [profile.id, profile])
+    );
+    const allActivities = (activityRows || []) as ActivityRow[];
+    const allCalendarEvents = (calendarEventRows || []) as CalendarEventRow[];
+    const allSales = ((salesRows || []) as SalesRow[]).filter((row) =>
+      isInDateRange(getSaleDate(row), startIso, endIso)
+    );
+
+    const currentActivities = allActivities.filter((row) => {
+      const createdAt = new Date(row.created_at || "").getTime();
       return createdAt >= new Date(startIso).getTime() && createdAt <= new Date(endIso).getTime();
     });
-    const previousBusinessRows = allRows.filter((row) => {
-      const createdAt = new Date(row.created_at).getTime();
+
+    const previousActivities = allActivities.filter((row) => {
+      const createdAt = new Date(row.created_at || "").getTime();
       return createdAt >= new Date(previousRange.startIso).getTime() && createdAt <= new Date(previousRange.endIso).getTime();
     });
-    const marketingRows = rows.filter(isMarketingContact);
-    const advisorStats = buildAdvisorStats(marketingRows, profiles);
-    const message = buildTeamsMessage(reportDate, marketingRows, advisorStats, previousBusinessRows);
+
+    const currentCalendarEvents = allCalendarEvents.filter((event) => {
+      const createdAt = new Date(event.created_at || "").getTime();
+      return createdAt >= new Date(startIso).getTime() && createdAt <= new Date(endIso).getTime();
+    });
+
+    const previousCalendarEvents = allCalendarEvents.filter((event) => {
+      const createdAt = new Date(event.created_at || "").getTime();
+      return createdAt >= new Date(previousRange.startIso).getTime() && createdAt <= new Date(previousRange.endIso).getTime();
+    });
+
+    const currentMarketingActivities = currentActivities.filter(isMarketingContact);
+    const previousMarketingActivities = previousActivities.filter(isMarketingContact);
+
+    const ccActivities = filterActivitiesByUserGroup(currentMarketingActivities, profiles, "cc");
+    const previousCcActivities = filterActivitiesByUserGroup(previousMarketingActivities, profiles, "cc");
+    const ccCalendarEvents = filterCalendarEventsByUserGroup(currentCalendarEvents, profiles, "cc");
+    const previousCcCalendarEvents = filterCalendarEventsByUserGroup(previousCalendarEvents, profiles, "cc");
+
+    const advisorActivities = filterActivitiesByUserGroup(currentMarketingActivities, profiles, "advisor");
+    const previousAdvisorActivities = filterActivitiesByUserGroup(previousMarketingActivities, profiles, "advisor");
+    const advisorCalendarEvents = filterCalendarEventsByUserGroup(currentCalendarEvents, profiles, "advisor");
+    const previousAdvisorCalendarEvents = filterCalendarEventsByUserGroup(previousCalendarEvents, profiles, "advisor");
+
+    const ccSummary = summarizeDailyGroup(ccActivities, profileMap, ccCalendarEvents);
+    const previousCcSummary = summarizeDailyGroup(previousCcActivities, profileMap, previousCcCalendarEvents);
+    const advisorSummary = summarizeDailyGroup(advisorActivities, profileMap, advisorCalendarEvents);
+    const previousAdvisorSummary = summarizeDailyGroup(previousAdvisorActivities, profileMap, previousAdvisorCalendarEvents);
+    const advisorSales = filterSalesByUserGroup(allSales, profiles, "advisor");
+    const advisorSalesSummary = summarizeSales(advisorSales);
+    const advisorSalesByUser = summarizeSalesByUser(advisorSales);
+
+    const message = buildTeamsMessage(
+      reportDate,
+      ccSummary,
+      previousCcSummary,
+      advisorSummary,
+      previousAdvisorSummary,
+      advisorSalesSummary,
+      advisorSalesByUser
+    );
     const teamsResult = await sendTeamsReport(message);
 
     return NextResponse.json({
       ok: true,
       reportDate,
       previousBusinessDate,
-      rows: marketingRows.length,
+      ccSummary,
+      advisorSummary,
+      advisorSalesSummary,
+      advisorSalesByUser: Object.fromEntries(advisorSalesByUser.entries()),
       teamsResult,
       message,
     });
