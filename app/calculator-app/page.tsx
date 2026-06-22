@@ -103,6 +103,8 @@ type CatalogPanel = {
   display_name: string | null;
   power_wp: number;
   price_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
 };
 
 type CatalogStorage = {
@@ -114,6 +116,8 @@ type CatalogStorage = {
   voltageType?: "low_voltage" | "high_voltage" | null;
   price_net: number;
   installation_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
 };
 
 type CatalogInverter = {
@@ -124,6 +128,8 @@ type CatalogInverter = {
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   max_pv_kw: number;
   price_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
 };
 
 type SelectedAdditionalService = {
@@ -1262,13 +1268,20 @@ export default function Home() {
         return;
       }
 
-      const loadedPanels = Object.entries(apiCatalog.panels || {}).map(([code, panel]) => ({
-        code,
-        name: panel.name,
-        display_name: panel.displayName || panel.name,
-        power_wp: panel.powerWp,
-        price_net: panel.priceNet,
-      })) as CatalogPanel[];
+      const loadedPanels = Object.entries(apiCatalog.panels || {}).map(([code, panel]) => {
+        const panelCatalogCardUrl =
+          (panel as { catalogCardUrl?: string | null }).catalogCardUrl || null;
+
+        return {
+          code,
+          name: panel.name,
+          display_name: panel.displayName || panel.name,
+          power_wp: panel.powerWp,
+          price_net: panel.priceNet,
+          catalog_card_url: panelCatalogCardUrl,
+          catalogCardUrl: panelCatalogCardUrl,
+        };
+      }) as CatalogPanel[];
 
       const loadedStorages = Object.entries(apiCatalog.storages || {})
         .filter(([code]) => code !== "none")
@@ -1291,6 +1304,10 @@ export default function Home() {
             voltageType: storageVoltageType,
             price_net: catalogStorage.priceNet,
             installation_net: catalogStorage.installationNet,
+            catalog_card_url:
+              (catalogStorage as { catalogCardUrl?: string | null }).catalogCardUrl || null,
+            catalogCardUrl:
+              (catalogStorage as { catalogCardUrl?: string | null }).catalogCardUrl || null,
           };
         }) as CatalogStorage[];
 
@@ -1312,6 +1329,10 @@ export default function Home() {
           batteryVoltageType: inverterBatteryVoltageType,
           max_pv_kw: inverter.maxPvKw,
           price_net: inverter.priceNet,
+          catalog_card_url:
+            (inverter as { catalogCardUrl?: string | null }).catalogCardUrl || null,
+          catalogCardUrl:
+            (inverter as { catalogCardUrl?: string | null }).catalogCardUrl || null,
         };
       }) as CatalogInverter[];
       if (loadedPanels.length === 0 || loadedStorages.length === 0 || loadedInverters.length === 0) {
@@ -1473,6 +1494,7 @@ export default function Home() {
         displayName: panelName,
         powerWp: Number(panel.power_wp || 0),
         priceNet: Number(panel.price_net || 0),
+        catalogCardUrl: panel.catalog_card_url || panel.catalogCardUrl || null,
       };
 
       return acc;
@@ -1490,6 +1512,7 @@ export default function Home() {
           voltageType: storageVoltageType,
           priceNet: Number(catalogStorage.price_net || 0),
           installationNet: Number(catalogStorage.installation_net || 0),
+          catalogCardUrl: catalogStorage.catalog_card_url || catalogStorage.catalogCardUrl || null,
         };
 
         return acc;
@@ -1502,6 +1525,7 @@ export default function Home() {
           voltageType: "low_voltage",
           priceNet: 0,
           installationNet: 0,
+          catalogCardUrl: null,
         },
       } as CalculatorCatalog["storages"]
     );
@@ -1513,6 +1537,7 @@ export default function Home() {
       batteryVoltageType: inferInverterBatteryVoltageType(inverter),
       maxPvKw: Number(inverter.max_pv_kw || 0),
       priceNet: Number(inverter.price_net || 0),
+      catalogCardUrl: inverter.catalog_card_url || inverter.catalogCardUrl || null,
     }));
 
     return {

@@ -18,6 +18,7 @@ type PanelItem = {
   displayName: string;
   powerWp: number;
   priceNet: number;
+  catalogCardUrl?: string | null;
 };
 
 type InverterItem = {
@@ -27,6 +28,7 @@ type InverterItem = {
   priceNet: number;
   type: "ongrid" | "hybrid";
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
+  catalogCardUrl?: string | null;
 };
 
 type StorageItem = {
@@ -36,6 +38,7 @@ type StorageItem = {
   voltageType: "low_voltage" | "high_voltage";
   priceNet: number;
   installationNet: number;
+  catalogCardUrl?: string | null;
 };
 
 type AdditionalServiceInput = {
@@ -266,16 +269,16 @@ async function loadCatalogFromSupabase() {
   const [panelsResponse, invertersResponse, storagesResponse] = await Promise.all([
     supabase
       .from("panels")
-      .select("code, name, display_name, power_wp, price_net, active")
+      .select("code, name, display_name, power_wp, price_net, catalog_card_url, active")
       .eq("active", true),
     supabase
       .from("inverters")
-      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, active")
+      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
     supabase
       .from("storages")
-      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, active")
+      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, active")
       .eq("active", true),
   ]);
 
@@ -292,6 +295,7 @@ async function loadCatalogFromSupabase() {
           displayName: panel.display_name || panel.name,
           powerWp: Number(panel.power_wp),
           priceNet: Number(panel.price_net),
+          catalogCardUrl: panel.catalog_card_url || null,
         },
       ])
     )
@@ -303,6 +307,7 @@ async function loadCatalogFromSupabase() {
       displayName: inverter.display_name || inverter.name,
       type: inverter.type,
       batteryVoltageType: inverter.battery_voltage_type || null,
+      catalogCardUrl: inverter.catalog_card_url || null,
       maxPvKw: Number(inverter.max_pv_kw),
       priceNet: Number(inverter.price_net),
     }))
@@ -319,6 +324,7 @@ async function loadCatalogFromSupabase() {
           voltageType: storage.voltage_type || "low_voltage",
           priceNet: Number(storage.price_net),
           installationNet: Number(storage.installation_net),
+          catalogCardUrl: storage.catalog_card_url || null,
         },
       ])
     )

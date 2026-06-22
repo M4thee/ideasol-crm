@@ -1,6 +1,21 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 
+export const runtime = "nodejs";
+
+type CatalogCardRequest = {
+  title?: string;
+  fileName?: string;
+  url?: string;
+  catalogCardUrl?: string;
+};
+
+type MailAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+};
+
 function formatMoney(value: number) {
   return Number(value || 0).toLocaleString("pl-PL");
 }
@@ -30,6 +45,159 @@ function getInverterTypeLabel(inverterType: unknown) {
   }
 
   return "Falownik";
+}
+
+function sanitizeAttachmentFileName(value: string, fallback: string) {
+  const normalized = String(value || fallback)
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_");
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  return normalized.toLowerCase().endsWith(".pdf") ? normalized : `${normalized}.pdf`;
+}
+
+function normalizeCatalogCardRequests(rawValue: unknown): CatalogCardRequest[] {
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+
+  const uniqueUrls = new Set<string>();
+  const result: CatalogCardRequest[] = [];
+
+  for (const item of rawValue) {
+    let card: CatalogCardRequest | null = null;
+
+    if (typeof item === "string") {
+      card = { url: item };
+    } else if (item && typeof item === "object") {
+      const typedItem = item as CatalogCardRequest;
+      card = {
+        title: typedItem.title,
+        fileName: typedItem.fileName,
+        url: typedItem.url || typedItem.catalogCardUrl,
+      };
+    }
+
+    const url = String(card?.url || "").trim();
+
+    if (!url || uniqueUrls.has(url)) {
+      continue;
+    }
+
+    uniqueUrls.add(url);
+    result.push({
+      title: card?.title,
+      fileName: card?.fileName,
+      url,
+    });
+  }
+
+  return result;
+}
+
+function getGraphConfig() {
+  const tenantId =
+    process.env.MICROSOFT_TENANT_ID ||
+    process.env.AZURE_TENANT_ID ||
+    process.env.MS_TENANT_ID ||
+    process.env.TENANT_ID;
+  const clientId =
+    process.env.MICROSOFT_CLIENT_ID ||
+    process.env.AZURE_CLIENT_ID ||
+    process.env.MS_CLIENT_ID ||
+    process.env.CLIENT_ID;
+  const clientSecret =
+    process.env.MICROSOFT_CLIENT_SECRET ||
+    process.env.AZURE_CLIENT_SECRET ||
+    process.env.MS_CLIENT_SECRET ||
+    process.env.CLIENT_SECRET;
+
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new Error("Brak konfiguracji Microsoft Graph do pobierania kart katalogowych");
+  }
+
+  return { tenantId, clientId, clientSecret };
+}
+
+async function getMicrosoftGraphAccessToken() {
+  const { tenantId, clientId, clientSecret } = getGraphConfig();
+  const tokenResponse = await fetch(
+    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: "https://graph.microsoft.com/.default",
+        grant_type: "client_credentials",
+      }),
+    }
+  );
+
+  if (!tokenResponse.ok) {
+    const details = await tokenResponse.text();
+    throw new Error(`Nie udało się pobrać tokenu Microsoft Graph: ${details}`);
+  }
+
+  const tokenData = (await tokenResponse.json()) as { access_token?: string };
+
+  if (!tokenData.access_token) {
+    throw new Error("Microsoft Graph nie zwrócił access_token");
+  }
+
+  return tokenData.access_token;
+}
+
+function encodeSharingUrlForGraph(shareUrl: string) {
+  return Buffer.from(shareUrl)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+async function downloadCatalogCardAttachment(
+  card: CatalogCardRequest,
+  accessToken: string,
+  index: number
+): Promise<MailAttachment> {
+  const shareUrl = String(card.url || "").trim();
+
+  if (!shareUrl) {
+    throw new Error("Brak linku SharePoint do karty katalogowej");
+  }
+
+  const encodedShareUrl = encodeSharingUrlForGraph(shareUrl);
+  const graphUrl = `https://graph.microsoft.com/v1.0/shares/u!${encodedShareUrl}/driveItem/content`;
+  const fileResponse = await fetch(graphUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!fileResponse.ok) {
+    const details = await fileResponse.text();
+    throw new Error(`Nie udało się pobrać karty katalogowej z SharePoint: ${details}`);
+  }
+
+  const fileBuffer = Buffer.from(await fileResponse.arrayBuffer());
+  const filename = sanitizeAttachmentFileName(
+    card.fileName || card.title || `karta-katalogowa-${index + 1}.pdf`,
+    `karta-katalogowa-${index + 1}.pdf`
+  );
+
+  return {
+    filename,
+    content: fileBuffer,
+    contentType: "application/pdf",
+  };
 }
 
 export async function POST(request: Request) {
@@ -83,6 +251,33 @@ export async function POST(request: Request) {
     const replyTo = isPublicSend && advisorEmail ? advisorEmail : generalReplyTo;
     const vatRate = Number(body.vatRate || 8);
     const finalGross = Number(body.finalGross || body.finalGross8 || 0);
+
+    const includeCatalogCards = Boolean(
+      body.includeCatalogCards || body.attachCatalogCards || body.sendCatalogCards
+    );
+    const catalogCardRequests = includeCatalogCards
+      ? normalizeCatalogCardRequests(body.catalogCards || body.catalogCardAttachments || [])
+      : [];
+
+    let catalogCardAttachments: MailAttachment[] = [];
+
+    if (catalogCardRequests.length > 0) {
+      try {
+        const graphAccessToken = await getMicrosoftGraphAccessToken();
+        catalogCardAttachments = await Promise.all(
+          catalogCardRequests.map((card, index) =>
+            downloadCatalogCardAttachment(card, graphAccessToken, index)
+          )
+        );
+      } catch (error) {
+        console.error("Błąd pobierania kart katalogowych", error);
+
+        return NextResponse.json(
+          { error: "Nie udało się pobrać kart katalogowych z SharePoint" },
+          { status: 500 }
+        );
+      }
+    }
 
     const subject = isStorageOnly
       ? "Oferta magazynu energii"
@@ -143,6 +338,10 @@ export async function POST(request: Request) {
 
     const storageTextLine = hasEnergyStorage
       ? `- magazyn energii: ${body.energyStorage}\n`
+      : "";
+
+    const catalogCardsTextLine = catalogCardAttachments.length
+      ? `\nW załączniku przesyłam również karty katalogowe wybranych urządzeń.\n`
       : "";
 
     const panelDetailsParts = [
@@ -220,7 +419,7 @@ www.ideasol.pl`;
 ${offerIntro}
 
 Zakres wyceny:
-${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}
+${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${catalogCardsTextLine}
 Cena netto: ${formatMoney(body.finalNet)} zł
 Cena brutto ${vatRate}%: ${formatMoney(finalGross)} zł
 ${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł\n` : ""}
@@ -229,6 +428,14 @@ Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na insta
 Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
 
 ${emailSignatureText}`;
+
+    const catalogCardsHtmlBox = catalogCardAttachments.length
+      ? `<div style="border-left:5px solid #2563eb; background:#eff6ff; border:1px solid #bfdbfe; border-radius:14px; padding:16px 18px; margin:0 0 22px;">
+                <p style="margin:0; font-size:14px; color:#1e3a8a; line-height:1.6;">
+                  W załączniku znajdują się karty katalogowe wybranych urządzeń.
+                </p>
+              </div>`
+      : "";
 
     const html = `
       <div style="margin:0; padding:0; background:#f8faf9; font-family: Arial, Helvetica, sans-serif; color:#111827;">
@@ -278,6 +485,8 @@ ${emailSignatureText}`;
                 </tr>
               </table>
 
+              ${catalogCardsHtmlBox}
+
               <div style="border-left:5px solid #16a34a; background:#f8faf9; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin:0 0 22px;">
                 <p style="margin:0; font-size:15px; color:#111827; line-height:1.65;">
                   Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami).
@@ -310,6 +519,7 @@ ${emailSignatureText}`;
       subject,
       text,
       html,
+      attachments: catalogCardAttachments,
     });
 
     return NextResponse.json({ ok: true });

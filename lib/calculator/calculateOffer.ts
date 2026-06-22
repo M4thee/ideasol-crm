@@ -42,6 +42,7 @@ export type PanelItem = {
   displayName: string;
   powerWp: number;
   priceNet: number;
+  catalogCardUrl?: string | null;
 };
 
 export type InverterItem = {
@@ -51,6 +52,7 @@ export type InverterItem = {
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   maxPvKw: number;
   priceNet: number;
+  catalogCardUrl?: string | null;
 };
 
 export type StorageItem = {
@@ -60,6 +62,7 @@ export type StorageItem = {
   voltageType?: "low_voltage" | "high_voltage";
   priceNet: number;
   installationNet: number;
+  catalogCardUrl?: string | null;
 };
 
 type AdditionalServiceInput = {

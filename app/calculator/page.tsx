@@ -15,6 +15,9 @@ import {
 type Result = {
   pvPowerKw: number;
   inverter: string;
+  inverterSizingPvPowerKw?: number;
+  inverterBatteryVoltageType?: "low_voltage" | "high_voltage" | null;
+  inverterBatteryVoltageLabel?: string;
   energyStorage: string;
   storage?: string;
   storageVoltageType?: "low_voltage" | "high_voltage";
@@ -100,6 +103,8 @@ type CatalogPanel = {
   display_name: string | null;
   power_wp: number;
   price_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
 };
 
 type CatalogStorage = {
@@ -111,14 +116,26 @@ type CatalogStorage = {
   voltageType?: "low_voltage" | "high_voltage" | null;
   price_net: number;
   installation_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
 };
 
 type CatalogInverter = {
   name: string;
   display_name: string | null;
   type: string;
+  battery_voltage_type?: "low_voltage" | "high_voltage" | null;
+  batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   max_pv_kw: number;
   price_net: number;
+  catalog_card_url?: string | null;
+  catalogCardUrl?: string | null;
+};
+
+type CatalogCardEmailAttachment = {
+  title: string;
+  fileName: string;
+  url: string;
 };
 
 type SelectedAdditionalService = {
@@ -436,6 +453,7 @@ export default function Home() {
   const [existingPvPowerKw, setExistingPvPowerKw] = useState("0");
   const [selectedAdditionalServices, setSelectedAdditionalServices] = useState<SelectedAdditionalService[]>([]);
   const [identicalSetCount, setIdenticalSetCount] = useState(1);
+  const [includeCatalogCards, setIncludeCatalogCards] = useState(true);
 
   const [billingSystem, setBillingSystem] = useState<
     "net_billing" | "net_metering"
@@ -550,6 +568,109 @@ export default function Home() {
   }
   function getResultStorageDisplayName(offerResult: Result) {
     return offerResult.energyStorage || offerResult.storage || "Brak";
+  }
+
+  function sanitizeCatalogCardFileName(value: string, fallback: string) {
+    const normalized = String(value || fallback)
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, "_")
+      .replace(/\s+/g, "_");
+
+    if (!normalized) {
+      return fallback;
+    }
+
+    return normalized.toLowerCase().endsWith(".pdf") ? normalized : `${normalized}.pdf`;
+  }
+
+  function getSelectedPanelCatalogCard(): CatalogCardEmailAttachment | null {
+    if (offerType === "storage") {
+      return null;
+    }
+
+    const selectedPanel = panels.find((panel) => panel.code === panelModel);
+    const url = selectedPanel?.catalog_card_url || selectedPanel?.catalogCardUrl || null;
+
+    if (!selectedPanel || !url) {
+      return null;
+    }
+
+    const title = selectedPanel.display_name || selectedPanel.name || selectedPanel.code;
+
+    return {
+      title,
+      fileName: sanitizeCatalogCardFileName(title, "karta-panelu.pdf"),
+      url,
+    };
+  }
+
+  function getSelectedStorageCatalogCard(): CatalogCardEmailAttachment | null {
+    if (!storage || storage === "none") {
+      return null;
+    }
+
+    const selectedStorage = storages.find((catalogStorage) => catalogStorage.code === storage);
+    const url = selectedStorage?.catalog_card_url || selectedStorage?.catalogCardUrl || null;
+
+    if (!selectedStorage || !url) {
+      return null;
+    }
+
+    const title = selectedStorage.display_name || selectedStorage.name || selectedStorage.code;
+
+    return {
+      title,
+      fileName: sanitizeCatalogCardFileName(title, "karta-magazynu-energii.pdf"),
+      url,
+    };
+  }
+
+  function getSelectedInverterCatalogCard(offerResult: Result): CatalogCardEmailAttachment | null {
+    if (!offerResult.inverter || offerResult.inverter === "Brak") {
+      return null;
+    }
+
+    const selectedInverter =
+      selectedInverterName !== "auto"
+        ? inverters.find((inverter) => inverter.name === selectedInverterName)
+        : inverters.find(
+          (inverter) =>
+            inverter.name === offerResult.inverter ||
+            inverter.display_name === offerResult.inverter
+        );
+
+    const url = selectedInverter?.catalog_card_url || selectedInverter?.catalogCardUrl || null;
+
+    if (!selectedInverter || !url) {
+      return null;
+    }
+
+    const title = selectedInverter.display_name || selectedInverter.name;
+
+    return {
+      title,
+      fileName: sanitizeCatalogCardFileName(title, "karta-falownika.pdf"),
+      url,
+    };
+  }
+
+  function buildCatalogCardRequests(offerResult: Result): CatalogCardEmailAttachment[] {
+    const cards = [
+      getSelectedPanelCatalogCard(),
+      getSelectedInverterCatalogCard(offerResult),
+      getSelectedStorageCatalogCard(),
+    ].filter((card): card is CatalogCardEmailAttachment => Boolean(card?.url));
+
+    const uniqueUrls = new Set<string>();
+
+    return cards.filter((card) => {
+      if (uniqueUrls.has(card.url)) {
+        return false;
+      }
+
+      uniqueUrls.add(card.url);
+      return true;
+    });
   }
 
   function calculateNearestPanelCount(powerKwText: string, model: string) {
@@ -747,6 +868,10 @@ export default function Home() {
         display_name: panel.displayName || panel.name,
         power_wp: panel.powerWp,
         price_net: panel.priceNet,
+        catalog_card_url:
+          (panel as { catalogCardUrl?: string | null }).catalogCardUrl || null,
+        catalogCardUrl:
+          (panel as { catalogCardUrl?: string | null }).catalogCardUrl || null,
       })) as CatalogPanel[];
 
       const loadedStorages = Object.entries(apiCatalog.storages || {})
@@ -765,16 +890,32 @@ export default function Home() {
             voltageType: storageVoltageType,
             price_net: catalogStorage.priceNet,
             installation_net: catalogStorage.installationNet,
+            catalog_card_url:
+              (catalogStorage as { catalogCardUrl?: string | null }).catalogCardUrl || null,
+            catalogCardUrl:
+              (catalogStorage as { catalogCardUrl?: string | null }).catalogCardUrl || null,
           };
         }) as CatalogStorage[];
 
-      const loadedInverters = (apiCatalog.inverters || []).map((inverter) => ({
-        name: inverter.name,
-        display_name: inverter.displayName || inverter.name,
-        type: inverter.type,
-        max_pv_kw: inverter.maxPvKw,
-        price_net: inverter.priceNet,
-      })) as CatalogInverter[];
+      const loadedInverters = (apiCatalog.inverters || []).map((inverter) => {
+        const inverterBatteryVoltageType =
+          (inverter as { batteryVoltageType?: "low_voltage" | "high_voltage" | null })
+            .batteryVoltageType || null;
+        const inverterCatalogCardUrl =
+          (inverter as { catalogCardUrl?: string | null }).catalogCardUrl || null;
+
+        return {
+          name: inverter.name,
+          display_name: inverter.displayName || inverter.name,
+          type: inverter.type,
+          battery_voltage_type: inverterBatteryVoltageType,
+          batteryVoltageType: inverterBatteryVoltageType,
+          max_pv_kw: inverter.maxPvKw,
+          price_net: inverter.priceNet,
+          catalog_card_url: inverterCatalogCardUrl,
+          catalogCardUrl: inverterCatalogCardUrl,
+        };
+      }) as CatalogInverter[];
       if (loadedPanels.length === 0 || loadedStorages.length === 0 || loadedInverters.length === 0) {
         console.warn("Katalog kalkulatora z Supabase jest pusty — nie nadpisuję cache pustymi danymi", {
           panels: loadedPanels.length,
@@ -934,6 +1075,7 @@ export default function Home() {
         displayName: panelName,
         powerWp: Number(panel.power_wp || 0),
         priceNet: Number(panel.price_net || 0),
+        catalogCardUrl: panel.catalog_card_url || panel.catalogCardUrl || null,
       };
 
       return acc;
@@ -952,6 +1094,7 @@ export default function Home() {
           voltageType: storageVoltageType,
           priceNet: Number(catalogStorage.price_net || 0),
           installationNet: Number(catalogStorage.installation_net || 0),
+          catalogCardUrl: catalogStorage.catalog_card_url || catalogStorage.catalogCardUrl || null,
         };
 
         return acc;
@@ -964,6 +1107,7 @@ export default function Home() {
           voltageType: "low_voltage",
           priceNet: 0,
           installationNet: 0,
+          catalogCardUrl: null,
         },
       } as CalculatorCatalog["storages"]
     );
@@ -972,8 +1116,10 @@ export default function Home() {
       name: inverter.name,
       displayName: inverter.display_name || inverter.name,
       type: String(inverter.type || "ongrid") as any,
+      batteryVoltageType: inverter.battery_voltage_type || inverter.batteryVoltageType || null,
       maxPvKw: Number(inverter.max_pv_kw || 0),
       priceNet: Number(inverter.price_net || 0),
+      catalogCardUrl: inverter.catalog_card_url || inverter.catalogCardUrl || null,
     }));
 
     return {
@@ -1111,6 +1257,7 @@ export default function Home() {
     setSavedOfferId(null);
     setEmailStatus("");
     setShowSettings(false);
+    setIncludeCatalogCards(true);
   }
 
 
@@ -1315,6 +1462,10 @@ IdeaSol`;
     setSendingEmail(true);
     setEmailStatus("");
 
+    const catalogCardsForEmail = includeCatalogCards
+      ? buildCatalogCardRequests(result)
+      : [];
+
     if (!isCalculatorOnline()) {
       const offlineItem: OfflineOfferQueueItem = {
         id: createOfflineQueueId(),
@@ -1357,6 +1508,8 @@ IdeaSol`;
             email: advisorEmail,
             role: userProfile?.role || currentUserRole,
           },
+          includeCatalogCards,
+          catalogCards: catalogCardsForEmail,
         },
       };
 
@@ -1432,12 +1585,14 @@ IdeaSol`;
           panelPowerWp: getPanelPowerWp(panelModel),
           inverter: result.inverter,
           inverterType: getSelectedInverterType(result.inverter),
-          energyStorage: result.energyStorage,
+          energyStorage: getResultStorageDisplayName(result),
           finalNet: result.finalNet,
           finalGross: result.finalGross,
           vatRate: result.vatRate,
           subsidyAllocation: result.subsidyAllocation || null,
           subsidyTotal: result.subsidyAllocation?.total || 0,
+          includeCatalogCards: catalogCardsForEmail.length > 0,
+          catalogCards: catalogCardsForEmail,
         }),
       });
 
@@ -1526,6 +1681,9 @@ IdeaSol`;
         const pricingOverridesSnapshot = snapshot.pricingOverrides || pricingOverrides;
         const advisorSnapshot =
           (snapshot.advisor as Record<string, unknown> | undefined) || {};
+        const catalogCardsSnapshot = Array.isArray(snapshot.catalogCards)
+          ? (snapshot.catalogCards as CatalogCardEmailAttachment[])
+          : [];
 
         if (!snapshot.selectedClientEmail && snapshot.typedClientEmail) {
           const { error: updateClientEmailError } = await supabase
@@ -1566,7 +1724,7 @@ IdeaSol`;
           panel_count: Number(snapshot.panelCount || 0),
           panel_power_wp: Number(snapshot.panelPowerWp || 0),
           inverter: queuedResult.inverter,
-          energy_storage: queuedResult.energyStorage,
+          energy_storage: getResultStorageDisplayName(queuedResult),
           roof_type: snapshot.roofType || null,
           offer_data: {
             result: queuedResult,
@@ -1641,12 +1799,14 @@ IdeaSol`;
             panelPowerWp: Number(snapshot.panelPowerWp || 0),
             inverter: queuedResult.inverter,
             inverterType: getSelectedInverterType(queuedResult.inverter),
-            energyStorage: queuedResult.energyStorage,
+            energyStorage: getResultStorageDisplayName(queuedResult),
             finalNet: queuedResult.finalNet,
             finalGross: queuedResult.finalGross,
             vatRate: queuedResult.vatRate,
             subsidyAllocation: queuedResult.subsidyAllocation || null,
             subsidyTotal: queuedResult.subsidyAllocation?.total || 0,
+            includeCatalogCards: Boolean(snapshot.includeCatalogCards) && catalogCardsSnapshot.length > 0,
+            catalogCards: Boolean(snapshot.includeCatalogCards) ? catalogCardsSnapshot : [],
           }),
         });
 
@@ -1813,6 +1973,9 @@ IdeaSol`;
                   setResult={setResult}
                   setCopied={setCopied}
                   setEmailStatus={setEmailStatus}
+                  catalogCards={buildCatalogCardRequests(result)}
+                  includeCatalogCards={includeCatalogCards}
+                  setIncludeCatalogCards={setIncludeCatalogCards}
                   clientEmail={clientEmail}
                   clientName={clientName}
                   setClientEmail={setClientEmail}

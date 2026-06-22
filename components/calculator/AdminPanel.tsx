@@ -13,6 +13,7 @@ type PanelItem = {
   name: string;
   power_wp: number;
   price_net: number;
+  catalog_card_url: string | null;
   active: boolean;
 };
 
@@ -26,6 +27,7 @@ type InverterItem = {
   battery_voltage_type: "low_voltage" | "high_voltage" | null;
   max_pv_kw: number;
   price_net: number;
+  catalog_card_url: string | null;
   active: boolean;
 };
 
@@ -40,6 +42,7 @@ type StorageItem = {
   voltage_type: "low_voltage" | "high_voltage";
   price_net: number;
   installation_net: number;
+  catalog_card_url: string | null;
   active: boolean;
 };
 
@@ -68,6 +71,7 @@ const EMPTY_PANEL_FORM = {
   name: "",
   power_wp: "450",
   price_net: "0",
+  catalog_card_url: "",
 };
 
 const EMPTY_INVERTER_FORM = {
@@ -79,6 +83,7 @@ const EMPTY_INVERTER_FORM = {
   battery_voltage_type: "",
   max_pv_kw: "10",
   price_net: "0",
+  catalog_card_url: "",
 };
 
 const EMPTY_STORAGE_FORM = {
@@ -91,6 +96,7 @@ const EMPTY_STORAGE_FORM = {
   voltage_type: "low_voltage",
   price_net: "0",
   installation_net: "1500",
+  catalog_card_url: "",
 };
 
 const EMPTY_ADDITIONAL_SERVICE_FORM = {
@@ -133,7 +139,7 @@ export default function AdminPanel({
   async function loadPanels() {
     const { data, error } = await supabase
       .from("panels")
-      .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, active")
+      .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, catalog_card_url, active")
       .eq("active", true)
       .order("power_wp", { ascending: false });
 
@@ -148,7 +154,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, active")
+      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
@@ -164,7 +170,7 @@ export default function AdminPanel({
   async function loadStorages() {
     const { data, error } = await supabase
       .from("storages")
-      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, active")
+      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, active")
       .eq("active", true)
       .order("voltage_type", { ascending: true })
       .order("capacity_kwh", { ascending: true });
@@ -318,6 +324,7 @@ export default function AdminPanel({
           name: panel.display_name || panel.model || panel.code,
           power_wp: Number(panel.power_wp),
           price_net: Number(panel.price_net),
+          catalog_card_url: panel.catalog_card_url?.trim() || null,
           active: Boolean(panel.active),
         })
         .eq("id", panel.id);
@@ -349,6 +356,7 @@ export default function AdminPanel({
       name: panelForm.display_name.trim() || panelForm.model.trim() || panelForm.code.trim(),
       power_wp: Number(panelForm.power_wp),
       price_net: Number(panelForm.price_net),
+      catalog_card_url: panelForm.catalog_card_url.trim() || null,
       active: true,
     });
 
@@ -415,6 +423,7 @@ export default function AdminPanel({
             inverter.type === "hybrid" ? inverter.battery_voltage_type || null : null,
           max_pv_kw: Number(inverter.max_pv_kw),
           price_net: Number(inverter.price_net),
+          catalog_card_url: inverter.catalog_card_url?.trim() || null,
           active: Boolean(inverter.active),
         })
         .eq("id", inverter.id);
@@ -448,6 +457,7 @@ export default function AdminPanel({
         inverterForm.type === "hybrid" ? inverterForm.battery_voltage_type || null : null,
       max_pv_kw: Number(inverterForm.max_pv_kw),
       price_net: Number(inverterForm.price_net),
+      catalog_card_url: inverterForm.catalog_card_url.trim() || null,
       active: true,
     });
 
@@ -514,6 +524,7 @@ export default function AdminPanel({
           voltage_type: storage.voltage_type || "low_voltage",
           price_net: parseDecimal(storage.price_net),
           installation_net: parseDecimal(storage.installation_net),
+          catalog_card_url: storage.catalog_card_url?.trim() || null,
           active: Boolean(storage.active),
         })
         .eq("id", storage.id);
@@ -547,6 +558,7 @@ export default function AdminPanel({
       voltage_type: storageForm.voltage_type,
       price_net: parseDecimal(storageForm.price_net),
       installation_net: parseDecimal(storageForm.installation_net),
+      catalog_card_url: storageForm.catalog_card_url.trim() || null,
       active: true,
     });
 
@@ -990,6 +1002,13 @@ export default function AdminPanel({
                 value={panelForm.price_net}
                 onChange={(e) => setPanelForm({ ...panelForm, price_net: e.target.value })}
               />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-7"
+                placeholder="Link do karty katalogowej SharePoint"
+                value={panelForm.catalog_card_url}
+                onChange={(e) => setPanelForm({ ...panelForm, catalog_card_url: e.target.value })}
+              />
             </div>
 
             <button
@@ -1051,6 +1070,13 @@ export default function AdminPanel({
                     type="number"
                     value={panel.price_net}
                     onChange={(e) => updatePanel(panel.id, "price_net", Number(e.target.value))}
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Link do karty katalogowej"
+                    value={panel.catalog_card_url || ""}
+                    onChange={(e) => updatePanel(panel.id, "catalog_card_url", e.target.value)}
                   />
 
                   <button
@@ -1148,6 +1174,15 @@ export default function AdminPanel({
                 value={inverterForm.price_net}
                 onChange={(e) =>
                   setInverterForm({ ...inverterForm, price_net: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-7"
+                placeholder="Link do karty katalogowej SharePoint"
+                value={inverterForm.catalog_card_url}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, catalog_card_url: e.target.value })
                 }
               />
             </div>
@@ -1250,6 +1285,15 @@ export default function AdminPanel({
                         "price_net",
                         Number(e.target.value)
                       )
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Link do karty katalogowej"
+                    value={inverter.catalog_card_url || ""}
+                    onChange={(e) =>
+                      updateInverter(inverter.id, "catalog_card_url", e.target.value)
                     }
                   />
 
@@ -1365,6 +1409,15 @@ export default function AdminPanel({
                   setStorageForm({ ...storageForm, installation_net: e.target.value })
                 }
               />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-4"
+                placeholder="Link do karty katalogowej SharePoint"
+                value={storageForm.catalog_card_url}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, catalog_card_url: e.target.value })
+                }
+              />
             </div>
 
             <button
@@ -1477,6 +1530,15 @@ export default function AdminPanel({
                         "installation_net",
                         parseDecimal(e.target.value)
                       )
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Link do karty katalogowej"
+                    value={storage.catalog_card_url || ""}
+                    onChange={(e) =>
+                      updateStorage(storage.id, "catalog_card_url", e.target.value)
                     }
                   />
 

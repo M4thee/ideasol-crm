@@ -62,6 +62,7 @@ type Result = {
   }[];
 };
 
+
 type CrmClientOption = {
   id: string;
   full_name?: string | null;
@@ -83,6 +84,12 @@ type CrmClientOption = {
   [key: string]: unknown;
 };
 
+type CatalogCardEmailAttachment = {
+  title: string;
+  fileName: string;
+  url: string;
+};
+
 type OfferResultProps = {
   result: Result;
   panelCount: number;
@@ -95,6 +102,9 @@ type OfferResultProps = {
   setResult: (value: Result | null) => void;
   setCopied: (value: boolean) => void;
   setEmailStatus: (value: string) => void;
+  catalogCards?: CatalogCardEmailAttachment[];
+  includeCatalogCards?: boolean;
+  setIncludeCatalogCards?: (value: boolean) => void;
   clientEmail: string;
   clientName: string;
   setClientEmail: (value: string) => void;
@@ -184,6 +194,9 @@ export default function OfferResult({
   setResult,
   setCopied,
   setEmailStatus,
+  catalogCards = [],
+  includeCatalogCards = false,
+  setIncludeCatalogCards,
   clientEmail,
   clientName,
   setClientEmail,
@@ -222,6 +235,7 @@ export default function OfferResult({
   const hasSelectedCrmClientEmail = Boolean(selectedCrmClientEmail);
   const canSendOfferEmail = hasSelectedCrmClient && Boolean(normalizedClientEmail);
   const storageDisplayName = result.energyStorage || result.storage || "Brak";
+  const hasCatalogCards = catalogCards.length > 0;
 
   useEffect(() => {
     if (!selectedClientId) {
@@ -558,6 +572,27 @@ export default function OfferResult({
           </div>
         )}
 
+        {hasCatalogCards && (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm ring-1 ring-blue-100 dark:border-blue-500/30 dark:bg-blue-950/25 dark:ring-blue-500/20">
+            <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">Karty katalogowe</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {catalogCards.map((card) => (
+                <a
+                  key={`${card.title}-${card.url}`}
+                  href={card.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 transition hover:border-blue-400 hover:bg-blue-50 dark:border-blue-500/30 dark:bg-slate-950 dark:text-blue-200 dark:hover:bg-blue-950/40 sm:text-sm"
+                  title={`Otwórz kartę katalogową: ${card.title}`}
+                >
+                  <FileTextIcon />
+                  PDF - {card.title}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {additionalServices.length > 0 && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
             <div className="flex items-start justify-between gap-4">
@@ -720,6 +755,30 @@ export default function OfferResult({
                 disabled={!selectedClientId}
               />
             </label>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  checked={includeCatalogCards && hasCatalogCards}
+                  disabled={!hasCatalogCards || !setIncludeCatalogCards}
+                  onChange={(event) => setIncludeCatalogCards?.(event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Dołącz karty katalogowe jako załączniki PDF
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                    {hasCatalogCards
+                      ? `Do maila zostanie dołączone ${catalogCards.length} plik(i): ${catalogCards
+                        .map((card) => card.title)
+                        .join(", ")}.`
+                      : "Brak przypisanych kart katalogowych dla wybranych urządzeń."}
+                  </span>
+                </span>
+              </label>
+            </div>
 
             {!hasSelectedCrmClient && (
               <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
