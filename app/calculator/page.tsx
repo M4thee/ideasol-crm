@@ -1597,7 +1597,8 @@ IdeaSol`;
       });
 
       if (!res.ok) {
-        throw new Error("Nie udało się wysłać maila");
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.error || "Nie udało się wysłać maila");
       }
 
       const mailActivityDescription = [
@@ -1811,7 +1812,8 @@ IdeaSol`;
         });
 
         if (!res.ok) {
-          throw new Error("Nie udało się wysłać zaległej oferty mailowej");
+          const errorData = await res.json().catch(() => null);
+          throw new Error(errorData?.error || "Nie udało się wysłać zaległej oferty mailowej");
         }
 
         const mailActivityDescription = [

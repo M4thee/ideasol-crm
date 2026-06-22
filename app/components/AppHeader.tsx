@@ -150,7 +150,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
   const [toastNotification, setToastNotification] = useState<HeaderNotification | null>(null);
-  const [maintenanceBarVisible, setMaintenanceBarVisible] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalledPwa, setIsInstalledPwa] = useState(false);
@@ -318,14 +317,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     }, 8000);
   }
 
-  useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const dismissedDate = localStorage.getItem(
-      "ideasol-maintenance-banner-dismissed"
-    );
-
-    setMaintenanceBarVisible(dismissedDate !== today);
-  }, []);
 
   useEffect(() => {
     const profileId = profile?.id;
@@ -800,30 +791,6 @@ const canManageUsers = profile?.role === "admin";
 
   return (
     <>
-      {maintenanceBarVisible && (
-        <div className="-mx-4 mb-5 flex items-center justify-center gap-3 rounded-none bg-red-700 px-4 py-3 text-center text-sm font-bold text-white shadow-md sm:-mx-6 lg:-mx-8 lg:text-base">
-          <span className="min-w-0">
-            W dniach 20.06.2026 od godz. 23:00 do 21.06.2026 do godz. 9:00 CRM będzie niedostępny z uwagi na prace aktualizacyjne.
-          </span>
-
-          <button
-            type="button"
-            onClick={() => {
-              const today = new Date().toISOString().slice(0, 10);
-              localStorage.setItem(
-                "ideasol-maintenance-banner-dismissed",
-                today
-              );
-              setMaintenanceBarVisible(false);
-            }}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 text-lg leading-none text-white transition hover:bg-white/25 active:scale-95"
-            aria-label="Zamknij komunikat o przerwie technicznej"
-            title="Zamknij"
-          >
-            ×
-          </button>
-        </div>
-      )}
 
       <header className="mb-8 text-slate-900 lg:mb-10">
       <div className="flex items-start justify-between gap-4 lg:items-center">
@@ -1228,7 +1195,7 @@ const canManageUsers = profile?.role === "admin";
                       className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
                       onClick={() => setProfileMenuOpen(false)}
                     >
-                      Użytkownicy
+                      Panel administratora
                     </Link>
                   )}
 
@@ -1499,7 +1466,7 @@ const canManageUsers = profile?.role === "admin";
                 onClick={() => setMobileMenuOpen(false)}
                 className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
               >
-                Użytkownicy
+                Panel administratora
               </Link>
             )}
 

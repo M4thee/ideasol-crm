@@ -1,6 +1,7 @@
 import {
   graphApiRequest,
   graphApiRequestWithAccessToken,
+  refreshMicrosoftDelegatedAccessToken,
 } from "@/lib/microsoftGraph";
 
 export type TeamsCalendarNotificationPayload = {
@@ -14,6 +15,12 @@ export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificatio
 
 export type TeamsChannelNotificationPayload = {
   message: string;
+};
+
+export type TeamsSaleNotificationPayload = {
+  productsSummary: string;
+  sellerName: string;
+  saleUrl?: string | null;
 };
 
 export type TeamsDelegatedChannelNotificationPayload = TeamsChannelNotificationPayload & {
@@ -151,6 +158,17 @@ export function buildTeamsEnergyStorageLeadChannelMessage(
   return lines.join("\n");
 }
 
+export function buildTeamsSaleChannelMessage(payload: TeamsSaleNotificationPayload) {
+  const lines = [
+    "<strong>🔥 Nowa sprzedaż pojawiła się w CRM! 🔥</strong>",
+    `Produkt: <strong>${displayValue(payload.productsSummary)}</strong>`,
+    `Sprzedawca: <strong>${displayValue(payload.sellerName)}</strong>`,
+    "Gratulacje! 👏",
+  ];
+
+  return lines.join("\n");
+}
+
 export async function sendTeamsCalendarNotification(
   payload: TeamsCalendarNotificationPayload
 ) {
@@ -181,6 +199,69 @@ export async function sendTeamsLeadChannelNotification(
 ) {
   const teamId = process.env.MICROSOFT_TEAMS_LEADS_TEAM_ID || requireEnv("MICROSOFT_TEAMS_TEAM_ID");
   const channelId = process.env.MICROSOFT_TEAMS_LEADS_CHANNEL_ID || requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
+
+  const message = await graphApiRequest<GraphChannelMessage>(
+    `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: {
+          contentType: "html",
+          content: payload.message.replaceAll("\n", "<br />"),
+        },
+      }),
+    }
+  );
+
+  return {
+    success: true,
+    messageId: message.id,
+  };
+}
+
+export async function sendTeamsSaleChannelNotification(
+  payload: TeamsChannelNotificationPayload
+) {
+  const salesChatId = process.env.MICROSOFT_TEAMS_SALES_CHAT_ID;
+
+  if (salesChatId) {
+    const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+    if (!delegatedRefreshToken) {
+      throw new Error(
+        "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki wiadomości na czat Teams."
+      );
+    }
+
+    const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+    const delegatedAccessToken = delegatedToken.access_token;
+
+    if (!delegatedAccessToken) {
+      throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph.");
+    }
+
+    const message = await graphApiRequestWithAccessToken<GraphChannelMessage>(
+      `https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(salesChatId)}/messages`,
+      delegatedAccessToken,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          body: {
+            contentType: "html",
+            content: payload.message.replaceAll("\n", "<br />"),
+          },
+        }),
+      }
+    );
+
+    return {
+      success: true,
+      messageId: message.id,
+    };
+  }
+
+  const teamId = process.env.MICROSOFT_TEAMS_SALES_TEAM_ID || requireEnv("MICROSOFT_TEAMS_TEAM_ID");
+  const channelId = process.env.MICROSOFT_TEAMS_SALES_CHANNEL_ID || requireEnv("MICROSOFT_TEAMS_CHANNEL_ID");
 
   const message = await graphApiRequest<GraphChannelMessage>(
     `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,

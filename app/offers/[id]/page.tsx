@@ -1412,6 +1412,123 @@ export default function OfferDetailsPage() {
       .join("\n");
   }
 
+  function formatSalePower(value: number | null | undefined) {
+    const parsedValue = Number(value || 0);
+
+    if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+      return "";
+    }
+
+    return parsedValue.toLocaleString("pl-PL", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function getOfferStorageCapacityKwh() {
+    if (!offer) return 0;
+
+    const offerData = (offer.offer_data || {}) as Record<string, any>;
+    const resultData = (offerData.result || {}) as Record<string, any>;
+    const formData = (offerData.form || {}) as Record<string, any>;
+
+    const possibleValues = [
+      resultData.storageCapacityKwh,
+      resultData.storage_capacity_kwh,
+      resultData.energyStorageCapacityKwh,
+      resultData.energy_storage_capacity_kwh,
+      resultData.batteryCapacityKwh,
+      resultData.battery_capacity_kwh,
+      formData.storageCapacityKwh,
+      formData.storage_capacity_kwh,
+      formData.energyStorageCapacityKwh,
+      formData.energy_storage_capacity_kwh,
+    ];
+
+    for (const value of possibleValues) {
+      const parsedValue = Number(String(value || "").replace(",", "."));
+
+      if (Number.isFinite(parsedValue) && parsedValue > 0) {
+        return parsedValue;
+      }
+    }
+
+    const storageText = String(offer.energy_storage || "");
+    const match = storageText.match(/(\d+(?:[,.]\d+)?)\s*kwh/i);
+
+    if (match?.[1]) {
+      const parsedValue = Number(match[1].replace(",", "."));
+
+      if (Number.isFinite(parsedValue) && parsedValue > 0) {
+        return parsedValue;
+      }
+    }
+
+    return 0;
+  }
+
+  function buildTeamsSaleProductsSummary() {
+    if (!offer) return "Sprzedaż";
+
+    const parts: string[] = [];
+    const pvPower = Number(offer.pv_power_kw || 0);
+    const storageCapacity = getOfferStorageCapacityKwh();
+    const hasStorage = Boolean(offer.energy_storage && offer.energy_storage !== "Brak");
+
+    if (Number.isFinite(pvPower) && pvPower > 0) {
+      parts.push(`PV ${formatSalePower(pvPower)} kWp`);
+    }
+
+    if (hasStorage) {
+      parts.push(
+        storageCapacity > 0
+          ? `ME ${formatSalePower(storageCapacity)} kWh`
+          : `ME ${offer.energy_storage}`
+      );
+    }
+
+    return parts.length ? parts.join(" + ") : getOfferTypeLabel(offer.offer_type);
+  }
+
+  function getTeamsSaleSellerName() {
+    return (
+      creator?.display_name ||
+      creator?.full_name ||
+      creator?.name ||
+      creator?.username ||
+      creator?.email ||
+      "Nieznany sprzedawca"
+    );
+  }
+
+  async function sendTeamsSaleCreatedNotification(saleId: string) {
+    try {
+      const saleUrl = `${window.location.origin}/sales/${saleId}`;
+      const response = await fetch("/api/teams/sale-created", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          saleId,
+          productsSummary: buildTeamsSaleProductsSummary(),
+          sellerName: getTeamsSaleSellerName(),
+          saleUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        console.error(
+          "Błąd wysyłki powiadomienia Teams o nowej sprzedaży:",
+          errorData?.error || response.statusText
+        );
+      }
+    } catch (error) {
+      console.error("Błąd wysyłki powiadomienia Teams o nowej sprzedaży:", error);
+    }
+  }
+
   async function createSaleFromOffer(workflowOverride?: {
     decision: "existing" | "new" | null;
     clientId: string | null;
@@ -1755,6 +1872,8 @@ if (updateClientStatusError) {
         })
         .eq("id", sourceEventId);
     }
+
+    await sendTeamsSaleCreatedNotification(createdSale.id);
     setCreatingSale(false);
     setAllowDuplicateClientCreation(false);
     setSkipDuplicateCheck(false);

@@ -591,14 +591,14 @@ export default function AdminPanel({
   }
 
   return (
-    <section className="relative mt-8 overflow-hidden rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50">
+    <section className="relative mt-8 overflow-hidden rounded-3xl border border-blue-100 bg-white p-6 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50 dark:border-slate-700 dark:bg-slate-950 dark:shadow-none dark:ring-slate-800">
       <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-blue-500 via-emerald-400 to-cyan-400" />
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
             Panel administracyjny
           </p>
-          <h2 className="mt-1 text-2xl font-bold text-slate-950">Panel admina cen</h2>
+          <h2 className="mt-1 text-2xl font-bold text-slate-950 dark:text-slate-100">Panel admina cen</h2>
 
           <p className="mt-2 text-sm text-slate-500">
             Zmień wartości, a potem kliknij „Zapisz ustawienia”. Zapis trafia globalnie do Supabase.
@@ -612,7 +612,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={() => savePricingSettings(pricingOverrides)}
-              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Zapisz ustawienia
             </button>
@@ -622,7 +622,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={savePanels}
-              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Zapisz panele
             </button>
@@ -631,7 +631,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={saveInverters}
-              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Zapisz falowniki
             </button>
@@ -641,7 +641,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={saveStorages}
-              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Zapisz magazyny
             </button>
@@ -651,7 +651,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={saveAdditionalServices}
-              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Zapisz usługi dodatkowe
             </button>
@@ -674,7 +674,7 @@ export default function AdminPanel({
           type="button"
           onClick={() => setActiveTab("global")}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "global"
-            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
         >
@@ -685,7 +685,7 @@ export default function AdminPanel({
           type="button"
           onClick={() => setActiveTab("panels")}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "panels"
-            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
         >
@@ -696,7 +696,7 @@ export default function AdminPanel({
           type="button"
           onClick={() => setActiveTab("inverters")}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "inverters"
-            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
         >
@@ -707,7 +707,7 @@ export default function AdminPanel({
           type="button"
           onClick={() => setActiveTab("storages")}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "storages"
-            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
         >
@@ -718,7 +718,7 @@ export default function AdminPanel({
           type="button"
           onClick={() => setActiveTab("additionalServices")}
           className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "additionalServices"
-            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
         >
@@ -736,7 +736,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["installation", "pvPerKwNet"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -748,7 +748,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["placeholders", "protections"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -760,7 +760,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["placeholders", "wiring"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -772,7 +772,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["placeholders", "transport"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -784,7 +784,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["placeholders", "documentation"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -796,7 +796,7 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["margins", "marketing"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
@@ -808,13 +808,13 @@ export default function AdminPanel({
               onChange={(e) =>
                 updatePricingValue(["operator", "percent"], e.target.value)
               }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </label>
 
           <div className="md:col-span-2 xl:col-span-3 mt-2">
-            <div className="rounded-3xl border border-blue-100 bg-blue-50/40 p-5">
-              <h3 className="text-lg font-semibold text-slate-900">
+            <div className="rounded-3xl border border-blue-100 bg-blue-50/40 p-5 dark:border-slate-700 dark:bg-slate-900/80">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                 Marże ownerów i managerów
               </h3>
 
@@ -837,7 +837,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -855,7 +855,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -873,7 +873,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -891,7 +891,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -909,7 +909,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -927,7 +927,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
@@ -945,7 +945,7 @@ export default function AdminPanel({
                         e.target.value
                       )
                     }
-                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    className="w-full mt-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
               </div>
@@ -1014,7 +1014,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={addPanel}
-              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Dodaj panel
             </button>
@@ -1190,7 +1190,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={addInverter}
-              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Dodaj falownik
             </button>
@@ -1423,7 +1423,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={addStorage}
-              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Dodaj magazyn
             </button>
@@ -1619,7 +1619,7 @@ export default function AdminPanel({
                   })
                 }
                 className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${additionalServiceForm.allows_quantity
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-100"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-100 dark:shadow-none"
                   : "border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
               >
@@ -1632,7 +1632,7 @@ export default function AdminPanel({
             <button
               type="button"
               onClick={addAdditionalService}
-              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400"
+              className="mt-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-emerald-100 transition hover:from-emerald-500 hover:to-teal-400 dark:shadow-none"
             >
               Dodaj usługę
             </button>

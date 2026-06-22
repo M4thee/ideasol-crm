@@ -72,13 +72,13 @@ function isHiddenAssignmentUser(profile: {
 function getSaleStatusClass(status: string) {
   switch (status) {
     case "Oczekuje na sprawdzenie dokumentów":
-      return "bg-[#95FCFC] text-slate-950 border-[#95FCFC]";
+      return "bg-[#95FCFC] !text-slate-950 border-[#95FCFC]";
     case "Oczekiwanie na zaliczkę":
-      return "bg-[#FCE795] text-slate-950 border-[#FCE795]";
+      return "bg-[#FCE795] !text-slate-950 border-[#FCE795]";
     case "Oczekuje na umówienie montażu":
-      return "bg-[#F3D357] text-slate-950 border-[#F3D357]";
+      return "bg-[#F3D357] !text-slate-950 border-[#F3D357]";
     case "Montaż umówiony":
-      return "bg-[#D578FA] text-slate-950 border-[#D578FA]";
+      return "bg-[#D578FA] !text-slate-950 border-[#D578FA]";
     case "W trakcie montażu":
       return "bg-[#C039F3] text-white border-[#C039F3]";
     case "Montaż zakończony - oczekiwanie na pełną wpłatę":
@@ -88,7 +88,7 @@ function getSaleStatusClass(status: string) {
     case "Zakończony - ZM wysłane":
       return "bg-[#0AA906] text-white border-[#0AA906]";
     case "Zakończony - procesowanie dotacji":
-      return "bg-[#0BF3F5] text-slate-950 border-[#0BF3F5]";
+      return "bg-[#0BF3F5] !text-slate-950 border-[#0BF3F5]";
     case "Zakończony":
       return "bg-[#0AA906] text-white border-[#0AA906]";
     case "Anulowana":
@@ -98,9 +98,9 @@ function getSaleStatusClass(status: string) {
     case "Utrzymanie - nieuratowana":
       return "bg-[#3D0309] text-white border-[#3D0309]";
     case "Utrzymanie - uratowana":
-      return "bg-[#B9DAD9] text-slate-950 border-[#B9DAD9]";
+      return "bg-[#B9DAD9] !text-slate-950 border-[#B9DAD9]";
     default:
-      return "bg-slate-100 text-slate-700 border-slate-200";
+      return "bg-slate-100 !text-slate-700 border-slate-200 dark:bg-slate-800 dark:!text-slate-100 dark:border-slate-700";
   }
 }
 
@@ -444,12 +444,12 @@ export default function SalesPage() {
   }, [offers, offerSearch]);
 
   return (
-    <main className="text-slate-900">
+    <main className="text-slate-900 dark:text-slate-100">
       <div className="space-y-6">
         <header className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <p className="text-sm text-slate-500 mb-1">Moduł sprzedażowy</p>
-            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Sprzedaże</h1>
+            <p className="mb-1 text-sm text-slate-500 dark:text-slate-400">Moduł sprzedażowy</p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">Sprzedaże</h1>
           </div>
           <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <button
@@ -463,27 +463,27 @@ export default function SalesPage() {
         </header>
 
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 md:gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-sm text-slate-500">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {currentUserRole === "seller" ? "Moje sprzedaże" : "Liczba sprzedaży"}
             </p>
-            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">{sales.length}</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">{sales.length}</p>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-sm text-slate-500">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {currentUserRole === "seller" ? "Moje zakończone" : "Zakończone"}
             </p>
-            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
+            <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">
               {sales.filter((sale) => sale.status.startsWith("Zakończony")).length}
             </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <p className="text-sm text-slate-500">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {currentUserRole === "seller" ? "Wartość moich umów" : "Wartość umów"}
             </p>
-            <p className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">
+            <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">
               {sales
                 .filter((sale) => sale.status !== "Anulowana")
                 .reduce((sum, sale) => sum + (sale.contract_value || 0), 0)
@@ -492,11 +492,11 @@ export default function SalesPage() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 lg:flex-row lg:items-center">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-col items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 dark:border-slate-700 sm:px-6 lg:flex-row lg:items-center">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Lista sprzedaży</h2>
-              <p className="text-sm text-slate-500">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Lista sprzedaży</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Najnowsze sprzedaże są na górze listy.
               </p>
             </div>
@@ -506,18 +506,18 @@ export default function SalesPage() {
                 <button
                   type="button"
                   onClick={() => setIsSellerFilterOpen((value) => !value)}
-                  className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 sm:w-auto"
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60 sm:w-auto"
                 >
                   {getSellerFilterLabel()}
                 </button>
 
                 {isSellerFilterOpen && !["seller", "cc"].includes(currentUserRole) && (
-                  <div className="absolute left-0 right-0 top-12 z-30 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl sm:left-auto sm:w-72">
+                  <div className="absolute left-0 right-0 top-12 z-30 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:left-auto sm:w-72">
                     <div className="mb-2 flex gap-2">
                       <button
                         type="button"
                         onClick={selectAllSellers}
-                        className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200"
+                        className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                       >
                         Wszyscy
                       </button>
@@ -525,7 +525,7 @@ export default function SalesPage() {
                       <button
                         type="button"
                         onClick={selectOnlyMe}
-                        className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                        className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
                       >
                         Moje
                       </button>
@@ -535,7 +535,7 @@ export default function SalesPage() {
                       {salesOwners.map((owner) => (
                         <label
                           key={owner.id}
-                          className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm hover:bg-slate-50"
+                          className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                         >
                           <input
                             type="checkbox"
@@ -544,11 +544,11 @@ export default function SalesPage() {
                             className="h-4 w-4 accent-emerald-500"
                           />
 
-                          <span className="font-medium text-slate-700">
+                          <span className="font-medium text-slate-700 dark:text-slate-200">
                             {owner.display_name || "Użytkownik"}
                           </span>
 
-                          <span className="ml-auto text-xs text-slate-400">
+                          <span className="ml-auto text-xs text-slate-400 dark:text-slate-500">
                             {owner.role === "owner"
                               ? "Członek Zarządu"
                               : owner.role === "admin"
@@ -569,7 +569,7 @@ export default function SalesPage() {
               <button
                 type="button"
                 onClick={loadSales}
-                className="w-full rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-slate-700 sm:w-auto"
+                className="w-full rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200 sm:w-auto"
               >
                 Odśwież
               </button>
@@ -577,9 +577,9 @@ export default function SalesPage() {
           </div>
 
           {loading ? (
-            <div className="p-4 text-slate-500 sm:p-6">Ładowanie sprzedaży...</div>
+            <div className="p-4 text-slate-500 dark:text-slate-400 sm:p-6">Ładowanie sprzedaży...</div>
           ) : sales.length === 0 ? (
-            <div className="space-y-4 p-4 text-slate-500 sm:p-6">
+            <div className="space-y-4 p-4 text-slate-500 dark:text-slate-400 sm:p-6">
               <p>
                 Brak sprzedaży. Sprzedaże są teraz tworzone wyłącznie na podstawie istniejących ofert.
               </p>
@@ -592,12 +592,12 @@ export default function SalesPage() {
             </div>
           ) : (
             <>
-              <div className="border-b border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-900 sm:px-6">
+              <div className="border-b border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100 sm:px-6">
                 <span className="font-semibold">Nowy workflow sprzedaży:</span> sprzedaże powinny być tworzone wyłącznie z istniejących ofert kalkulatora.
               </div>
               <div className="overflow-x-auto">
               <table className="min-w-[980px] w-full text-sm">
-                <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                   <tr>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">SaleID</th>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">Data sprzedaży</th>
@@ -609,7 +609,7 @@ export default function SalesPage() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {sales.map((sale) => {
                     const visibleSaleId = sale.public_id
                       ? `SID${String(sale.public_id).padStart(6, "0")}`
@@ -620,25 +620,25 @@ export default function SalesPage() {
                       "Brak klienta";
 
                     return (
-                      <tr key={sale.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-4 sm:px-6 font-bold text-slate-900 whitespace-nowrap">
+                      <tr key={sale.id} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/70">
+                        <td className="px-4 py-4 sm:px-6 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           {visibleSaleId}
                         </td>
 
-                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                           {new Date(sale.sale_date).toLocaleString("pl-PL")}
                         </td>
 
                         <td className="px-4 py-4 sm:px-6">
                           <div>
-                            <p className="font-semibold text-slate-900">{clientName}</p>
-                            <p className="text-xs text-slate-500">
+                            <p className="font-semibold text-slate-900 dark:text-slate-100">{clientName}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               {sale.client?.city || "Brak miasta"}
                             </p>
                           </div>
                         </td>
 
-                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                           {sale.seller?.display_name ||
                             sale.seller?.email ||
                             (sale.seller_id
@@ -646,7 +646,7 @@ export default function SalesPage() {
                               : "Brak sprzedawcy")}
                         </td>
 
-                        <td className="px-4 py-4 sm:px-6 text-slate-700 whitespace-nowrap">
+                        <td className="px-4 py-4 sm:px-6 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                           {sale.contract_value
                             ? `${sale.contract_value.toLocaleString("pl-PL")} zł`
                             : "Brak danych"}
@@ -682,11 +682,11 @@ export default function SalesPage() {
       </div>
       {isOfferPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+          <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5 dark:border-slate-700">
               <div>
-                <p className="text-sm text-slate-500">Nowa sprzedaż</p>
-                <h2 className="text-2xl font-bold text-slate-900">
+                <p className="text-sm text-slate-500 dark:text-slate-400">Nowa sprzedaż</p>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
                   Wybierz ofertę
                 </h2>
               </div>
@@ -694,19 +694,19 @@ export default function SalesPage() {
               <button
                 type="button"
                 onClick={() => setIsOfferPickerOpen(false)}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 Zamknij
               </button>
             </div>
 
-            <div className="border-b border-slate-100 px-6 py-4">
+            <div className="border-b border-slate-100 px-6 py-4 dark:border-slate-800">
               <input
                 type="text"
                 value={offerSearch}
                 onChange={(e) => setOfferSearch(e.target.value)}
                 placeholder="Szukaj po OfferID, nazwisku, emailu..."
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-emerald-400"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
             </div>
 
@@ -724,7 +724,7 @@ export default function SalesPage() {
                   {filteredOffers.map((offer) => (
                     <div
                       key={offer.id}
-                      className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-5 transition hover:border-emerald-300 hover:bg-emerald-50/30 lg:flex-row lg:items-center"
+                      className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-5 transition hover:border-emerald-300 hover:bg-emerald-50/30 dark:border-slate-700 dark:hover:border-emerald-600 dark:hover:bg-emerald-950/20 lg:flex-row lg:items-center"
                     >
                       <div className="min-w-[140px]">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
