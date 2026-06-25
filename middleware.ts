@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  const maintenanceMode =
-    process.env.MAINTENANCE_MODE === "true";
+  const maintenanceMode = true;
 
   const { pathname } = request.nextUrl;
 
@@ -15,7 +14,7 @@ export async function middleware(request: NextRequest) {
     !pathname.startsWith("/favicon") &&
     !pathname.startsWith("/logo.png")
   ) {
-    return NextResponse.rewrite(
+    return NextResponse.redirect(
       new URL("/maintenance", request.url)
     );
   }
