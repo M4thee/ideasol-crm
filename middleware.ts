@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  const maintenanceMode = true;
+  const maintenanceModeValue = process.env.MAINTENANCE_MODE
+    ?.trim()
+    .replace(/^['\"]|['\"]$/g, "")
+    .toLowerCase();
+  const maintenanceMode =
+    maintenanceModeValue === "true" ||
+    maintenanceModeValue === "1" ||
+    maintenanceModeValue === "yes" ||
+    maintenanceModeValue === "on";
 
   const { pathname } = request.nextUrl;
 
