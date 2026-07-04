@@ -20,6 +20,7 @@ type CalendarItem = {
   owner_name: string | null;
   assigned_user_id: string | null;
   assigned_user_name: string | null;
+  location: string | null;
 };
 
 type CalendarView = "month" | "week" | "day";
@@ -35,6 +36,7 @@ type AdvisorForCalendarEvent = {
   id: string;
   display_name: string | null;
   email: string | null;
+  phone: string | null;
   role: string | null;
 };
 
@@ -45,6 +47,7 @@ type ClientForCalendarEvent = {
   contact_person: string | null;
   email: string | null;
   phone: string | null;
+  contact_phone: string | null;
   city: string | null;
   street: string | null;
   building_number: string | null;
@@ -58,6 +61,10 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [selectedEventTypes, setSelectedEventTypes] = useState<Array<CalendarItem["type"]>>([
+    "meeting",
+    "phone_call",
+  ]);
   const [selectedItem, setSelectedItem] = useState<CalendarItem | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
@@ -271,7 +278,7 @@ export default function CalendarPage() {
     const { data: clientsData, error: clientsError } = clientIds.length > 0
       ? await supabase
           .from("clients")
-          .select("id, full_name, company_name")
+          .select("id, full_name, company_name, city, street, building_number, postal_code, address")
           .in("id", clientIds)
       : { data: [], error: null };
 
@@ -284,6 +291,22 @@ export default function CalendarPage() {
         client.id,
         client.full_name || client.company_name || "Klient",
       ])
+    );
+
+    const clientLocationsById = new Map(
+      (clientsData || []).map((client) => {
+        const baseAddress = (client.address || "").trim();
+        const streetLine = [client.street, client.building_number]
+          .map((part) => (part || "").trim())
+          .filter(Boolean)
+          .join(" ");
+        const cityLine = [client.postal_code, client.city]
+          .map((part) => (part || "").trim())
+          .filter(Boolean)
+          .join(" ");
+
+        return [client.id, [baseAddress || streetLine, cityLine].filter(Boolean).join(", ")];
+      })
     );
 
     const ownerIds = [
@@ -340,6 +363,7 @@ export default function CalendarPage() {
         owner_name: ownerId ? ownersById.get(ownerId) || "Użytkownik" : null,
         assigned_user_id: item.assigned_user_id || null,
         assigned_user_name: item.assigned_user_id ? ownersById.get(item.assigned_user_id) || "Doradca" : null,
+        location: item.client_id ? clientLocationsById.get(item.client_id) || null : null,
       };
     });
 
@@ -350,13 +374,23 @@ export default function CalendarPage() {
   function getItemsForDate(date: Date) {
     return calendarItems.filter((item) => {
       const itemDate = new Date(item.date);
-
-      return (
+      const matchesDate =
         itemDate.getFullYear() === date.getFullYear() &&
         itemDate.getMonth() === date.getMonth() &&
-        itemDate.getDate() === date.getDate()
-      );
+        itemDate.getDate() === date.getDate();
+
+      const matchesType = selectedEventTypes.includes(item.type);
+
+      return matchesDate && matchesType;
     });
+  }
+
+  function toggleEventTypeFilter(type: CalendarItem["type"]) {
+    setSelectedEventTypes((current) =>
+      current.includes(type)
+        ? current.filter((item) => item !== type)
+        : [...current, type]
+    );
   }
 
   function isToday(date: Date) {
@@ -376,6 +410,20 @@ export default function CalendarPage() {
 
   function openEventPage(item: CalendarItem) {
     router.push(`/event/${item.id}`);
+  }
+
+  function openNavigation(item: CalendarItem) {
+    const destination = (item.location || "").trim();
+
+    if (!destination) return;
+
+    const encodedDestination = encodeURIComponent(destination);
+    const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(window.navigator.userAgent);
+    const navigationUrl = isAppleDevice
+      ? `https://maps.apple.com/?q=${encodedDestination}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodedDestination}`;
+
+    window.open(navigationUrl, "_blank", "noopener,noreferrer");
   }
 
   function addMinutesToIsoDateTime(value: string, minutes: number) {
@@ -497,17 +545,18 @@ System rozliczeń: net-billing / net-metering`;
   }
 
   function getClientLocation(client: ClientForCalendarEvent) {
-    if (client.address) return client.address;
-
+    const baseAddress = (client.address || "").trim();
     const streetLine = [client.street, client.building_number]
+      .map((part) => (part || "").trim())
       .filter(Boolean)
       .join(" ");
 
     const cityLine = [client.postal_code, client.city]
+      .map((part) => (part || "").trim())
       .filter(Boolean)
       .join(" ");
 
-    return [streetLine, cityLine]
+    return [baseAddress || streetLine, cityLine]
       .filter(Boolean)
       .join(", ");
   }
@@ -516,7 +565,7 @@ async function loadClientsForEventModal() {
   const { data, error } = await supabase
     .from("clients")
     .select(
-      "id, full_name, company_name, contact_person, email, phone, city, street, building_number, postal_code, address"
+      "id, full_name, company_name, contact_person, email, phone, contact_phone, city, street, building_number, postal_code, address"
     )
     .order("created_at", { ascending: false })
     .limit(250);
@@ -536,7 +585,7 @@ async function loadClientsForEventModal() {
 async function loadAdvisorsForEventModal() {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, display_name, email, role")
+    .select("id, display_name, email, phone, role")
     .neq("role", "admin")
     .eq("hidden_from_assignment", false)
     .order("display_name", { ascending: true });
@@ -574,6 +623,7 @@ async function closeCreateEventModal() {
   setShowCreateEventModal(false);
   setCreateEventError("");
 }
+
 
 // --- Sync created meeting to Outlook ---
 async function syncCreatedMeetingToOutlook(params: {
@@ -625,26 +675,67 @@ async function syncCreatedMeetingToOutlook(params: {
       throw new Error(result.error || "Nie udało się utworzyć wydarzenia Outlook.");
     }
 
-    await supabase
-      .from("calendar_events")
-      .update({
-        microsoft_event_id: result.microsoftEventId || null,
-        microsoft_event_url: result.microsoftEventUrl || null,
-        microsoft_sync_status: "synced",
-        microsoft_sync_error: null,
-      })
-      .eq("id", params.calendarEventId);
+    console.log("Outlook event utworzony dla spotkania CRM:", {
+      calendarEventId: params.calendarEventId,
+      microsoftEventId: result.microsoftEventId || null,
+      microsoftEventUrl: result.microsoftEventUrl || null,
+    });
   } catch (error) {
     console.error("Nie udało się zsynchronizować wydarzenia z Outlook", error);
 
-    await supabase
-      .from("calendar_events")
-      .update({
-        microsoft_sync_status: "error",
-        microsoft_sync_error:
-          error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
-      })
-      .eq("id", params.calendarEventId);
+    console.warn("Pominięto zapis błędu synchronizacji Microsoft w calendar_events:", {
+      calendarEventId: params.calendarEventId,
+      error: error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
+    });
+  }
+}
+
+async function sendMeetingConfirmationSms(calendarEventId: string) {
+  const trimmedCalendarEventId = String(calendarEventId || "").trim();
+
+  if (!trimmedCalendarEventId) return;
+
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      console.warn("Pominięto SMS potwierdzający spotkanie - brak aktywnej sesji użytkownika.");
+      return;
+    }
+
+    const response = await fetch("/api/sms/meeting-confirmation", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        calendarEventId: trimmedCalendarEventId,
+      }),
+    });
+
+    const responseText = await response.text().catch(() => "");
+    let responseBody: unknown = responseText;
+
+    try {
+      responseBody = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      responseBody = responseText;
+    }
+
+    if (!response.ok) {
+      console.error("Błąd odpowiedzi endpointu SMS potwierdzenia spotkania:", {
+        status: response.status,
+        body: responseBody,
+      });
+      return;
+    }
+
+    console.log("SMS potwierdzający spotkanie obsłużony z kalendarza:", responseBody);
+  } catch (error) {
+    console.error("Nie udało się wywołać SMS potwierdzającego spotkanie z kalendarza:", error);
   }
 }
 
@@ -750,7 +841,17 @@ async function createCalendarEventFromModal() {
       ? `Urlop: ${advisorName}`
       : `${newEventType === "meeting" ? "Spotkanie" : "Kontakt telefoniczny"}: ${clientName}`;
   const eventLocation = selectedClient ? getClientLocation(selectedClient) : "";
-  const eventPhone = selectedClient?.phone || "";
+  const eventPhone = selectedClient?.phone || selectedClient?.contact_phone || "";
+  console.log("Dane SMS dla tworzonego spotkania:", {
+    selectedClientId: selectedClient?.id || null,
+    clientPhone: selectedClient?.phone || null,
+    clientContactPhone: selectedClient?.contact_phone || null,
+    eventPhone,
+    selectedAdvisorId: selectedAdvisor?.id || null,
+    advisorName,
+    advisorPhone: selectedAdvisor?.phone || null,
+    newEventType,
+  });
 
   if (newEventType !== "vacation") {
     const vacationConflict = await findAdvisorVacationConflict(newEventAdvisorId, newEventAt);
@@ -847,6 +948,17 @@ async function createCalendarEventFromModal() {
   }
 
   if (createdEvent?.id && newEventType === "meeting") {
+    console.log("Spotkanie utworzone w CRM z kalendarza - start SMS i Outlook:", {
+      calendarEventId: createdEvent.id,
+      clientId: newEventClientId,
+      eventPhone,
+      newEventAt,
+      advisorName,
+      advisorPhone: selectedAdvisor?.phone || null,
+    });
+
+    await sendMeetingConfirmationSms(createdEvent.id);
+
     await syncCreatedMeetingToOutlook({
       calendarEventId: createdEvent.id,
       title: eventTitle,
@@ -874,6 +986,7 @@ async function createCalendarEventFromModal() {
 
   await loadCalendarItems();
 }
+
   function toggleOwnerFilter(ownerId: string) {
     setSelectedOwnerIds((current) =>
       current.includes(ownerId)
@@ -1152,7 +1265,7 @@ async function createCalendarEventFromModal() {
     }
 
     return days;
-  }, [currentDate, calendarItems]);
+  }, [currentDate, calendarItems, selectedEventTypes]);
 
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
   function getRoleLabel(role: string | null) {
@@ -1166,7 +1279,7 @@ async function createCalendarEventFromModal() {
 }
   const dayItems = useMemo(
     () => getItemsForDate(currentDate),
-    [currentDate, calendarItems]
+    [currentDate, calendarItems, selectedEventTypes]
   );
 
   const filteredClientsForEvent = clientsForEvent
@@ -1181,6 +1294,7 @@ async function createCalendarEventFromModal() {
         client.contact_person,
         client.email,
         client.phone,
+        client.contact_phone,
         client.address,
         client.street,
         client.building_number,
@@ -1217,13 +1331,13 @@ async function createCalendarEventFromModal() {
     <main className="text-slate-900">
       <div className="space-y-6">
 
-        <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
+        <section className="overflow-hidden bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
+          <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center lg:flex-wrap">
               <button
                 type="button"
                 onClick={() => setCalendarView("month")}
-                className={`px-4 py-2 rounded-xl font-medium ${
+                className={`w-full px-4 py-2 rounded-xl font-medium sm:w-auto ${
                   calendarView === "month"
                     ? "bg-emerald-500 text-white"
                     : "border border-slate-300 bg-white text-slate-600"
@@ -1235,7 +1349,7 @@ async function createCalendarEventFromModal() {
               <button
                 type="button"
                 onClick={() => setCalendarView("week")}
-                className={`px-4 py-2 rounded-xl font-medium ${
+                className={`w-full px-4 py-2 rounded-xl font-medium sm:w-auto ${
                   calendarView === "week"
                     ? "bg-emerald-500 text-white"
                     : "border border-slate-300 bg-white text-slate-600"
@@ -1247,7 +1361,7 @@ async function createCalendarEventFromModal() {
               <button
                 type="button"
                 onClick={() => setCalendarView("day")}
-                className={`px-4 py-2 rounded-xl font-medium ${
+                className={`w-full px-4 py-2 rounded-xl font-medium sm:w-auto ${
                   calendarView === "day"
                     ? "bg-emerald-500 text-white"
                     : "border border-slate-300 bg-white text-slate-600"
@@ -1256,11 +1370,11 @@ async function createCalendarEventFromModal() {
                 Dzień
               </button>
 
-              <div className="relative ml-2">
+              <div className="relative w-full lg:ml-2 lg:w-auto">
                 <button
                   type="button"
                   onClick={() => setIsOwnerFilterOpen((value) => !value)}
-                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 lg:w-auto"
                 >
                   {getOwnerFilterLabel()}
                 </button>
@@ -1310,30 +1424,57 @@ async function createCalendarEventFromModal() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4 ml-auto">
+              <div className="grid w-full grid-cols-2 gap-2 lg:w-auto lg:grid-cols-none lg:flex lg:items-center">
+                <button
+                  type="button"
+                  onClick={() => toggleEventTypeFilter("meeting")}
+                  className={`flex h-14 w-full items-center justify-center rounded-xl border px-4 text-center text-sm font-semibold leading-tight transition sm:w-36 ${
+                    selectedEventTypes.includes("meeting")
+                      ? "border-sky-300 bg-sky-50 text-sky-800"
+                      : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Spotkania
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleEventTypeFilter("phone_call")}
+                  className={`flex h-14 w-full items-center justify-center rounded-xl border px-4 text-center text-sm font-semibold leading-tight transition sm:w-36 ${
+                    selectedEventTypes.includes("phone_call")
+                      ? "border-violet-300 bg-violet-50 text-violet-800"
+                      : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Kontakty tel.
+                </button>
+              </div>
+            
+
+            <div className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 lg:ml-auto lg:flex lg:w-auto lg:gap-4">
               <button
                 type="button"
                 onClick={openCreateEventModal}
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-semibold"
+                className="col-span-3 rounded-xl bg-emerald-500 px-4 py-3 text-white font-semibold hover:bg-emerald-400 sm:col-span-1 sm:py-2 lg:col-span-auto"
               >
                 Dodaj wydarzenie
               </button>
               <button
                 type="button"
                 onClick={() => changePeriod("previous")}
-                className="w-10 h-10 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+                className="h-10 w-10 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
               >
                 ←
               </button>
 
-              <h1 className="text-3xl font-bold capitalize min-w-[220px] text-center">
+              <h1 className="min-w-0 truncate text-center text-2xl font-bold capitalize sm:min-w-[220px] sm:text-3xl lg:truncate-none">
                 {headerLabel}
               </h1>
 
               <button
                 type="button"
                 onClick={() => changePeriod("next")}
-                className="w-10 h-10 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+                className="h-10 w-10 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
               >
                 →
               </button>
@@ -1341,7 +1482,7 @@ async function createCalendarEventFromModal() {
               <button
                 type="button"
                 onClick={() => setCurrentDate(new Date())}
-                className="px-4 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-50"
+                className="col-span-3 rounded-xl border border-slate-300 bg-white px-4 py-2 hover:bg-slate-50 sm:col-span-1 lg:col-span-auto"
               >
                 Dziś
               </button>
@@ -1351,8 +1492,9 @@ async function createCalendarEventFromModal() {
           {loading ? (
             <p className="text-sm text-slate-400">Ładowanie kalendarza...</p>
           ) : calendarView === "month" ? (
-            <>
-              <div className="grid grid-cols-7 border border-slate-200 rounded-t-2xl overflow-hidden">
+            <div className="-mx-1 overflow-x-auto px-1 pb-2">
+              <div className="min-w-[720px]">
+                <div className="grid grid-cols-7 border border-slate-200 rounded-t-2xl overflow-hidden">
                 {["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Niedz"].map(
                   (day) => (
                     <div
@@ -1365,54 +1507,56 @@ async function createCalendarEventFromModal() {
                 )}
               </div>
 
-              <div className="grid grid-cols-7 border-x border-b border-slate-200 rounded-b-2xl overflow-hidden">
-                {calendarDays.map((day, index) => (
-                  <div
-                    key={index}
-                    onClick={() => {
-                      setCurrentDate(day.date);
-                      setCalendarView("day");
-                    }}
-                    className={`min-h-[180px] border-r border-b border-slate-200 p-2 transition-all cursor-pointer hover:bg-slate-50 ${
-                      !day.isCurrentMonth ? "bg-slate-50 text-slate-300" : "bg-white"
-                    } ${
-                      isToday(day.date)
-                        ? "ring-2 ring-emerald-400 ring-inset"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                      <span
-                        className={`text-sm font-semibold px-2 py-1 rounded-lg ${
-                          isToday(day.date) ? "bg-emerald-500 text-white" : ""
-                        }`}
-                      >
-                        {day.date.getDate()}
-                      </span>
-                    </div>
+                <div className="grid grid-cols-7 border-x border-b border-slate-200 rounded-b-2xl overflow-hidden">
+                  {calendarDays.map((day, index) => (
+                    <div
+                      key={index}
+                      onClick={() => {
+                        setCurrentDate(day.date);
+                        setCalendarView("day");
+                      }}
+                      className={`min-h-[180px] border-r border-b border-slate-200 p-2 transition-all cursor-pointer hover:bg-slate-50 ${
+                        !day.isCurrentMonth ? "bg-slate-50 text-slate-300" : "bg-white"
+                      } ${
+                        isToday(day.date)
+                          ? "ring-2 ring-emerald-400 ring-inset"
+                          : ""
+                      }`}
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span
+                          className={`text-sm font-semibold px-2 py-1 rounded-lg ${
+                            isToday(day.date) ? "bg-emerald-500 text-white" : ""
+                          }`}
+                        >
+                          {day.date.getDate()}
+                        </span>
+                      </div>
 
-                    <div className="space-y-2">
-                  {day.items.slice(0, 3).map((item) => (
-                    <CalendarEventCard
-                      key={item.id}
-                      item={item}
-                      onClick={openCalendarItem}
-                      showOwner={!["seller", "cc"].includes(currentUserRole)}
-                    />
+                      <div className="space-y-2">
+                    {day.items.slice(0, 3).map((item) => (
+                      <CalendarEventCard
+                        key={item.id}
+                        item={item}
+                        onClick={openCalendarItem}
+                        showOwner={!["seller", "cc"].includes(currentUserRole)}
+                      />
+                    ))}
+
+                        {day.items.length > 3 && (
+                          <p className="text-[11px] text-slate-500 px-1">
+                            +{day.items.length - 3} więcej
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   ))}
-
-                      {day.items.length > 3 && (
-                        <p className="text-[11px] text-slate-500 px-1">
-                          +{day.items.length - 3} więcej
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                </div>
               </div>
-            </>
+            </div>
           ) : calendarView === "week" ? (
-            <div className="grid grid-cols-7 border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="-mx-1 overflow-x-auto px-1 pb-2">
+              <div className="grid min-w-[720px] grid-cols-7 overflow-hidden rounded-2xl border border-slate-200">
               {weekDays.map((date) => {
                 const items = getItemsForDate(date);
 
@@ -1459,6 +1603,7 @@ async function createCalendarEventFromModal() {
                   </div>
                 );
               })}
+              </div>
             </div>
           ) : (
             <div className="border border-slate-200 rounded-2xl bg-white p-6 shadow-sm">
@@ -1882,25 +2027,18 @@ async function createCalendarEventFromModal() {
                     </div>
                   )}
 
-                  <div className="grid md:grid-cols-3 gap-3 pt-2">
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                      <p className="text-xs text-slate-400 uppercase font-semibold">Notatki</p>
-                      <p className="text-sm text-slate-600 mt-1">Do podpięcia</p>
+                  {selectedItem.location && (
+                    <div>
+                      <p className="text-xs text-slate-400 uppercase font-semibold">Adres</p>
+                      <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">
+                        {selectedItem.location}
+                      </p>
                     </div>
+                  )}
 
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                      <p className="text-xs text-slate-400 uppercase font-semibold">Statusy</p>
-                      <p className="text-sm text-slate-600 mt-1">Do podpięcia</p>
-                    </div>
-
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                      <p className="text-xs text-slate-400 uppercase font-semibold">Aktywności</p>
-                      <p className="text-sm text-slate-600 mt-1">Do podpięcia</p>
-                    </div>
-                  </div>
                 </div>
 
-                <div className="flex justify-end gap-3 mt-8">
+                <div className="flex flex-col gap-3 mt-8 sm:flex-row sm:justify-end">
                   <button
                     type="button"
                     onClick={() => setSelectedItem(null)}
@@ -1908,6 +2046,16 @@ async function createCalendarEventFromModal() {
                   >
                     Zamknij
                   </button>
+
+                  {selectedItem.location && selectedItem.type !== "vacation" && (
+                    <button
+                      type="button"
+                      onClick={() => openNavigation(selectedItem)}
+                      className="px-4 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold md:hidden"
+                    >
+                      Nawiguj
+                    </button>
+                  )}
 
                   <button
                     type="button"

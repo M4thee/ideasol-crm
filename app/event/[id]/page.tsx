@@ -121,19 +121,21 @@ export default function EventPage() {
 
   function getClientAddress() {
     if (!client) return "Brak adresu";
-    if (client.address) return client.address;
 
+    const baseAddress = (client.address || "").trim();
     const streetAddress = [client.street, client.building_number]
-  .filter(Boolean)
-  .join(" ");
+      .map((part) => (part || "").trim())
+      .filter(Boolean)
+      .join(" ");
 
-const cityAddress = [client.postal_code, client.city]
-  .filter(Boolean)
-  .join(" ");
+    const cityAddress = [client.postal_code, client.city]
+      .map((part) => (part || "").trim())
+      .filter(Boolean)
+      .join(" ");
 
-return [streetAddress, cityAddress]
-  .filter(Boolean)
-  .join(", ") || "Brak adresu";
+    const addressParts = [baseAddress || streetAddress, cityAddress].filter(Boolean);
+
+    return addressParts.join(", ") || "Brak adresu";
   }
 
   function localDateTimeToIso(value: string) {
@@ -150,6 +152,59 @@ return [streetAddress, cityAddress]
 
     date.setMinutes(date.getMinutes() + minutes);
     return date.toISOString();
+  }
+
+  async function sendMeetingConfirmationSms(
+    calendarEventId: string,
+    options?: { force?: boolean }
+  ) {
+    const trimmedCalendarEventId = String(calendarEventId || "").trim();
+
+    if (!trimmedCalendarEventId) return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        console.warn("Pominięto SMS potwierdzający spotkanie - brak aktywnej sesji użytkownika.");
+        return;
+      }
+
+      const response = await fetch("/api/sms/meeting-confirmation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          calendarEventId: trimmedCalendarEventId,
+          force: Boolean(options?.force),
+        }),
+      });
+
+      const responseText = await response.text().catch(() => "");
+      let responseBody: unknown = responseText;
+
+      try {
+        responseBody = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        responseBody = responseText;
+      }
+
+      if (!response.ok) {
+        console.error("Błąd odpowiedzi endpointu SMS potwierdzenia spotkania:", {
+          status: response.status,
+          body: responseBody,
+        });
+        return;
+      }
+
+      console.log("SMS potwierdzający spotkanie obsłużony z karty wydarzenia:", responseBody);
+    } catch (error) {
+      console.error("Nie udało się wywołać SMS potwierdzającego spotkanie z karty wydarzenia:", error);
+    }
   }
 
   const hourOptions = Array.from({ length: 13 }, (_, index) =>
@@ -262,6 +317,7 @@ return [streetAddress, cityAddress]
     clientPhone: string | null;
     clientAddress: string;
   }) {
+    await sendMeetingConfirmationSms(params.calendarEventId, { force: true });
     if (!params.microsoftEventId || !params.ownerId) {
       await supabase
         .from("calendar_events")
@@ -337,6 +393,113 @@ return [streetAddress, cityAddress]
           microsoft_sync_status: "error",
           microsoft_sync_error:
             error instanceof Error ? error.message : "Nieznany błąd aktualizacji Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+    }
+  }
+
+  // --- Helper: sync new meeting with Outlook and Teams ---
+  async function syncNewMeetingWithOutlookAndTeams(params: {
+    calendarEventId: string;
+    ownerId: string | null;
+    title: string;
+    description: string | null;
+    eventAt: string;
+    clientName: string;
+    clientPhone: string | null;
+    clientAddress: string;
+  }) {
+    await sendMeetingConfirmationSms(params.calendarEventId);
+    if (!params.ownerId) {
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error: "Brak właściciela spotkania — nie można wysłać powiadomienia Teams/Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+      return;
+    }
+
+    const { data: ownerProfile } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", params.ownerId)
+      .maybeSingle();
+
+    if (!ownerProfile?.email) {
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error: "Brak adresu e-mail właściciela spotkania — nie można wysłać powiadomienia Teams/Outlook.",
+        })
+        .eq("id", params.calendarEventId);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/microsoft/outlook/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userEmail: ownerProfile.email,
+          assignedUserEmail: ownerProfile.email,
+          subject: params.title || "Spotkanie CRM",
+          body: params.description || "",
+          clientName: params.clientName,
+          clientPhone: params.clientPhone || "",
+          clientAddress: params.clientAddress,
+          meetingNote: params.description || undefined,
+          crmUrl: `${window.location.origin}/event/${params.calendarEventId}`,
+          location: params.clientAddress,
+          startDateTime: new Date(params.eventAt).toISOString(),
+          endDateTime: addMinutesToIsoDateTime(params.eventAt, 60),
+          timeZone: "Europe/Warsaw",
+          reminderMinutesBeforeStart: 10,
+        }),
+      });
+
+      const result = await response.json().catch(() => null) as {
+        ok?: boolean;
+        error?: string;
+        id?: string;
+        eventId?: string;
+        microsoftEventId?: string;
+        microsoftEventUrl?: string;
+        webLink?: string;
+        event?: {
+          id?: string;
+          webLink?: string;
+        };
+      } | null;
+
+      if (!response.ok || !result?.ok) {
+        throw new Error(result?.error || "Nie udało się wysłać spotkania do Teams/Outlook.");
+      }
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_event_id:
+            result.event?.id || result.microsoftEventId || result.eventId || result.id || null,
+          microsoft_event_url:
+            result.event?.webLink || result.microsoftEventUrl || result.webLink || null,
+          microsoft_sync_status: "synced",
+          microsoft_sync_error: null,
+        })
+        .eq("id", params.calendarEventId);
+    } catch (error) {
+      console.error("Nie udało się zsynchronizować nowego spotkania z Teams/Outlook", error);
+
+      await supabase
+        .from("calendar_events")
+        .update({
+          microsoft_sync_status: "error",
+          microsoft_sync_error:
+            error instanceof Error ? error.message : "Nieznany błąd wysyłki Teams/Outlook.",
         })
         .eq("id", params.calendarEventId);
     }
@@ -731,24 +894,42 @@ async function reassignEventOwner() {
       }
     }
     if (needsMeeting) {
-      const { error: meetingError } = await supabase.from("calendar_events").insert({
-        client_id: event.client_id,
-        title: `Spotkanie: ${client?.full_name || client?.company_name || "Klient"}`,
-        description:
-          description ||
-          "Spotkanie umówione po kontakcie telefonicznym. Kontakt marketingowy.",
-        event_type: "meeting",
-        event_at: taskMeetingAt,
-        status: "planned",
-        created_by: chosenMeetingOwnerId,
-      });
+      const meetingEventAt = localDateTimeToIso(taskMeetingAt);
+      const { data: meetingEvent, error: meetingError } = await supabase
+        .from("calendar_events")
+        .insert({
+          client_id: event.client_id,
+          source_activity_id: event.source_activity_id,
+          title: `Spotkanie: ${client?.full_name || client?.company_name || "Klient"}`,
+          description:
+            description ||
+            "Spotkanie umówione po kontakcie telefonicznym. Kontakt marketingowy.",
+          event_type: "meeting",
+          event_at: meetingEventAt,
+          status: "planned",
+          created_by: chosenMeetingOwnerId,
+          assigned_user_id: chosenMeetingOwnerId,
+        })
+        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .single();
 
-      if (meetingError) {
+      if (meetingError || !meetingEvent) {
         console.error("Efekt zapisany, ale nie udało się utworzyć spotkania:", meetingError);
-        alert(`Efekt zapisany, ale nie udało się utworzyć spotkania: ${meetingError.message}`);
+        alert(`Efekt zapisany, ale nie udało się utworzyć spotkania: ${meetingError?.message || "Brak szczegółów błędu."}`);
         setSavingTaskEffect(false);
         return;
       }
+
+      await syncNewMeetingWithOutlookAndTeams({
+        calendarEventId: meetingEvent.id,
+        ownerId: meetingEvent.assigned_user_id || meetingEvent.created_by,
+        title: meetingEvent.title || "Spotkanie CRM",
+        description: meetingEvent.description,
+        eventAt: meetingEvent.event_at,
+        clientName,
+        clientPhone: client?.phone || null,
+        clientAddress: getClientAddress(),
+      });
     }
 
     const completedStatus = `Zakończone - ${taskPhoneStatus}`;
@@ -757,7 +938,7 @@ async function reassignEventOwner() {
       .from("calendar_events")
       .update({ status: completedStatus })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
       .single();
 
     if (completeEventError || !completedEvent) {
@@ -976,31 +1157,49 @@ async function reassignEventOwner() {
 
     if (needsNextContact) {
       const nextEventAt = localDateTimeToIso(nextContactAt);
+      const nextEventOwnerId = nextContactType === "meeting" ? chosenMeetingOwnerId : user?.id || null;
+      const { data: nextEvent, error: nextEventError } = await supabase
+        .from("calendar_events")
+        .insert({
+          client_id: event.client_id,
+          source_activity_id: event.source_activity_id,
+          title:
+            nextContactType === "phone"
+              ? "Ponowny kontakt: Zainteresowany"
+              : `Spotkanie: ${clientName}`,
+          description,
+          event_type: nextContactType === "phone" ? "reminder" : "meeting",
+          event_at: nextEventAt,
+          status: "planned",
+          created_by: nextEventOwnerId,
+          assigned_user_id: nextContactType === "meeting" ? nextEventOwnerId : null,
+        })
+        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .single();
 
-      const { error: nextEventError } = await supabase.from("calendar_events").insert({
-        client_id: event.client_id,
-        source_activity_id: event.source_activity_id,
-        title:
-          nextContactType === "phone"
-            ? "Ponowny kontakt: Zainteresowany"
-            : `Spotkanie: ${clientName}`,
-        description,
-        event_type: nextContactType === "phone" ? "reminder" : "meeting",
-        event_at: nextEventAt,
-        status: "planned",
-        created_by: nextContactType === "meeting" ? chosenMeetingOwnerId : user?.id || null,
-      });
-
-      if (nextEventError) {
+      if (nextEventError || !nextEvent) {
         console.error(
           "Efekt spotkania zapisany, ale nie udało się utworzyć kolejnego kontaktu:",
           nextEventError
         );
         alert(
-          `Efekt spotkania zapisany, ale nie udało się utworzyć kolejnego kontaktu: ${nextEventError.message}`
+          `Efekt spotkania zapisany, ale nie udało się utworzyć kolejnego kontaktu: ${nextEventError?.message || "Brak szczegółów błędu."}`
         );
         setSavingMeetingEffect(false);
         return;
+      }
+
+      if (nextContactType === "meeting") {
+        await syncNewMeetingWithOutlookAndTeams({
+          calendarEventId: nextEvent.id,
+          ownerId: nextEvent.assigned_user_id || nextEvent.created_by,
+          title: nextEvent.title || "Spotkanie CRM",
+          description: nextEvent.description,
+          eventAt: nextEvent.event_at,
+          clientName,
+          clientPhone: client?.phone || null,
+          clientAddress: getClientAddress(),
+        });
       }
     }
 
