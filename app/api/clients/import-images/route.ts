@@ -398,7 +398,7 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
             {
               type: "text",
               text:
-                'Odczytaj dane klienta ze zdjęcia/screena z systemu spotkań. Zwróć wyłącznie JSON z następującymi polami: {"full_name":string|null,"phone":string|null,"email":string|null,"street":string|null,"house_number":string|null,"city":string|null,"postal_code":string|null,"import_note":string|null}.\n\n' +
+                'Odczytaj dane klienta ze zdjęcia/screena z systemu spotkań. Zwróć wyłącznie JSON z następującymi polami: {"full_name":string|null,"phone":string|null,"email":string|null,"street":string|null,"house_number":string|null,"city":string|null,"postal_code":string|null,"ce_meeting_datetime":string|null,"import_note":string|null}.\n\n' +
                 'STREFE WYTYCZNE DLA ADRESU KLIENTA:\n' +
                 '1. "street": Podaj tylko nazwę ulicy lub samej miejscowości (jeśli ulica nie występuje). Nie dopisuj tu kodu pocztowego, numeru domu ani miasta.\n' +
                 '2. "house_number": Podaj wyłącznie numer domu / lokalu / działki.\n' +
@@ -406,7 +406,8 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
                 '4. "postal_code": Podaj strictly kod pocztowy KLIENTA (format XX-XXX). UWAGA: Na screenie mogą znajdować się kody pocztowe doradców (np. Mateusz, Janusz itp.) lub numery ID systemu. Kategorycznie je zignoruj! Wyciągnij tylko ten kod, który jest bezpośrednim elementem adresu zamieszkania/montażu klienta.\n\n' +
                 'POZOSTAŁE ZASADY:\n' +
                 '- Email odczytaj jako osobne pole email tylko wtedy, gdy jest to email klienta. Ignoruj emaile zawierające columbusenergy, columbusone albo columbuselite.\n' +
-                '- Pole import_note ma zawierać wszystkie informacje sprzedażowe i opisowe widoczne na screenie poza podstawowymi danymi klienta, czyli m.in. produkt, rachunek, właściciel licznika, umowa kompleksowa, pokrycie dachowe, informacje dodatkowe, treść sekcji "Spotkanie handlowe", "Opis", "Uwagi". Właściciel licznika zawsze ma trafić do import_note, nie jako osobne pole. Nie traktuj pola "Notatka: Brak" jako powodu do pustej notatki, jeżeli wyżej na ekranie są informacje opisowe. Godziny spotkania pomiń, chyba że są częścią szerszego opisu.',
+                '- Pole ce_meeting_datetime ma zawierać datę i godzinę spotkania w CE/Columbus/konkurencji widoczną na screenie, jeśli występuje. Zachowaj możliwie czytelny format, np. "21.06.2026 14:30" albo dokładnie taki, jak na screenie. Jeśli nie ma daty/godziny spotkania, zwróć null.\n' +
+'- Pole import_note ma zawierać wszystkie informacje sprzedażowe i opisowe widoczne na screenie poza podstawowymi danymi klienta, czyli m.in. produkt, rachunek, właściciel licznika, umowa kompleksowa, pokrycie dachowe, informacje dodatkowe, treść sekcji "Spotkanie handlowe", "Opis", "Uwagi". Właściciel licznika zawsze ma trafić do import_note, nie jako osobne pole. Nie traktuj pola "Notatka: Brak" jako powodu do pustej notatki, jeżeli wyżej na ekranie są informacje opisowe.',
             },
             {
               type: "image_url",
@@ -428,6 +429,7 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
       house_number?: unknown;
       city?: unknown;
       postal_code?: unknown;
+      ce_meeting_datetime?: unknown;
       import_note?: unknown;
     } | null;
 
@@ -458,6 +460,14 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
     const streetStr = normalizeText(parsed?.street);
     const houseNumStr = normalizeText(parsed?.house_number);
     const cleanAddress = [streetStr, houseNumStr].filter(Boolean).join(" ");
+    const ceMeetingDatetime = normalizeText(parsed?.ce_meeting_datetime);
+const importNote = normalizeText(parsed?.import_note);
+const finalImportNote = [
+  ceMeetingDatetime ? `Data spotkania w CE: ${ceMeetingDatetime}` : null,
+  importNote,
+]
+  .filter(Boolean)
+  .join("\n");
 
     return {
       source_file_name: file.name,
@@ -468,7 +478,7 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
       address: cleanAddress || null,
       postal_code: detectedPostalCode,
       province: normalizeProvinceName(detectedProvince),
-      import_note: normalizeText(parsed?.import_note),
+      import_note: finalImportNote || null,
       assigned_user_id: assignedAdvisorId,
       error: null,
     };

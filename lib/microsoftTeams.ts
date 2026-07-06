@@ -9,6 +9,13 @@ export type TeamsCalendarNotificationPayload = {
   message: string;
 };
 
+export type TeamsNoteMentionNotificationPayload = {
+  userEmail: string;
+  mentionedByName: string;
+  clientName: string;
+  noteUrl: string;
+};
+
 export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificationPayload & {
   accessToken: string;
 };
@@ -164,6 +171,18 @@ export function buildTeamsSaleChannelMessage(payload: TeamsSaleNotificationPaylo
     `Produkt: <strong>${displayValue(payload.productsSummary)}</strong>`,
     `Sprzedawca: <strong>${displayValue(payload.sellerName)}</strong>`,
     "Gratulacje! 👏",
+  ];
+
+  return lines.join("\n");
+}
+
+export function buildTeamsNoteMentionMessage(payload: TeamsNoteMentionNotificationPayload) {
+  const lines = [
+    `<strong>💬 Wspomniano o Tobie w notatce CRM</strong>`,
+    "",
+    `Użytkownik <strong>${displayValue(payload.mentionedByName)}</strong> wspomniał o Tobie w notatce na kliencie <strong>${displayValue(payload.clientName)}</strong>.`,
+    "",
+    `<a href="${escapeHtml(payload.noteUrl)}">Otwórz klienta w CRM</a>`,
   ];
 
   return lines.join("\n");
@@ -418,6 +437,31 @@ export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendar
 
 export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {
   return sendTeamsDirectCalendarNotification(payload);
+}
+
+export async function sendTeamsDirectNoteMentionNotification(
+  payload: TeamsNoteMentionNotificationPayload
+) {
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+  if (!delegatedRefreshToken) {
+    throw new Error(
+      "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki indywidualnej wiadomości Teams o wzmiance."
+    );
+  }
+
+  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+  const delegatedAccessToken = delegatedToken.access_token;
+
+  if (!delegatedAccessToken) {
+    throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph dla wzmianki Teams.");
+  }
+
+  return sendTeamsDelegatedDirectCalendarNotification({
+    userEmail: payload.userEmail,
+    message: buildTeamsNoteMentionMessage(payload),
+    accessToken: delegatedAccessToken,
+  });
 }
 
 export async function sendTeamsDelegatedLeadChannelNotification(

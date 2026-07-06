@@ -159,6 +159,86 @@ const provinces = [
   "Zachodniopomorskie",
 ];
 
+function normalizeProvinceName(value?: string | null) {
+  const rawValue = String(value || "").trim();
+
+  if (!rawValue) return "";
+
+  const normalizedValue = rawValue
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l")
+    .replace(/[^a-z0-9]+/g, "");
+
+  const provinceAliases: Record<string, string> = {
+    podkarpackie: "Podkarpackie",
+    subcarpathian: "Podkarpackie",
+    subcarpathianvoivodeship: "Podkarpackie",
+
+    mazowieckie: "Mazowieckie",
+    masovian: "Mazowieckie",
+    masovianvoivodeship: "Mazowieckie",
+
+    malopolskie: "Małopolskie",
+    lesserpoland: "Małopolskie",
+    lesserpolandvoivodeship: "Małopolskie",
+
+    slaskie: "Śląskie",
+    silesian: "Śląskie",
+    silesianvoivodeship: "Śląskie",
+
+    swietokrzyskie: "Świętokrzyskie",
+    holycross: "Świętokrzyskie",
+    holycrossvoivodeship: "Świętokrzyskie",
+
+    lodzkie: "Łódzkie",
+    lodz: "Łódzkie",
+    lodzvoivodeship: "Łódzkie",
+
+    opolskie: "Opolskie",
+    opole: "Opolskie",
+    opolevoivodeship: "Opolskie",
+
+    lubelskie: "Lubelskie",
+    lublin: "Lubelskie",
+    lublinvoivodeship: "Lubelskie",
+
+    dolnoslaskie: "Dolnośląskie",
+    lowersilesian: "Dolnośląskie",
+    lowersilesianvoivodeship: "Dolnośląskie",
+
+    kujawskopomorskie: "Kujawsko-Pomorskie",
+    kuyavianpomeranian: "Kujawsko-Pomorskie",
+    kuyavianpomeranianvoivodeship: "Kujawsko-Pomorskie",
+
+    lubuskie: "Lubuskie",
+    lubusz: "Lubuskie",
+    lubuszvoivodeship: "Lubuskie",
+
+    podlaskie: "Podlaskie",
+    podlaskievoivodeship: "Podlaskie",
+
+    pomorskie: "Pomorskie",
+    pomeranian: "Pomorskie",
+    pomeranianvoivodeship: "Pomorskie",
+
+    warminskomazurskie: "Warmińsko-Mazurskie",
+    warmianmasurian: "Warmińsko-Mazurskie",
+    warmianmasurianvoivodeship: "Warmińsko-Mazurskie",
+
+    wielkopolskie: "Wielkopolskie",
+    greaterpoland: "Wielkopolskie",
+    greaterpolandvoivodeship: "Wielkopolskie",
+
+    zachodniopomorskie: "Zachodniopomorskie",
+    westpomeranian: "Zachodniopomorskie",
+    westpomeranianvoivodeship: "Zachodniopomorskie",
+  };
+
+  return provinceAliases[normalizedValue] || rawValue;
+}
+
 const countryPhoneCodes = [
   { code: "+48", label: "🇵🇱" },
   { code: "+49", label: "🇩🇪" },
@@ -198,6 +278,7 @@ function ClientsPageContent() {
   const filtersPanelRef = useRef<HTMLDivElement | null>(null);
   const loadingMoreClientsRef = useRef(false);
   const filtersHydratedRef = useRef(false);
+  const clientsLoadedRef = useRef(false);
   const searchParams = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -249,6 +330,15 @@ function ClientsPageContent() {
   useEffect(() => {
     initializePage();
   }, []);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    if (!currentUserId || !currentUserRole) return;
+    if (clientsLoadedRef.current) return;
+
+    clientsLoadedRef.current = true;
+    loadClients(currentUserId, currentUserRole);
+  }, [filtersHydrated, currentUserId, currentUserRole]);
 
   useEffect(() => {
     if (filtersHydratedRef.current) return;
@@ -332,6 +422,7 @@ function ClientsPageContent() {
   useEffect(() => {
     setVisibleClientsLimit(15);
   }, [
+    clients.length,
     statusFilter,
     subStatusFilter,
     selectedAdvisorIds,
@@ -366,7 +457,7 @@ function ClientsPageContent() {
     const role = (profileData?.role || "seller") as UserRole;
     setCurrentUserRole(role);
 
-    await Promise.all([loadClients(user.id, role), loadSellers(), loadAvailableTags()]);
+    await Promise.all([loadSellers(), loadAvailableTags()]);
   }
 
   async function loadAvailableTags() {
@@ -579,6 +670,12 @@ function ClientsPageContent() {
 
   async function loadClients(userId = currentUserId, role = currentUserRole) {
     setLoading(true);
+
+    if (!userId || !role) {
+      setClients([]);
+      setLoading(false);
+      return;
+    }
 
     const normalizedRole = String(role || "seller").toLowerCase();
     const canViewAllClients = canViewAllClientsForRole(normalizedRole);
@@ -815,6 +912,7 @@ function ClientsPageContent() {
 
       return {
         ...client,
+        province: normalizeProvinceName(client.province) || null,
         assigned_user: client.assigned_user_id
           ? assignedUsersById[client.assigned_user_id] || null
           : null,
@@ -930,11 +1028,7 @@ function ClientsPageContent() {
         postal_code: company.postal_code || currentClient.postal_code,
         street: company.street || currentClient.street,
         building_number: company.building_number || currentClient.building_number,
-        province:
-          provinces.find(
-            (province) =>
-              province.toLowerCase() === String(company.province || "").toLowerCase()
-          ) || currentClient.province,
+        province: normalizeProvinceName(company.province) || currentClient.province,
       }));
     } catch (error) {
       console.error("Błąd pobierania danych z GUS:", error);
@@ -995,7 +1089,7 @@ function ClientsPageContent() {
       postal_code: newClient.postal_code || null,
       street: newClient.street || null,
       building_number: newClient.building_number || null,
-      province: newClient.province || null,
+      province: normalizeProvinceName(newClient.province) || null,
       phone:
         normalizedPhone
           ? `${newClient.phone_country_code} ${normalizedPhone}`
@@ -1457,7 +1551,11 @@ function ClientsPageContent() {
     );
   });
 
-  const visibleClients = filteredClients.slice(0, visibleClientsLimit);
+  const safeVisibleClientsLimit = Math.max(
+    visibleClientsLimit,
+    filteredClients.length > 0 ? 15 : 0
+  );
+  const visibleClients = filteredClients.slice(0, safeVisibleClientsLimit);
   const hasMoreClients = visibleClients.length < filteredClients.length;
 
   function shouldLoadMoreClients() {
@@ -1469,13 +1567,15 @@ function ClientsPageContent() {
 
   useEffect(() => {
     function handleWindowScroll() {
+      if (filteredClients.length === 0) return;
+      if (safeVisibleClientsLimit >= filteredClients.length) return;
       if (!shouldLoadMoreClients()) return;
       if (loadingMoreClientsRef.current) return;
 
       loadingMoreClientsRef.current = true;
 
       setVisibleClientsLimit((currentLimit) =>
-        Math.min(currentLimit + 15, filteredClients.length)
+        Math.min(Math.max(currentLimit, 15) + 15, filteredClients.length)
       );
 
       window.setTimeout(() => {
@@ -1492,7 +1592,7 @@ function ClientsPageContent() {
     return () => {
       window.removeEventListener("scroll", handleWindowScroll);
     };
-  }, [filteredClients.length]);
+  }, [filteredClients.length, safeVisibleClientsLimit]);
 
   const stats = {
     all: clients.length,
@@ -1575,8 +1675,8 @@ function ClientsPageContent() {
                       type="button"
                       onClick={() => setStatusFilter(status)}
                       className={`rounded-xl px-3 py-2 text-sm font-semibold transition sm:px-4 ${statusFilter === status
-                          ? "bg-slate-900 text-white"
-                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                         }`}
                     >
                       {status}
@@ -1596,14 +1696,14 @@ function ClientsPageContent() {
                       type="button"
                       onClick={() => setSubStatusFilter(subStatus)}
                       className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${subStatusFilter === subStatus
-                          ? "bg-slate-800 text-white"
-                          : subStatus === "Zaległe"
-                            ? "bg-[#FBBCD0] text-[#700729] hover:bg-[#f7a8c0]"
-                            : subStatus === "W kontakcie"
-                              ? "bg-[#CCEBE6] text-slate-800 hover:bg-[#b8e0da]"
-                              : subStatus === "Niezainteresowani"
-                                ? "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        ? "bg-slate-800 text-white"
+                        : subStatus === "Zaległe"
+                          ? "bg-[#FBBCD0] text-[#700729] hover:bg-[#f7a8c0]"
+                          : subStatus === "W kontakcie"
+                            ? "bg-[#CCEBE6] text-slate-800 hover:bg-[#b8e0da]"
+                            : subStatus === "Niezainteresowani"
+                              ? "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                     >
                       {subStatus}
@@ -2179,8 +2279,8 @@ function ClientsPageContent() {
                 type="button"
                 onClick={() => setClientType("B2C")}
                 className={`rounded-xl px-5 py-3 text-sm font-bold transition ${clientType === "B2C"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
                   }`}
               >
                 B2C
@@ -2190,8 +2290,8 @@ function ClientsPageContent() {
                 type="button"
                 onClick={() => setClientType("B2B")}
                 className={`rounded-xl px-5 py-3 text-sm font-bold transition ${clientType === "B2B"
-                    ? "bg-slate-900 text-white"
-                    : "bg-slate-100 text-slate-700"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
                   }`}
               >
                 B2B

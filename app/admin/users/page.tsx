@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import AdminPanel from "@/components/calculator/AdminPanel";
@@ -1287,6 +1288,12 @@ export default function AdminUsersPage() {
               >
                 Kalkulator
               </button>
+              <Link
+                href="/admin/users/infobars"
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+              >
+                Infobar
+              </Link>
             </div>
           </div>
             {activeSection === "users" && (

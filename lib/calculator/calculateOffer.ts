@@ -810,36 +810,54 @@ export function calculateOffer(input: CalculateOfferInput) {
     pricing.margins.managerFeeNet * managerFeeMultiplier
   );
 
-  const finalNet = Math.round(
-    purchaseCostNet +
-    grossManagerMarginsBeforeOperatorNet +
-    sellerMarkupNet +
-    marketingNet +
-    managerFeeNet
-  );
-
-  const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
-  const sellerWarrantyFeeNet = Math.round(
-    sellerMarkupNet * (operatorPercent / 100)
-  );
-
   const sellerCommissionNet = Math.max(
     0,
     sellerMarkupNet
   );
 
+  const operatorMultiplier = 1 - operatorPercent / 100;
 
-  const managerWarrantyFeeNet = Math.max(0, operatorFeeNet - sellerWarrantyFeeNet);
+  const finalNet = Math.round(
+    operatorMultiplier > 0
+      ? (
+        purchaseCostNet +
+        grossManagerMarginsBeforeOperatorNet +
+        sellerCommissionNet +
+        marketingNet +
+        managerFeeNet
+      ) / operatorMultiplier
+      : purchaseCostNet +
+        grossManagerMarginsBeforeOperatorNet +
+        sellerCommissionNet +
+        marketingNet +
+        managerFeeNet
+  );
+
+  const operatorFeeNet = Math.round(finalNet * (operatorPercent / 100));
+  const sellerWarrantyFeeNet = Math.round(
+    sellerCommissionNet * (operatorPercent / 100)
+  );
+
+  const companyMargin = Math.max(
+    0,
+    Math.round(
+      finalNet -
+      purchaseCostNet -
+      sellerCommissionNet -
+      marketingNet -
+      managerFeeNet -
+      operatorFeeNet
+    )
+  );
+
+  const managerWarrantyFeeNet = operatorFeeNet;
 
   const operatorFeePerOwnerNet =
     managerOverride.ownersCount > 0
       ? Math.round(managerWarrantyFeeNet / managerOverride.ownersCount)
       : 0;
 
-  const managerMarginAfterOperatorTotalNet = Math.max(
-    0,
-    grossManagerMarginsBeforeOperatorNet - managerWarrantyFeeNet
-  );
+  const managerMarginAfterOperatorTotalNet = companyMargin;
 
   const managerMarginAfterOperatorPerOwnerNet =
     managerOverride.ownersCount > 0
@@ -848,10 +866,6 @@ export function calculateOffer(input: CalculateOfferInput) {
 
   const finalGross = Math.round(finalNet * (1 + vatRate / 100));
 
-  const companyMargin = Math.round(
-    managerMarginAfterOperatorTotalNet +
-    managerFeeNet
-  );
 
   const subsidyProgramCap = billingSystem === "net_billing" ? 16000 : 8000;
   const totalPvPowerForSubsidyKw = Number((existingPvPowerKw + pvPowerKw).toFixed(2));

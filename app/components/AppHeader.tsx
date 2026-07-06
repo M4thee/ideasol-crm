@@ -73,6 +73,29 @@ type HeaderNotification = {
   created_at: string;
 };
 
+
+type InfobarItem = {
+  id: string;
+  message: string;
+  backgroundColor: string;
+  textColor: string;
+  dismissible: boolean;
+  priority: number;
+  linkUrl: string | null;
+};
+
+type InfobarRow = {
+  id: string;
+  message: string;
+  color: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: boolean | null;
+  dismissible: boolean | null;
+  priority: number | null;
+  link_url: string | null;
+};
+
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{
@@ -84,15 +107,15 @@ type BeforeInstallPromptEvent = Event & {
 type SearchableClient = {
   id: string;
   public_id?: string | null;
-  lead_id?: string | null;
-  lead_number?: string | number | null;
   full_name?: string | null;
   company_name?: string | null;
-  name?: string | null;
   email?: string | null;
   phone?: string | null;
-  contact_email?: string | null;
-  contact_phone?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  street?: string | null;
+  building_number?: string | null;
+  address?: string | null;
   assigned_user_id?: string | null;
   [key: string]: unknown;
 };
@@ -102,6 +125,7 @@ type SearchableSale = {
   public_id?: string | null;
   sale_id?: string | null;
   sale_number?: string | number | null;
+  contract_number?: string | null;
   client_id?: string | null;
   event_id?: string | null;
   [key: string]: unknown;
@@ -109,7 +133,11 @@ type SearchableSale = {
 
 function normalizeSearchValue(value: unknown) {
   if (value === null || value === undefined) return "";
-  return String(value).toLowerCase();
+
+  return String(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function getRecordSearchText(record: Record<string, unknown>) {
@@ -133,6 +161,46 @@ function pickFirstString(...values: unknown[]) {
   return value ? String(value) : null;
 }
 
+function getReadableTextColor(backgroundColor: string) {
+  const hex = backgroundColor.replace("#", "").trim();
+
+  if (hex.length !== 6) return "#ffffff";
+
+  const red = parseInt(hex.slice(0, 2), 16);
+  const green = parseInt(hex.slice(2, 4), 16);
+  const blue = parseInt(hex.slice(4, 6), 16);
+  const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
+
+  return brightness > 150 ? "#111827" : "#ffffff";
+}
+
+function isInfobarActiveNow(infobar: InfobarRow) {
+  if (!infobar.is_active) return false;
+
+  const now = Date.now();
+  const startsAt = infobar.starts_at ? new Date(infobar.starts_at).getTime() : null;
+  const endsAt = infobar.ends_at ? new Date(infobar.ends_at).getTime() : null;
+
+  if (startsAt && startsAt > now) return false;
+  if (endsAt && endsAt < now) return false;
+
+  return true;
+}
+
+function normalizeInfobar(row: InfobarRow): InfobarItem {
+  const backgroundColor = row.color || "#dc2626";
+
+  return {
+    id: row.id,
+    message: row.message,
+    backgroundColor,
+    textColor: getReadableTextColor(backgroundColor),
+    dismissible: row.dismissible !== false,
+    priority: row.priority || 1,
+    linkUrl: row.link_url || null,
+  };
+}
+
 export default function AppHeader({ currentUser }: AppHeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -154,11 +222,17 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalledPwa, setIsInstalledPwa] = useState(false);
   const [isSafariBrowser, setIsSafariBrowser] = useState(false);
+  const [infobars, setInfobars] = useState<InfobarItem[]>([]);
+  const [closedInfobarIds, setClosedInfobarIds] = useState<string[]>([]);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
   const notificationsLoadedRef = useRef(false);
   const lastNotificationSoundRef = useRef<number>(0);
 
   const trimmedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+
+  const visibleInfobars = infobars.filter(
+    (infobar) => !closedInfobarIds.includes(infobar.id)
+  );
 
   const unreadNotificationsCount = notifications.filter(
     (notification) => !notification.is_read
@@ -187,6 +261,113 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
     changeThemeMode(nextTheme);
   }
+  useEffect(() => {
+    try {
+      const savedClosedInfobarIds = window.localStorage.getItem(
+        "ideasol_closed_infobars"
+      );
+
+      setClosedInfobarIds(
+        savedClosedInfobarIds ? JSON.parse(savedClosedInfobarIds) : []
+      );
+    } catch (error) {
+      console.error("Błąd odczytu zamkniętych infobarów:", error);
+      setClosedInfobarIds([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    const profileId = profile?.id;
+
+    if (!profileId) {
+      setInfobars([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadInfobars() {
+      const { data: infobarData, error: infobarError } = await supabase
+        .from("admin_infobars")
+        .select("id, message, color, starts_at, ends_at, is_active, dismissible, priority, link_url")
+        .eq("is_active", true)
+        .order("priority", { ascending: true })
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (infobarError) {
+        console.error("Błąd ładowania infobarów:", infobarError);
+        return;
+      }
+
+      const { data: dismissalsData, error: dismissalsError } = await supabase
+        .from("admin_infobar_dismissals")
+        .select("infobar_id")
+        .eq("user_id", profileId);
+
+      if (dismissalsError) {
+        console.error("Błąd ładowania zamkniętych infobarów:", dismissalsError);
+      }
+
+      if (!active) return;
+
+      const dismissedIds = (dismissalsData || [])
+        .map((dismissal: { infobar_id: string | null }) => dismissal.infobar_id)
+        .filter(Boolean) as string[];
+
+      setClosedInfobarIds((current) => {
+        const nextClosedInfobarIds = Array.from(new Set([...current, ...dismissedIds]));
+        window.localStorage.setItem(
+          "ideasol_closed_infobars",
+          JSON.stringify(nextClosedInfobarIds)
+        );
+
+        return nextClosedInfobarIds;
+      });
+
+      const normalizedInfobars = ((infobarData || []) as InfobarRow[])
+        .filter(isInfobarActiveNow)
+        .map(normalizeInfobar)
+        .sort((first, second) => first.priority - second.priority);
+
+      setInfobars(normalizedInfobars);
+    }
+
+    loadInfobars();
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.id]);
+
+  async function closeInfobar(infobarId: string) {
+    setClosedInfobarIds((current) => {
+      const nextClosedInfobarIds = Array.from(new Set([...current, infobarId]));
+      window.localStorage.setItem(
+        "ideasol_closed_infobars",
+        JSON.stringify(nextClosedInfobarIds)
+      );
+
+      return nextClosedInfobarIds;
+    });
+
+    if (!profile?.id) return;
+
+    const { error } = await supabase.from("admin_infobar_dismissals").upsert(
+      {
+        infobar_id: infobarId,
+        user_id: profile.id,
+      },
+      {
+        onConflict: "infobar_id,user_id",
+      }
+    );
+
+    if (error) {
+      console.error("Błąd zapisu zamknięcia infobara:", error);
+    }
+  }
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("ideasol_theme");
     const initialTheme: ThemeMode =
@@ -413,7 +594,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
       setSearching(true);
       setSearchError(null);
 
-      const searchValue = trimmedSearch.toLowerCase();
+      const searchValue = normalizeSearchValue(trimmedSearch);
       const searchDigits = trimmedSearch.replace(/\D/g, "");
       const normalizedRole = String(profile.role || "seller").toLowerCase();
       const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
@@ -439,7 +620,13 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
         }
       }
 
-      let clientsQuery = supabase.from("clients").select("*").limit(300);
+      const clientsSelectColumns =
+        "id, full_name, company_name, email, phone, city, postal_code, address, assigned_user_id";
+
+      let clientsQuery = supabase
+        .from("clients")
+        .select(clientsSelectColumns)
+        .limit(2000);
 
       if (!canViewAllClients) {
         if (!allowedAssignedUserIds || allowedAssignedUserIds.length === 0) {
@@ -453,7 +640,10 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
       if (clientsResponse.error) {
         console.error("Błąd wyszukiwania CRM:", {
-          clients: clientsResponse.error,
+          message: clientsResponse.error.message,
+          details: clientsResponse.error.details,
+          hint: clientsResponse.error.hint,
+          code: clientsResponse.error.code,
         });
 
         setSearchError("Nie udało się wykonać wyszukiwania.");
@@ -472,30 +662,34 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
           );
 
       const accessibleClientIds = scopedClients.map((client) => client.id);
-      let salesResponse: { data: unknown[] | null; error: unknown } = {
-        data: [],
-        error: null,
-      };
+      let salesData: SearchableSale[] = [];
 
       if (canViewAllClients || accessibleClientIds.length > 0) {
-        let salesQuery = supabase.from("sales").select("*").limit(300);
+        const salesSelectVariants = [
+          "id, public_id, sale_id, sale_number, contract_number, client_id, event_id",
+          "id, public_id, sale_id, sale_number, client_id, event_id",
+          "id, public_id, client_id, event_id",
+          "id, client_id, event_id",
+          "id, client_id",
+        ];
 
-        if (!canViewAllClients) {
-          salesQuery = salesQuery.in("client_id", accessibleClientIds);
-        }
+          for (const salesSelectColumns of salesSelectVariants) {
+            let salesQuery = supabase
+              .from("sales")
+              .select(salesSelectColumns)
+              .limit(1000);
 
-        salesResponse = await salesQuery;
-      }
+            if (!canViewAllClients) {
+              salesQuery = salesQuery.in("client_id", accessibleClientIds.slice(0, 2000));
+            }
 
-      if (salesResponse.error) {
-        console.error("Błąd wyszukiwania CRM:", {
-          sales: salesResponse.error,
-        });
+            const salesResponse = await salesQuery;
 
-        setSearchError("Nie udało się wykonać wyszukiwania.");
-        setSearchResults([]);
-        setSearching(false);
-        return;
+            if (!salesResponse.error) {
+              salesData = (salesResponse.data || []) as unknown as SearchableSale[];
+              break;
+            }
+          }
       }
 
       const clientResults: SearchResult[] = scopedClients
@@ -512,18 +706,21 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
         .map((client) => ({
           id: client.id,
           type: "client",
-          public_id:
-            pickFirstString(client.public_id, client.lead_id, client.lead_number) || null,
-          title: client.company_name || client.full_name || client.name || "Klient",
+          public_id: pickFirstString(client.public_id) || null,
+          title: client.company_name || client.full_name || "Klient",
           subtitle:
-            [client.email || client.contact_email, client.phone || client.contact_phone]
+            [
+              client.email,
+              client.phone,
+              [client.postal_code, client.city].filter(Boolean).join(" "),
+            ]
               .filter(Boolean)
               .join(" • ") ||
-            pickFirstString(client.public_id, client.lead_id, client.lead_number) ||
+            pickFirstString(client.public_id) ||
             null,
         }));
 
-      const saleResults: SearchResult[] = ((salesResponse.data || []) as SearchableSale[])
+      const saleResults: SearchResult[] = salesData
         .filter((sale) => {
           const searchableText = getRecordSearchText(sale);
           const searchableDigits = getRecordSearchDigits(sale);
@@ -534,15 +731,22 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
           );
         })
         .slice(0, 8)
-        .map((sale) => ({
-          id: sale.id,
-          type: "sale",
-          public_id:
-            pickFirstString(sale.public_id, sale.sale_id, sale.sale_number) || null,
-          title:
-            pickFirstString(sale.public_id, sale.sale_id, sale.sale_number) || "Sprzedaż",
-          subtitle: "Karta sprzedaży",
-        }));
+        .map((sale) => {
+          const salePublicId = pickFirstString(
+            sale.public_id,
+            sale.sale_id,
+            sale.sale_number,
+            sale.contract_number
+          );
+
+          return {
+            id: sale.id,
+            type: "sale",
+            public_id: salePublicId,
+            title: salePublicId || "Sprzedaż",
+            subtitle: "Karta sprzedaży",
+          };
+        });
 
       setSearchResults([...clientResults, ...saleResults]);
       setSearching(false);
@@ -791,8 +995,50 @@ const canManageUsers = profile?.role === "admin";
 
   return (
     <>
+      {visibleInfobars.length > 0 && (
+        <div className="fixed left-0 right-0 top-0 z-[10000] shadow-lg">
+          {visibleInfobars.map((infobar) => (
+            <div
+              key={infobar.id}
+              className="border-b border-black/10 px-4 py-3"
+              style={{
+                backgroundColor: infobar.backgroundColor,
+                color: infobar.textColor,
+              }}
+            >
+              <div className="mx-auto flex max-w-7xl items-start justify-between gap-3">
+                {infobar.linkUrl ? (
+                  <a
+                    href={infobar.linkUrl}
+                    target={infobar.linkUrl.startsWith("http") ? "_blank" : undefined}
+                    rel={infobar.linkUrl.startsWith("http") ? "noopener noreferrer" : undefined}
+                    className="text-sm font-bold leading-snug underline-offset-4 transition hover:underline sm:text-base"
+                  >
+                    {infobar.message}
+                  </a>
+                ) : (
+                  <p className="text-sm font-bold leading-snug sm:text-base">
+                    {infobar.message}
+                  </p>
+                )}
 
-      <header className="mb-8 text-slate-900 lg:mb-10">
+                {infobar.dismissible && (
+                  <button
+                    type="button"
+                    onClick={() => closeInfobar(infobar.id)}
+                    className="-mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/20 transition hover:bg-black/35"
+                    aria-label="Zamknij komunikat"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <header className={`mb-8 text-slate-900 lg:mb-10 ${visibleInfobars.length > 0 ? "pt-24 sm:pt-16" : ""}`}>
       <div className="flex items-start justify-between gap-4 lg:items-center">
         <div className="min-w-0">
           <div className="flex items-center gap-3">

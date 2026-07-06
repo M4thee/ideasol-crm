@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -119,7 +119,15 @@ type ClientNote = {
 type UserRole = "owner" | "admin" | "cc" | "seller" | string;
 
 
+
 type Profile = {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  role: UserRole | null;
+};
+
+type MentionableUser = {
   id: string;
   display_name: string | null;
   email: string | null;
@@ -238,6 +246,10 @@ export default function ClientPage() {
   const [savingTag, setSavingTag] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState("");
+  const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null);
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+  const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   // removed phoneStatus, contactChannel, activityDescription, followUpAt
   const [savingActivity, setSavingActivity] = useState(false);
   const [showAllActivities, setShowAllActivities] = useState(false);
@@ -248,6 +260,7 @@ export default function ClientPage() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [assignableUsers, setAssignableUsers] = useState<Profile[]>([]);
   const [meetingAdvisors, setMeetingAdvisors] = useState<Profile[]>([]);
+  const [mentionableUsers, setMentionableUsers] = useState<MentionableUser[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [savingAssignment, setSavingAssignment] = useState(false);
@@ -274,6 +287,7 @@ export default function ClientPage() {
     loadClientCard();
     loadAssignmentData();
     loadMeetingAdvisors();
+    loadMentionableUsers();
   }, [clientId]);
 
   async function loadClientCard() {
@@ -696,6 +710,7 @@ export default function ClientPage() {
     );
   }
 
+
   async function loadMeetingAdvisors() {
     const { data, error } = await supabase
       .from("profiles")
@@ -711,6 +726,239 @@ export default function ClientPage() {
     }
 
     setMeetingAdvisors((data || []) as Profile[]);
+  }
+
+  async function loadMentionableUsers() {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name, email, role")
+      .eq("hidden_from_assignment", false)
+      .order("display_name", { ascending: true });
+
+    if (error) {
+      console.error("Błąd ładowania użytkowników do wzmianek:", error);
+      setMentionableUsers([]);
+      return;
+    }
+
+    setMentionableUsers((data || []) as MentionableUser[]);
+  }
+
+  function normalizeMentionText(value: string) {
+    return value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/ł/g, "l")
+      .replace(/[^a-z0-9@]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getMentionDisplayName(user: MentionableUser) {
+    return user.display_name || user.email || "Użytkownik";
+  }
+
+  function getMentionSuggestionMatches() {
+    const normalizedSearch = normalizeMentionText(mentionSearch.replace(/^@/, ""));
+
+    if (!showMentionSuggestions) return [];
+
+    return mentionableUsers
+      .filter((mentionableUser) => mentionableUser.id !== currentUserId)
+      .filter((mentionableUser) => {
+        const displayName = String(mentionableUser.display_name || "").trim();
+        const email = String(mentionableUser.email || "").trim();
+        const emailName = email.includes("@") ? email.split("@")[0] : email;
+        const searchableValue = normalizeMentionText(`${displayName} ${emailName} ${email}`);
+
+        if (!normalizedSearch) return true;
+
+        return searchableValue.includes(normalizedSearch);
+      })
+      .slice(0, 6);
+  }
+
+  function updateNoteDraft(value: string, cursorPosition?: number | null) {
+    setNewNote(value);
+
+    const position = cursorPosition ?? value.length;
+    const textBeforeCursor = value.slice(0, position);
+    const mentionMatch = textBeforeCursor.match(/(^|\s)@([\p{L}0-9._-]{0,40})$/u);
+
+    if (!mentionMatch) {
+      setShowMentionSuggestions(false);
+      setMentionSearch("");
+      setMentionStartIndex(null);
+      return;
+    }
+
+    const query = mentionMatch[2] || "";
+    const atIndex = position - query.length - 1;
+
+    setMentionSearch(query);
+    setMentionStartIndex(atIndex);
+    setShowMentionSuggestions(true);
+  }
+
+  function insertMentionIntoNote(mentionableUser: MentionableUser) {
+    if (mentionStartIndex === null) return;
+
+    const displayName = getMentionDisplayName(mentionableUser);
+    const mentionText = `@${displayName} `;
+    const textarea = noteTextareaRef.current;
+    const selectionEnd = textarea?.selectionEnd ?? newNote.length;
+    const nextNote = `${newNote.slice(0, mentionStartIndex)}${mentionText}${newNote.slice(selectionEnd)}`;
+    const nextCursorPosition = mentionStartIndex + mentionText.length;
+
+    setNewNote(nextNote);
+    setShowMentionSuggestions(false);
+    setMentionSearch("");
+    setMentionStartIndex(null);
+
+    window.requestAnimationFrame(() => {
+      noteTextareaRef.current?.focus();
+      noteTextareaRef.current?.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
+  }
+
+  function renderNoteContentWithMentions(content: string) {
+    if (!content) return null;
+
+    const mentionNames = mentionableUsers
+      .map((mentionableUser) => getMentionDisplayName(mentionableUser))
+      .filter((name) => name && name !== "Użytkownik")
+      .sort((firstName, secondName) => secondName.length - firstName.length);
+
+    if (mentionNames.length === 0) return content;
+
+    const escapedMentionNames = mentionNames.map((name) =>
+      name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    );
+    const mentionRegex = new RegExp(`@(${escapedMentionNames.join("|")})`, "g");
+    const parts = content.split(mentionRegex);
+
+    return parts.map((part, index) => {
+      const isMention = mentionNames.includes(part);
+
+      if (!isMention) return <span key={`${part}-${index}`}>{part}</span>;
+
+      return (
+        <span
+          key={`${part}-${index}`}
+          className="rounded-md bg-[#119182]/10 px-1.5 py-0.5 font-bold text-[#0f7f72]"
+        >
+          @{part}
+        </span>
+      );
+    });
+  }
+
+  function findMentionedUsers(noteContent: string, currentAuthorId?: string | null) {
+    const normalizedContent = normalizeMentionText(noteContent);
+
+    return mentionableUsers.filter((mentionableUser) => {
+      if (!mentionableUser.id || mentionableUser.id === currentAuthorId) return false;
+
+      const displayName = String(mentionableUser.display_name || "").trim();
+      const email = String(mentionableUser.email || "").trim();
+      const emailName = email.includes("@") ? email.split("@")[0] : email;
+      const possibleNames = [displayName, emailName]
+        .map((value) => normalizeMentionText(value))
+        .filter((value) => value.length >= 3);
+
+      return possibleNames.some((name) => normalizedContent.includes(`@${name}`));
+    });
+  }
+
+  async function createNoteMentionNotifications(params: {
+    noteId: string;
+    noteContent: string;
+    mentionedByUserId: string;
+    mentionedByName: string;
+  }) {
+    const mentionedUsers = findMentionedUsers(
+      params.noteContent,
+      params.mentionedByUserId
+    );
+
+    if (mentionedUsers.length === 0) return;
+
+    const clientNameForNotification = client?.full_name || client?.company_name || "kliencie";
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      "https://crm.ideasol.pl";
+    const noteUrl = `${appUrl.replace(/\/$/, "")}/clients/${clientId}#note-${params.noteId}`;
+
+    for (const mentionedUser of mentionedUsers) {
+      const { error: mentionError } = await supabase
+        .from("client_note_mentions")
+        .upsert(
+          {
+            client_id: clientId,
+            note_id: params.noteId,
+            mentioned_user_id: mentionedUser.id,
+            mentioned_by_user_id: params.mentionedByUserId,
+          },
+          {
+            onConflict: "note_id,mentioned_user_id",
+          }
+        );
+
+      if (mentionError) {
+        console.error("Błąd zapisu wzmianki w notatce:", mentionError);
+      }
+
+      const notificationBody = `Użytkownik ${params.mentionedByName} wspomniał o Tobie w notatce na kliencie ${clientNameForNotification}. Kliknij, aby przejść na kartę klienta.`;
+
+      const { error: notificationError } = await supabase.rpc("create_notification", {
+        p_user_id: mentionedUser.id,
+        p_title: "Wspomniano o Tobie w notatce",
+        p_body: notificationBody,
+        p_client_id: clientId,
+      });
+
+      if (notificationError) {
+        console.error("Błąd tworzenia powiadomienia o wzmiance:", notificationError);
+      }
+
+      try {
+        const teamsResponse = await fetch("/api/teams/send-notification", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: mentionedUser.id,
+            userEmail: mentionedUser.email,
+            mentionedByName: params.mentionedByName,
+            clientName: clientNameForNotification,
+            noteUrl,
+          }),
+        });
+ 
+        if (!teamsResponse.ok) {
+          const teamsErrorText = await teamsResponse.text().catch(() => "");
+          let teamsErrorBody: unknown = teamsErrorText;
+
+          try {
+            teamsErrorBody = teamsErrorText ? JSON.parse(teamsErrorText) : null;
+          } catch {
+            teamsErrorBody = teamsErrorText;
+          }
+
+          console.error("Błąd odpowiedzi endpointu Teams o wzmiance:", {
+            status: teamsResponse.status,
+            body: teamsErrorBody,
+          });
+        }
+      } catch (teamsError) {
+        console.error("Błąd wysyłki powiadomienia Teams o wzmiance:", teamsError);
+      }
+    }
+
+    window.dispatchEvent(new Event("ideasol-notifications-refresh"));
   }
 
   function canAssignClient() {
@@ -778,6 +1026,55 @@ export default function ClientPage() {
     return date.toISOString();
   }
 
+  async function sendMeetingConfirmationSms(calendarEventId: string) {
+    const trimmedCalendarEventId = String(calendarEventId || "").trim();
+
+    if (!trimmedCalendarEventId) return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        console.warn("Pominięto SMS potwierdzający spotkanie - brak aktywnej sesji użytkownika.");
+        return;
+      }
+
+      const response = await fetch("/api/sms/meeting-confirmation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          calendarEventId: trimmedCalendarEventId,
+        }),
+      });
+
+      const responseText = await response.text().catch(() => "");
+      let responseBody: unknown = responseText;
+
+      try {
+        responseBody = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        responseBody = responseText;
+      }
+
+      if (!response.ok) {
+        console.error("Błąd odpowiedzi endpointu SMS potwierdzenia spotkania:", {
+          status: response.status,
+          body: responseBody,
+        });
+        return;
+      }
+
+      console.log("SMS potwierdzający spotkanie obsłużony:", responseBody);
+    } catch (error) {
+      console.error("Nie udało się wywołać SMS potwierdzającego spotkanie:", error);
+    }
+  }
+
   async function syncClientMeetingToOutlook(params: {
     calendarEventId: string;
     title: string;
@@ -789,6 +1086,8 @@ export default function ClientPage() {
     advisorEmail: string | null;
   }) {
     const syncUserEmail = params.advisorEmail;
+
+    await sendMeetingConfirmationSms(params.calendarEventId);
 
     if (!syncUserEmail) {
       await supabase
@@ -832,26 +1131,17 @@ export default function ClientPage() {
         throw new Error(result?.error || "Nie udało się utworzyć wydarzenia Outlook.");
       }
 
-      await supabase
-        .from("calendar_events")
-        .update({
-          microsoft_event_id: result.microsoftEventId || result.eventId || null,
-          microsoft_sync_status: "synced",
-          microsoft_sync_error: null,
-          microsoft_synced_at: new Date().toISOString(),
-        })
-        .eq("id", params.calendarEventId);
+      console.log("Outlook event utworzony dla spotkania z karty klienta:", {
+        calendarEventId: params.calendarEventId,
+        microsoftEventId: result.microsoftEventId || result.eventId || null,
+      });
     } catch (error) {
       console.error("Nie udało się zsynchronizować spotkania klienta z Outlook:", error);
 
-      await supabase
-        .from("calendar_events")
-        .update({
-          microsoft_sync_status: "sync_failed",
-          microsoft_sync_error:
-            error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
-        })
-        .eq("id", params.calendarEventId);
+      console.warn("Pominięto zapis błędu synchronizacji Outlook w calendar_events:", {
+        calendarEventId: params.calendarEventId,
+        error: error instanceof Error ? error.message : "Nieznany błąd synchronizacji Outlook.",
+      });
     }
   }
 
@@ -1065,15 +1355,30 @@ export default function ClientPage() {
       authorEmail = noteAuthorData?.email || null;
     }
 
+    const createdNote = data as ClientNote;
+
     setNotes((currentNotes) => [
       {
-        ...(data as ClientNote),
+        ...createdNote,
         author_name: authorName,
         author_email: authorEmail,
       },
       ...currentNotes,
     ]);
+
+    if (user?.id) {
+      await createNoteMentionNotifications({
+        noteId: createdNote.id,
+        noteContent: trimmedNote,
+        mentionedByUserId: user.id,
+        mentionedByName: authorName,
+      });
+    }
+
     setNewNote("");
+    setShowMentionSuggestions(false);
+    setMentionSearch("");
+    setMentionStartIndex(null);
     setSavingNote(false);
   }
   async function addContactActivity(payload: ContactFormPayload) {
@@ -1741,12 +2046,41 @@ export default function ClientPage() {
                       NOTATKI NA KLIENCIE
                     </h3>
 
-                    <textarea
-                      value={newNote}
-                      onChange={(event) => setNewNote(event.target.value)}
-                      placeholder="Dodaj nową notatkę..."
-                      className="min-h-[78px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
-                    />
+                    <div className="relative">
+                      <textarea
+                        ref={noteTextareaRef}
+                        value={newNote}
+                        onChange={(event) =>
+                          updateNoteDraft(event.target.value, event.target.selectionStart)
+                        }
+                        onKeyUp={(event) =>
+                          updateNoteDraft(event.currentTarget.value, event.currentTarget.selectionStart)
+                        }
+                        onClick={(event) =>
+                          updateNoteDraft(event.currentTarget.value, event.currentTarget.selectionStart)
+                        }
+                        placeholder="Dodaj nową notatkę... Wpisz @, aby oznaczyć użytkownika"
+                        className="min-h-[78px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 outline-none transition focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                      />
+
+                      {showMentionSuggestions && getMentionSuggestionMatches().length > 0 && (
+                        <div className="absolute left-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                          <div className="border-b border-slate-100 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-400">
+                            Oznacz
+                          </div>
+                          {getMentionSuggestionMatches().map((mentionableUser) => (
+                            <button
+                              key={mentionableUser.id}
+                              type="button"
+                              onClick={() => insertMentionIntoNote(mentionableUser)}
+                              className="block w-full truncate border-b border-slate-100 px-2.5 py-1.5 text-left text-sm font-bold text-slate-900 transition last:border-b-0 hover:bg-slate-50"
+                            >
+                              @{getMentionDisplayName(mentionableUser)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     <div className="flex justify-end">
                       <button
@@ -1767,8 +2101,9 @@ export default function ClientPage() {
                       ) : (
                         notes.map((note) => (
                           <div
+                            id={`note-${note.id}`}
                             key={note.id}
-                            className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-[#119182] hover:shadow-[0_10px_22px_rgba(17,145,130,0.10)] dark:border-slate-700 dark:bg-slate-950"
+                            className="scroll-mt-32 group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-[#119182] hover:shadow-[0_10px_22px_rgba(17,145,130,0.10)] target:border-[#119182] target:ring-4 target:ring-[#119182]/20 dark:border-slate-700 dark:bg-slate-950"
                           >
                             <div className="flex flex-col gap-1 border-b border-[#9EECEF] bg-[#BDF6F9] px-3 py-1.5 transition-colors duration-200 group-hover:border-[#119182]/40 group-hover:bg-[#9FECEF] dark:border-slate-700 dark:bg-slate-800 dark:group-hover:border-slate-600 dark:group-hover:bg-slate-800 sm:flex-row sm:items-center sm:justify-between">
                               <div>
@@ -1783,7 +2118,7 @@ export default function ClientPage() {
                             </div>
 
                             <div className="whitespace-pre-line bg-slate-100 p-3 text-[13px] leading-6 text-slate-800 transition-colors duration-200 group-hover:bg-slate-200 dark:bg-slate-950 dark:text-slate-100 dark:group-hover:bg-slate-900">
-                              {note.content}
+                              {renderNoteContentWithMentions(note.content)}
                             </div>
                           </div>
                         ))

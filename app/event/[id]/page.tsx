@@ -874,6 +874,8 @@ async function reassignEventOwner() {
     }
 
     if (needsReminder) {
+      const reminderEventAt = localDateTimeToIso(taskReminderAt);
+
       const { error: reminderError } = await supabase.from("calendar_events").insert({
         client_id: event.client_id,
         title: `Ponowny kontakt: ${taskPhoneStatus}`,
@@ -881,9 +883,10 @@ async function reassignEventOwner() {
           description ||
           `Poprzedni status telefonu: ${taskPhoneStatus}. Kontakt marketingowy.`,
         event_type: "reminder",
-        event_at: taskReminderAt,
+        event_at: reminderEventAt,
         status: "planned",
         created_by: user?.id || null,
+        assigned_user_id: user?.id || null,
       });
 
       if (reminderError) {
@@ -1172,7 +1175,7 @@ async function reassignEventOwner() {
           event_at: nextEventAt,
           status: "planned",
           created_by: nextEventOwnerId,
-          assigned_user_id: nextContactType === "meeting" ? nextEventOwnerId : null,
+          assigned_user_id: nextEventOwnerId,
         })
         .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
         .single();
