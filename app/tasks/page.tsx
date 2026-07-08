@@ -215,6 +215,62 @@ export default function TasksPage() {
       ...new Set(activeReminders.map((item) => item.client_id).filter(Boolean)),
     ];
 
+    const earliestReminderAt = activeReminders.reduce<string | null>((earliest, item) => {
+      if (!item.event_at) return earliest;
+      if (!earliest) return item.event_at;
+      return new Date(item.event_at).getTime() < new Date(earliest).getTime()
+        ? item.event_at
+        : earliest;
+    }, null);
+
+    const { data: contactEventsData, error: contactEventsError } =
+      clientIds.length > 0 && earliestReminderAt
+        ? await supabase
+            .from("calendar_events")
+            .select("id, client_id, event_at, event_type, status")
+            .in("client_id", clientIds)
+            .in("event_type", ["meeting", "phone_call", "reminder"])
+            .gte("event_at", earliestReminderAt)
+        : { data: [], error: null };
+
+    if (contactEventsError) {
+      console.error("Błąd sprawdzania późniejszych kontaktów dla zadań", contactEventsError);
+    }
+
+    const laterContactExistsByReminderId = new Set<string>();
+
+    for (const reminder of activeReminders) {
+      if (!reminder.client_id || !reminder.event_at) continue;
+
+      const reminderTime = new Date(reminder.event_at).getTime();
+      if (Number.isNaN(reminderTime)) continue;
+
+      const hasLaterContact = (contactEventsData || []).some((event) => {
+        if (!event.client_id || event.client_id !== reminder.client_id) return false;
+        if (event.id === reminder.id) return false;
+        if (isCompletedReminderStatus(event.status)) return false;
+
+        const eventTime = new Date(event.event_at).getTime();
+        if (Number.isNaN(eventTime)) return false;
+
+        return eventTime > reminderTime;
+      });
+
+      if (hasLaterContact) {
+        laterContactExistsByReminderId.add(reminder.id);
+      }
+    }
+
+    const visibleReminders = activeReminders.filter(
+      (item) => !laterContactExistsByReminderId.has(item.id)
+    );
+
+    if (visibleReminders.length === 0) {
+      setReminders([]);
+      setLoading(false);
+      return;
+    }
+
     const { data: clientsData, error: clientsError } = clientIds.length > 0
       ? await supabase
           .from("clients")
@@ -234,7 +290,7 @@ export default function TasksPage() {
     );
 
     const ownerIds = [
-      ...new Set(activeReminders.map((item) => item.created_by).filter(Boolean)),
+      ...new Set(visibleReminders.map((item) => item.created_by).filter(Boolean)),
     ];
 
     const { data: ownersData, error: ownersError } = ownerIds.length > 0
@@ -256,7 +312,7 @@ export default function TasksPage() {
     );
 
     setReminders(
-      activeReminders.map((item) => ({
+      visibleReminders.map((item) => ({
         ...item,
         client_name: clientsById.get(item.client_id) || "Klient",
         owner_name: item.created_by

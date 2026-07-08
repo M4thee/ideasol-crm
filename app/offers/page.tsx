@@ -153,7 +153,7 @@ function OffersPageContent() {
   if (profile.is_active === false) return false;
 
   const normalizedRole = String(profile.role || "").toLowerCase();
-  return ["seller", "manager", "owner", "admin"].includes(normalizedRole) || !!userIds?.includes(profile.id);
+  return ["seller", "manager", "owner", "admin", "cc"].includes(normalizedRole) || !!userIds?.includes(profile.id);
 })
       .map((profile) => ({
         id: profile.id,
