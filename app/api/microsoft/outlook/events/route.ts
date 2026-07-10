@@ -49,6 +49,16 @@ function formatMultilineText(value: string) {
   return escapeHtml(value.trim()).replaceAll("\n", "<br />");
 }
 
+function formatMeetingDateTime(startDateTime?: string, timeZone?: string) {
+  if (!startDateTime) return "Brak terminu";
+
+  return new Date(startDateTime).toLocaleString("pl-PL", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: timeZone || "Europe/Warsaw",
+  });
+}
+
 function buildOutlookBody(payload: CreateOutlookEventPayload) {
   const rows = [
     payload.clientName
@@ -75,12 +85,7 @@ function buildOutlookBody(payload: CreateOutlookEventPayload) {
 }
 
 function buildTeamsMessage(payload: CreateOutlookEventPayload) {
-  const meetingDate = payload.startDateTime
-    ? new Date(payload.startDateTime).toLocaleString("pl-PL", {
-        dateStyle: "short",
-        timeStyle: "short",
-      })
-    : "Brak terminu";
+  const meetingDate = formatMeetingDateTime(payload.startDateTime, payload.timeZone);
 
   return [
     "📅 Nowe spotkanie CRM",
@@ -101,10 +106,7 @@ function buildTeamsMessage(payload: CreateOutlookEventPayload) {
 
 function buildRemovedMeetingTeamsMessage(payload: CreateOutlookEventPayload) {
   const meetingDate = payload.startDateTime
-    ? new Date(payload.startDateTime).toLocaleString("pl-PL", {
-        dateStyle: "short",
-        timeStyle: "short",
-      })
+    ? formatMeetingDateTime(payload.startDateTime, payload.timeZone)
     : "brak terminu";
 
   const clientName = payload.clientName?.trim() || "klientem";
