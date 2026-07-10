@@ -1,10 +1,5 @@
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
-import {
-  sendTeamsDelegatedDirectCalendarNotification,
-  sendTeamsDirectCalendarNotification,
-} from "@/lib/microsoftTeams";
 
 export const runtime = "nodejs";
 
@@ -102,23 +97,6 @@ function normalizeNameForMatch(value: string | null | undefined): string {
     .trim();
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  errorMessage: string
-): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-}
 
 function escapeHtml(value: string) {
   return value
@@ -316,8 +294,7 @@ async function resolveAdvisorProfile(
 ): Promise<AssignedAdvisor | null> {
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, email, display_name, name, username")
-    .eq("is_active", true);
+    .select("id, email, display_name, name, username");
 
   if (error) {
     console.error(`WWW lead advisor profile lookup failed for ${advisorName}`, error);
@@ -434,56 +411,6 @@ async function assignAdvisorByPostalCode(
   };
 }
 
-async function sendTeamsDelegatedChatMessage({
-  chatId,
-  message,
-  accessToken,
-}: {
-  chatId: string;
-  message: string;
-  accessToken: string;
-}) {
-  const response = await fetch(
-    `https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(chatId)}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        body: {
-          contentType: "html",
-          content: message.replaceAll("\n", "<br />"),
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Teams chat notification failed: ${response.status} ${errorText}`);
-  }
-}
-
-async function resolveTeamsRecipientEmail(supabase: SupabaseClient) {
-  if (WWW_LEAD_TEST_TEAMS_EMAIL) {
-    return WWW_LEAD_TEST_TEAMS_EMAIL;
-  }
-
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("email")
-    .ilike("display_name", "%Mateusz%Rapczewski%")
-    .maybeSingle();
-
-  if (error) {
-    console.error("WWW lead Mateusz profile lookup failed", error);
-    return "";
-  }
-
-  return typeof data?.email === "string" ? data.email : "";
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -652,100 +579,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const testTeamsRecipientEmail = await resolveTeamsRecipientEmail(supabase);
-    console.info("WWW lead assignment result", {
-      postalCode,
-      assignedUserId: assignedAdvisor?.id || null,
-      assignedAdvisor: assignedAdvisor?.displayName || null,
-      assignedAdvisorEmail: assignedAdvisor?.email || null,
-      distanceKm:
-        typeof assignedAdvisor?.distanceKm === "number"
-          ? Math.round(assignedAdvisor.distanceKm * 10) / 10
-          : null,
-    });
-    const boardChatId = WWW_LEAD_TEST_TEAMS_EMAIL
-      ? WWW_LEAD_TEST_BOARD_CHAT_ID
-      : WWW_LEAD_BOARD_CHAT_ID;
-    const teamsMessage = buildTeamsText(payload, clientId || undefined, assignedAdvisor);
-    const boardTeamsMessage = buildBoardTeamsText(payload, clientId || undefined, assignedAdvisor);
-
-    after(async () => {
-      try {
-        const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
-        let delegatedAccessToken = "";
-
-        if (delegatedRefreshToken) {
-          const delegatedToken = await withTimeout(
-            refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken),
-            4000,
-            "Timeout odświeżania tokenu Microsoft Graph dla leada WWW."
-          );
-          delegatedAccessToken = delegatedToken.access_token || "";
-        }
-
-        if (WWW_LEAD_TEST_TEAMS_EMAIL) {
-          if (delegatedAccessToken) {
-            await withTimeout(
-              sendTeamsDelegatedDirectCalendarNotification({
-                userEmail: testTeamsRecipientEmail,
-                message: teamsMessage,
-                accessToken: delegatedAccessToken,
-              }),
-              4000,
-              "Timeout wysyłki prywatnego Teams dla testowego leada WWW."
-            );
-          } else {
-            await withTimeout(
-              sendTeamsDirectCalendarNotification({
-                userEmail: testTeamsRecipientEmail,
-                message: teamsMessage,
-              }),
-              4000,
-              "Timeout wysyłki prywatnego Teams app-only dla testowego leada WWW."
-            );
-          }
-        } else if (assignedAdvisor?.email) {
-          if (delegatedAccessToken) {
-            await withTimeout(
-              sendTeamsDelegatedDirectCalendarNotification({
-                userEmail: assignedAdvisor.email,
-                message: teamsMessage,
-                accessToken: delegatedAccessToken,
-              }),
-              4000,
-              "Timeout wysyłki prywatnego Teams dla doradcy leada WWW."
-            );
-          } else {
-            await withTimeout(
-              sendTeamsDirectCalendarNotification({
-                userEmail: assignedAdvisor.email,
-                message: teamsMessage,
-              }),
-              4000,
-              "Timeout wysyłki prywatnego Teams app-only dla doradcy leada WWW."
-            );
-          }
-        } else {
-          console.warn("WWW lead assigned advisor email not found; skipping advisor notification.");
-        }
-
-        if (delegatedAccessToken) {
-          await withTimeout(
-            sendTeamsDelegatedChatMessage({
-              chatId: boardChatId,
-              message: boardTeamsMessage,
-              accessToken: delegatedAccessToken,
-            }),
-            4000,
-            "Timeout wysyłki Teams na czat zarządu/testowy dla leada WWW."
-          );
-        } else {
-          console.warn("WWW lead board chat notification skipped: missing delegated access token.");
-        }
-      } catch (teamsError) {
-        console.error("WWW lead Teams delegated notification failed", teamsError);
-      }
-    });
+    // Teams notification temporarily disabled for stabilization.
 
     return NextResponse.json(
       {
@@ -759,10 +593,7 @@ export async function POST(request: NextRequest) {
           typeof assignedAdvisor?.distanceKm === "number"
             ? Math.round(assignedAdvisor.distanceKm * 10) / 10
             : null,
-        teams_queued: true,
-        teams_test_recipient_email: WWW_LEAD_TEST_TEAMS_EMAIL ? testTeamsRecipientEmail || null : null,
-        teams_advisor_email: assignedAdvisor?.email || null,
-        teams_board_chat_id: boardChatId,
+        teams_disabled_temporarily: true,
       },
       { status: existingClientId ? 200 : 201 }
     );
