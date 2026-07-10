@@ -46,6 +46,7 @@ type AssignedAdvisor = {
   id: string;
   email: string | null;
   displayName: string;
+  distanceKm?: number;
 };
 
 const ADVISOR_POSTAL_CODES: AdvisorLocation[] = [
@@ -326,7 +327,10 @@ async function assignAdvisorByPostalCode(
     allowPrefixFallback: true,
   });
 
-  if (!leadLocation?.latitude || !leadLocation?.longitude) return null;
+  if (!leadLocation?.latitude || !leadLocation?.longitude) {
+    console.warn(`WWW lead advisor assignment skipped: location not found for ${postalCode}`);
+    return null;
+  }
 
   const advisorDistances = await Promise.all(
     ADVISOR_POSTAL_CODES.map(async (advisor) => {
@@ -334,7 +338,12 @@ async function assignAdvisorByPostalCode(
         allowPrefixFallback: true,
       });
 
-      if (!advisorLocation?.latitude || !advisorLocation?.longitude) return null;
+      if (!advisorLocation?.latitude || !advisorLocation?.longitude) {
+        console.warn(
+          `WWW lead advisor base location not found for ${advisor.advisorName} (${advisor.postalCode})`
+        );
+        return null;
+      }
 
       return {
         advisorName: advisor.advisorName,
@@ -348,13 +357,32 @@ async function assignAdvisorByPostalCode(
     })
   );
 
-  const nearestAdvisor = advisorDistances
+  const sortedAdvisors = advisorDistances
     .filter((advisor): advisor is { advisorName: string; distanceKm: number } => Boolean(advisor))
-    .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    .sort((a, b) => a.distanceKm - b.distanceKm);
 
-  if (!nearestAdvisor?.advisorName) return null;
+  console.info(
+    "WWW lead advisor distance ranking",
+    sortedAdvisors.map((advisor) => ({
+      advisorName: advisor.advisorName,
+      distanceKm: Math.round(advisor.distanceKm * 10) / 10,
+    }))
+  );
 
-  return resolveAdvisorProfile(supabase, nearestAdvisor.advisorName);
+  for (const advisor of sortedAdvisors) {
+    const profile = await resolveAdvisorProfile(supabase, advisor.advisorName);
+
+    if (profile) {
+      return {
+        ...profile,
+        distanceKm: advisor.distanceKm,
+      };
+    }
+
+    console.warn(`WWW lead nearest advisor has no matched profile: ${advisor.advisorName}`);
+  }
+
+  return null;
 }
 
 async function sendTeamsDelegatedChatMessage({
@@ -636,6 +664,10 @@ export async function POST(request: NextRequest) {
         duplicate: Boolean(existingClientId),
         assigned_user_id: assignedAdvisor?.id || null,
         assigned_advisor: assignedAdvisor?.displayName || null,
+        assigned_distance_km:
+          typeof assignedAdvisor?.distanceKm === "number"
+            ? Math.round(assignedAdvisor.distanceKm * 10) / 10
+            : null,
         teams_sent: teamsSent,
         teams_test_recipient_email: WWW_LEAD_TEST_TEAMS_EMAIL ? testTeamsRecipientEmail || null : null,
         teams_advisor_sent: teamsAdvisorSent,
