@@ -23,6 +23,10 @@ type WwwLeadPayload = {
   message?: string;
   province?: string;
   postal_code?: string;
+  postalCode?: string;
+  postcode?: string;
+  zip?: string;
+  kod_pocztowy?: string;
   products?: string[];
   page_url?: string;
   user_agent?: string;
@@ -460,8 +464,11 @@ export async function POST(request: NextRequest) {
     const fullName = cleanText(payload.name);
     const email = cleanText(payload.email).toLowerCase();
     const phone = normalizePhone(payload.phone);
-    const postalCode = cleanText(payload.postal_code);
+    const postalCode = cleanDetectedPostalCode(
+      payload.postal_code || payload.postalCode || payload.postcode || payload.zip || payload.kod_pocztowy
+    );
     const province = cleanText(payload.province);
+    payload.postal_code = postalCode || cleanText(payload.postal_code);
     const note = buildLeadNote(payload);
 
     if (!fullName && !email && !phone) {
@@ -662,6 +669,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         client_id: clientId,
         duplicate: Boolean(existingClientId),
+        postal_code_received: postalCode || null,
         assigned_user_id: assignedAdvisor?.id || null,
         assigned_advisor: assignedAdvisor?.displayName || null,
         assigned_distance_km:
