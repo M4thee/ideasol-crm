@@ -75,6 +75,15 @@ function cleanDetectedPostalCode(value: unknown) {
   return `${match[1]}-${match[2]}`;
 }
 
+function normalizeNameForMatch(value: string | null | undefined): string {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -269,29 +278,42 @@ async function resolveAdvisorProfile(
   supabase: SupabaseClient,
   advisorName: string
 ): Promise<AssignedAdvisor | null> {
-  const [firstName, ...lastNameParts] = advisorName.split(" ");
-  const lastName = lastNameParts.join(" ");
-
-  const { data, error } = await supabase
+  const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, email, display_name, name, username")
-    .ilike("display_name", `%${firstName}%${lastName}%`)
-    .maybeSingle();
+    .select("id, email, display_name, name, username");
 
   if (error) {
     console.error(`WWW lead advisor profile lookup failed for ${advisorName}`, error);
     return null;
   }
 
-  if (!data?.id) return null;
+  const normalizedAdvisorName = normalizeNameForMatch(advisorName);
+
+  const matchedProfile = (profiles || []).find((profile) => {
+    const candidates = [
+      profile.display_name,
+      profile.name,
+      profile.username,
+      profile.email,
+    ]
+      .filter(Boolean)
+      .map((value) => normalizeNameForMatch(String(value)));
+
+    return candidates.some((candidate) => candidate.includes(normalizedAdvisorName));
+  });
+
+  if (!matchedProfile?.id) {
+    console.warn(`WWW lead advisor profile not matched for ${advisorName}`);
+    return null;
+  }
 
   return {
-    id: data.id,
-    email: typeof data.email === "string" ? data.email : null,
+    id: matchedProfile.id,
+    email: typeof matchedProfile.email === "string" ? matchedProfile.email : null,
     displayName:
-      (typeof data.display_name === "string" && data.display_name) ||
-      (typeof data.name === "string" && data.name) ||
-      (typeof data.username === "string" && data.username) ||
+      (typeof matchedProfile.display_name === "string" && matchedProfile.display_name) ||
+      (typeof matchedProfile.name === "string" && matchedProfile.name) ||
+      (typeof matchedProfile.username === "string" && matchedProfile.username) ||
       advisorName,
   };
 }
@@ -327,8 +349,8 @@ async function assignAdvisorByPostalCode(
   );
 
   const nearestAdvisor = advisorDistances
-    .filter(Boolean)
-    .sort((a, b) => (a?.distanceKm || 0) - (b?.distanceKm || 0))[0];
+    .filter((advisor): advisor is { advisorName: string; distanceKm: number } => Boolean(advisor))
+    .sort((a, b) => a.distanceKm - b.distanceKm)[0];
 
   if (!nearestAdvisor?.advisorName) return null;
 
@@ -438,11 +460,12 @@ export async function POST(request: NextRequest) {
     ].filter(Boolean);
 
     let existingClientId: string | null = null;
+    let duplicateClient: { id?: string; assigned_user_id?: string; status?: string } | null = null;
 
     if (duplicateFilters.length > 0) {
-      const { data: duplicateClient, error: duplicateError } = await supabase
+      const { data, error: duplicateError } = await supabase
         .from("clients")
-        .select("id")
+        .select("id, assigned_user_id, status")
         .or(duplicateFilters.join(","))
         .maybeSingle();
 
@@ -450,10 +473,28 @@ export async function POST(request: NextRequest) {
         console.error("WWW lead duplicate check failed", duplicateError);
       }
 
+      duplicateClient = data || null;
       existingClientId = duplicateClient?.id || null;
     }
 
     let clientId = existingClientId;
+
+    const existingClientNeedsAssignment =
+      Boolean(existingClientId) && assignedAdvisor && !duplicateClient?.assigned_user_id;
+
+    if (existingClientNeedsAssignment) {
+      const { error: assignmentError } = await supabase
+        .from("clients")
+        .update({
+          assigned_user_id: assignedAdvisor.id,
+          status: "Przypisany",
+        })
+        .eq("id", existingClientId);
+
+      if (assignmentError) {
+        console.error("WWW lead existing client assignment failed", assignmentError);
+      }
+    }
 
     if (!clientId) {
       const { data: createdClient, error: clientError } = await supabase
