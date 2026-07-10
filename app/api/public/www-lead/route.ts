@@ -44,9 +44,30 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+
 function displayValue(value?: string | null) {
   const normalizedValue = value?.trim();
   return normalizedValue ? escapeHtml(normalizedValue) : "brak danych";
+}
+
+function buildLeadNote(payload: WwwLeadPayload) {
+  const products = Array.isArray(payload.products)
+    ? payload.products.filter(Boolean).join(", ")
+    : "";
+
+  return [
+    "Lead z formularza WWW — Jestem zainteresowany instalacją.",
+    payload.client_type ? `Typ klienta: ${payload.client_type}` : "",
+    payload.province ? `Województwo: ${payload.province}` : "",
+    payload.postal_code ? `Kod pocztowy: ${payload.postal_code}` : "",
+    products ? `Produkty: ${products}` : "",
+    payload.message ? `Wiadomość: ${payload.message}` : "",
+    payload.page_url ? `Źródło strony: ${payload.page_url}` : "",
+    payload.ip ? `IP: ${payload.ip}` : "",
+    payload.user_agent ? `User-Agent: ${payload.user_agent}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildTeamsText(payload: WwwLeadPayload, clientId?: string) {
@@ -125,6 +146,7 @@ export async function POST(request: NextRequest) {
     const phone = normalizePhone(payload.phone);
     const postalCode = cleanText(payload.postal_code);
     const province = cleanText(payload.province);
+    const note = buildLeadNote(payload);
 
     if (!fullName && !email && !phone) {
       return NextResponse.json(
@@ -171,7 +193,7 @@ export async function POST(request: NextRequest) {
           email: email || null,
           phone: phone || null,
           postal_code: postalCode || null,
-          city: province || null,
+          province: province || null,
           status: "Nowy lead",
           lead_source: "WWW",
         })
@@ -209,11 +231,12 @@ export async function POST(request: NextRequest) {
 
     if (clientId && tagData?.id) {
       const { error: relationError } = await supabase
-        .from("client_tag_assignments")
+        .from("client_tag_links")
         .upsert(
           {
             client_id: clientId,
             tag_id: tagData.id,
+            created_by: null,
           },
           { onConflict: "client_id,tag_id" }
         );
@@ -223,7 +246,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (clientId && !existingClientId && note) {
+      const { error: noteError } = await supabase
+        .from("client_notes")
+        .insert({
+          client_id: clientId,
+          content: note,
+          created_by: null,
+        });
+
+      if (noteError) {
+        console.error("WWW lead note insert failed", noteError);
+      }
+    }
+
     const teamsRecipientEmail = await resolveTeamsRecipientEmail(supabase);
+    let teamsSent = false;
+    let teamsErrorMessage: string | null = null;
 
     if (teamsRecipientEmail) {
       try {
@@ -231,8 +270,10 @@ export async function POST(request: NextRequest) {
           userEmail: teamsRecipientEmail,
           message: buildTeamsText(payload, clientId || undefined),
         });
+        teamsSent = true;
       } catch (teamsError) {
         console.error("WWW lead Teams direct notification failed", teamsError);
+        teamsErrorMessage = teamsError instanceof Error ? teamsError.message : String(teamsError);
       }
     } else {
       console.warn("WWW lead Teams recipient email not found; skipping direct notification.");
@@ -243,6 +284,9 @@ export async function POST(request: NextRequest) {
         ok: true,
         client_id: clientId,
         duplicate: Boolean(existingClientId),
+        teams_sent: teamsSent,
+        teams_recipient_email: teamsRecipientEmail || null,
+        teams_error: teamsErrorMessage,
       },
       { status: existingClientId ? 200 : 201 }
     );
