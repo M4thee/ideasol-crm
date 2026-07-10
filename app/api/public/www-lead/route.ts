@@ -71,6 +71,14 @@ const ADVISOR_EMAIL_BY_NAME: Record<string, string> = {
   "Aleksandra Jachowicz": "aleksandra.jachowicz@ideasol.pl",
 };
 
+const ADVISOR_NAME_BY_EMAIL: Record<string, string> = Object.entries(ADVISOR_EMAIL_BY_NAME).reduce(
+  (acc, [advisorName, advisorEmail]) => {
+    acc[advisorEmail.toLowerCase()] = advisorName;
+    return acc;
+  },
+  {} as Record<string, string>
+);
+
 function cleanText(value: unknown) {
   return String(value || "").trim();
 }
@@ -95,6 +103,16 @@ function normalizeNameForMatch(value: string | null | undefined): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function normalizeClientType(value: unknown) {
+  const normalized = normalizeNameForMatch(cleanText(value));
+
+  if (["firma", "firmowy", "company", "business", "b2b", "przedsiebiorca"].includes(normalized)) {
+    return "B2B";
+  }
+
+  return "B2C";
 }
 
 
@@ -292,6 +310,34 @@ async function resolveAdvisorProfile(
   supabase: SupabaseClient,
   advisorName: string
 ): Promise<AssignedAdvisor | null> {
+  const fallbackEmail = ADVISOR_EMAIL_BY_NAME[advisorName] || null;
+
+  if (fallbackEmail) {
+    const { data: profileByEmail, error: profileByEmailError } = await supabase
+      .from("profiles")
+      .select("id, email, display_name, name, username")
+      .eq("email", fallbackEmail)
+      .limit(1);
+
+    if (profileByEmailError) {
+      console.error(`WWW lead advisor profile email lookup failed for ${advisorName}`, profileByEmailError);
+    }
+
+    const matchedByEmail = profileByEmail?.[0];
+
+    if (matchedByEmail?.id) {
+      return {
+        id: matchedByEmail.id,
+        email: typeof matchedByEmail.email === "string" ? matchedByEmail.email : fallbackEmail,
+        displayName:
+          (typeof matchedByEmail.display_name === "string" && matchedByEmail.display_name) ||
+          (typeof matchedByEmail.name === "string" && matchedByEmail.name) ||
+          (typeof matchedByEmail.username === "string" && matchedByEmail.username) ||
+          advisorName,
+      };
+    }
+  }
+
   const { data: profiles, error } = await supabase
     .from("profiles")
     .select("id, email, display_name, name, username");
@@ -302,35 +348,29 @@ async function resolveAdvisorProfile(
   }
 
   const normalizedAdvisorName = normalizeNameForMatch(advisorName);
-  const fallbackEmail = ADVISOR_EMAIL_BY_NAME[advisorName] || null;
+  const advisorTokens = normalizedAdvisorName.split(" ").filter(Boolean);
 
-  const exactMatch = (profiles || []).find((profile) => {
-    return normalizeNameForMatch(profile.display_name || null) === normalizedAdvisorName;
-  });
-
-  const partialMatch = exactMatch || (profiles || []).find((profile) => {
+  const matchedProfile = (profiles || []).find((profile) => {
     const candidates = [
       profile.display_name,
       profile.name,
       profile.username,
       profile.email,
+      profile.email && ADVISOR_NAME_BY_EMAIL[String(profile.email).toLowerCase()],
     ]
       .filter(Boolean)
       .map((value) => normalizeNameForMatch(String(value)));
 
     return candidates.some((candidate) =>
-      candidate.includes(normalizedAdvisorName) || normalizedAdvisorName.includes(candidate)
+      candidate === normalizedAdvisorName ||
+      candidate.includes(normalizedAdvisorName) ||
+      normalizedAdvisorName.includes(candidate) ||
+      advisorTokens.every((token) => candidate.includes(token))
     );
   });
 
-  const emailMatch = partialMatch || (profiles || []).find((profile) => {
-    return fallbackEmail && typeof profile.email === "string" && profile.email.toLowerCase() === fallbackEmail;
-  });
-
-  const matchedProfile = exactMatch || partialMatch || emailMatch;
-
   if (!matchedProfile?.id) {
-    console.warn(`WWW lead advisor profile not matched for ${advisorName}`);
+    console.warn(`WWW lead advisor profile not matched for ${advisorName}`, { fallbackEmail });
     return null;
   }
 
@@ -440,6 +480,7 @@ export async function POST(request: NextRequest) {
       payload.postal_code || payload.postalCode || payload.postcode || payload.zip || payload.kod_pocztowy
     );
     const province = cleanText(payload.province);
+    const clientType = normalizeClientType(payload.client_type);
     payload.postal_code = postalCode || cleanText(payload.postal_code);
     const note = buildLeadNote(payload);
 
@@ -512,6 +553,7 @@ export async function POST(request: NextRequest) {
           phone: phone || null,
           postal_code: postalCode || null,
           province: province || null,
+          client_type: clientType,
           status: assignedAdvisor ? "Przypisany" : "Nowy lead",
           lead_source: "WWW",
           assigned_user_id: assignedAdvisor?.id || null,
@@ -587,6 +629,7 @@ export async function POST(request: NextRequest) {
         client_id: clientId,
         duplicate: Boolean(existingClientId),
         postal_code_received: postalCode || null,
+        client_type: clientType,
         assigned_user_id: assignedAdvisor?.id || null,
         assigned_advisor: assignedAdvisor?.displayName || null,
         assigned_distance_km:
