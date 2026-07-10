@@ -1,7 +1,10 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
-import { sendTeamsDelegatedDirectCalendarNotification } from "@/lib/microsoftTeams";
+import {
+  sendTeamsDelegatedDirectCalendarNotification,
+  sendTeamsDirectCalendarNotification,
+} from "@/lib/microsoftTeams";
 
 export const runtime = "nodejs";
 
@@ -63,6 +66,15 @@ const ADVISOR_POSTAL_CODES: AdvisorLocation[] = [
   { advisorName: "Michał Brodziński", postalCode: "32-060" },
   { advisorName: "Aleksandra Jachowicz", postalCode: "42-439" },
 ];
+
+const ADVISOR_EMAIL_BY_NAME: Record<string, string> = {
+  "Mateusz Rapczewski": "mateusz.rapczewski@ideasol.pl",
+  "Janusz Uchwat": "janusz.uchwat@ideasol.pl",
+  "Paweł Czupryński": "pawel.czuprzynski@ideasol.pl",
+  "Jan Osmenda": "jan.osmenda@ideasol.pl",
+  "Michał Brodziński": "michal.brodzinski@ideasol.pl",
+  "Aleksandra Jachowicz": "aleksandra.jachowicz@ideasol.pl",
+};
 
 function cleanText(value: unknown) {
   return String(value || "").trim();
@@ -300,54 +312,59 @@ async function findPostalCodeLocation(
 
 async function resolveAdvisorProfile(
   supabase: SupabaseClient,
-  advisor: AdvisorLocation
+  advisorName: string
 ): Promise<AssignedAdvisor | null> {
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, email, display_name, name, username");
+    .select("id, email, display_name, name, username")
+    .eq("is_active", true);
 
   if (error) {
-    console.error(`WWW lead advisor profile lookup failed for ${advisor.advisorName}`, error);
+    console.error(`WWW lead advisor profile lookup failed for ${advisorName}`, error);
     return null;
   }
 
-  const normalizedAdvisorName = normalizeNameForMatch(advisor.advisorName);
-  const advisorTokens = normalizedAdvisorName.split(" ").filter(Boolean);
-  const advisorEmail = advisor.email ? advisor.email.toLowerCase() : "";
+  const normalizedAdvisorName = normalizeNameForMatch(advisorName);
+  const fallbackEmail = ADVISOR_EMAIL_BY_NAME[advisorName] || null;
 
-  const matchedProfile = (profiles || []).find((profile) => {
-    const rawCandidates = [
+  const exactMatch = (profiles || []).find((profile) => {
+    return normalizeNameForMatch(profile.display_name || null) === normalizedAdvisorName;
+  });
+
+  const partialMatch = exactMatch || (profiles || []).find((profile) => {
+    const candidates = [
       profile.display_name,
       profile.name,
       profile.username,
       profile.email,
-    ].filter(Boolean) as string[];
+    ]
+      .filter(Boolean)
+      .map((value) => normalizeNameForMatch(String(value)));
 
-    const normalizedCandidates = rawCandidates.map((value) => normalizeNameForMatch(String(value)));
-    const emailCandidate = typeof profile.email === "string" ? profile.email.toLowerCase() : "";
-
-    if (advisorEmail && emailCandidate === advisorEmail) return true;
-    if (normalizedCandidates.some((candidate) => candidate.includes(normalizedAdvisorName))) return true;
-
-    return normalizedCandidates.some((candidate) =>
-      advisorTokens.every((token) => candidate.includes(token)) ||
-      advisorTokens.some((token) => token.length >= 4 && candidate.includes(token))
+    return candidates.some((candidate) =>
+      candidate.includes(normalizedAdvisorName) || normalizedAdvisorName.includes(candidate)
     );
   });
 
+  const emailMatch = partialMatch || (profiles || []).find((profile) => {
+    return fallbackEmail && typeof profile.email === "string" && profile.email.toLowerCase() === fallbackEmail;
+  });
+
+  const matchedProfile = exactMatch || partialMatch || emailMatch;
+
   if (!matchedProfile?.id) {
-    console.warn(`WWW lead advisor profile not matched for ${advisor.advisorName}`);
+    console.warn(`WWW lead advisor profile not matched for ${advisorName}`);
     return null;
   }
 
   return {
     id: matchedProfile.id,
-    email: typeof matchedProfile.email === "string" ? matchedProfile.email : null,
+    email: typeof matchedProfile.email === "string" ? matchedProfile.email : fallbackEmail,
     displayName:
       (typeof matchedProfile.display_name === "string" && matchedProfile.display_name) ||
       (typeof matchedProfile.name === "string" && matchedProfile.name) ||
       (typeof matchedProfile.username === "string" && matchedProfile.username) ||
-      advisor.advisorName,
+      advisorName,
   };
 }
 
@@ -355,67 +372,66 @@ async function assignAdvisorByPostalCode(
   supabase: SupabaseClient,
   postalCode: string
 ): Promise<AssignedAdvisor | null> {
-  const leadLocation = await findPostalCodeLocation(supabase, postalCode, {
+  const targetLocation = await findPostalCodeLocation(supabase, postalCode, {
     allowPrefixFallback: true,
   });
 
-  if (!leadLocation?.latitude || !leadLocation?.longitude) {
+  if (!targetLocation?.latitude || !targetLocation?.longitude) {
     console.warn(`WWW lead advisor assignment skipped: location not found for ${postalCode}`);
     return null;
   }
 
-  const advisorDistances = await Promise.all(
-    ADVISOR_POSTAL_CODES.map(async (advisor) => {
-      const advisorLocation = await findPostalCodeLocation(supabase, advisor.postalCode, {
-        allowPrefixFallback: true,
-      });
+  let nearestAdvisorName: string | null = null;
+  let nearestDistance = Number.MAX_VALUE;
 
-      if (!advisorLocation?.latitude || !advisorLocation?.longitude) {
-        console.warn(
-          `WWW lead advisor base location not found for ${advisor.advisorName} (${advisor.postalCode})`
-        );
-        return null;
-      }
+  for (const advisor of ADVISOR_POSTAL_CODES) {
+    const advisorLocation = await findPostalCodeLocation(supabase, advisor.postalCode, {
+      allowPrefixFallback: true,
+    });
 
-      return {
-        advisor,
-        advisorName: advisor.advisorName,
-        distanceKm: calculateDistanceKm(
-          Number(leadLocation.latitude),
-          Number(leadLocation.longitude),
-          Number(advisorLocation.latitude),
-          Number(advisorLocation.longitude)
-        ),
-      };
-    })
-  );
-
-  const sortedAdvisors = advisorDistances
-    .filter((advisor): advisor is { advisor: AdvisorLocation; advisorName: string; distanceKm: number } => Boolean(advisor))
-    .sort((a, b) => a.distanceKm - b.distanceKm);
-
-  console.info(
-    "WWW lead advisor distance ranking",
-    sortedAdvisors.map((advisor) => ({
-      advisorName: advisor.advisorName,
-      distanceKm: Math.round(advisor.distanceKm * 10) / 10,
-    }))
-  );
-
-  for (const advisor of sortedAdvisors) {
-    const profile = await resolveAdvisorProfile(supabase, advisor.advisor);
-
-    if (profile) {
-      return {
-        ...profile,
-        distanceKm: advisor.distanceKm,
-      };
+    if (!advisorLocation?.latitude || !advisorLocation?.longitude) {
+      console.warn(
+        `WWW lead advisor base location not found for ${advisor.advisorName} (${advisor.postalCode})`
+      );
+      continue;
     }
 
-    console.warn(`WWW lead nearest advisor has no matched profile: ${advisor.advisorName}`);
+    const distance = calculateDistanceKm(
+      Number(targetLocation.latitude),
+      Number(targetLocation.longitude),
+      Number(advisorLocation.latitude),
+      Number(advisorLocation.longitude)
+    );
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestAdvisorName = advisor.advisorName;
+    }
   }
 
-  return null;
+  if (!nearestAdvisorName) {
+    console.warn(`WWW lead advisor assignment skipped: nearest advisor not found for ${postalCode}`);
+    return null;
+  }
+
+  const advisorProfile = await resolveAdvisorProfile(supabase, nearestAdvisorName);
+
+  if (!advisorProfile) {
+    console.warn(`WWW lead advisor profile not matched after OCR-style routing: ${nearestAdvisorName}`);
+    return null;
+  }
+
+  console.info("WWW lead assigned advisor OCR-style", {
+    postalCode,
+    advisorName: nearestAdvisorName,
+    advisorProfileId: advisorProfile.id,
+    distanceKm: Math.round(nearestDistance * 10) / 10,
+  });
+
+  return {
+    ...advisorProfile,
+    distanceKm: nearestDistance,
+  };
 }
 
 async function sendTeamsDelegatedChatMessage({
@@ -656,57 +672,76 @@ export async function POST(request: NextRequest) {
     after(async () => {
       try {
         const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+        let delegatedAccessToken = "";
 
-        if (!delegatedRefreshToken) {
-          throw new Error(
-            "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki Teams dla leada WWW."
+        if (delegatedRefreshToken) {
+          const delegatedToken = await withTimeout(
+            refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken),
+            4000,
+            "Timeout odświeżania tokenu Microsoft Graph dla leada WWW."
           );
-        }
-
-        const delegatedToken = await withTimeout(
-          refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken),
-          4000,
-          "Timeout odświeżania tokenu Microsoft Graph dla leada WWW."
-        );
-        const delegatedAccessToken = delegatedToken.access_token;
-
-        if (!delegatedAccessToken) {
-          throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph dla leada WWW.");
+          delegatedAccessToken = delegatedToken.access_token || "";
         }
 
         if (WWW_LEAD_TEST_TEAMS_EMAIL) {
-          await withTimeout(
-            sendTeamsDelegatedDirectCalendarNotification({
-              userEmail: testTeamsRecipientEmail,
-              message: teamsMessage,
-              accessToken: delegatedAccessToken,
-            }),
-            4000,
-            "Timeout wysyłki prywatnego Teams dla testowego leada WWW."
-          );
+          if (delegatedAccessToken) {
+            await withTimeout(
+              sendTeamsDelegatedDirectCalendarNotification({
+                userEmail: testTeamsRecipientEmail,
+                message: teamsMessage,
+                accessToken: delegatedAccessToken,
+              }),
+              4000,
+              "Timeout wysyłki prywatnego Teams dla testowego leada WWW."
+            );
+          } else {
+            await withTimeout(
+              sendTeamsDirectCalendarNotification({
+                userEmail: testTeamsRecipientEmail,
+                message: teamsMessage,
+              }),
+              4000,
+              "Timeout wysyłki prywatnego Teams app-only dla testowego leada WWW."
+            );
+          }
         } else if (assignedAdvisor?.email) {
-          await withTimeout(
-            sendTeamsDelegatedDirectCalendarNotification({
-              userEmail: assignedAdvisor.email,
-              message: teamsMessage,
-              accessToken: delegatedAccessToken,
-            }),
-            4000,
-            "Timeout wysyłki prywatnego Teams dla doradcy leada WWW."
-          );
+          if (delegatedAccessToken) {
+            await withTimeout(
+              sendTeamsDelegatedDirectCalendarNotification({
+                userEmail: assignedAdvisor.email,
+                message: teamsMessage,
+                accessToken: delegatedAccessToken,
+              }),
+              4000,
+              "Timeout wysyłki prywatnego Teams dla doradcy leada WWW."
+            );
+          } else {
+            await withTimeout(
+              sendTeamsDirectCalendarNotification({
+                userEmail: assignedAdvisor.email,
+                message: teamsMessage,
+              }),
+              4000,
+              "Timeout wysyłki prywatnego Teams app-only dla doradcy leada WWW."
+            );
+          }
         } else {
           console.warn("WWW lead assigned advisor email not found; skipping advisor notification.");
         }
 
-        await withTimeout(
-          sendTeamsDelegatedChatMessage({
-            chatId: boardChatId,
-            message: boardTeamsMessage,
-            accessToken: delegatedAccessToken,
-          }),
-          4000,
-          "Timeout wysyłki Teams na czat zarządu/testowy dla leada WWW."
-        );
+        if (delegatedAccessToken) {
+          await withTimeout(
+            sendTeamsDelegatedChatMessage({
+              chatId: boardChatId,
+              message: boardTeamsMessage,
+              accessToken: delegatedAccessToken,
+            }),
+            4000,
+            "Timeout wysyłki Teams na czat zarządu/testowy dla leada WWW."
+          );
+        } else {
+          console.warn("WWW lead board chat notification skipped: missing delegated access token.");
+        }
       } catch (teamsError) {
         console.error("WWW lead Teams delegated notification failed", teamsError);
       }
