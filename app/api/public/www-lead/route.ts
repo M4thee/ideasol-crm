@@ -44,6 +44,7 @@ type PostalCodeLocation = {
 type AdvisorLocation = {
   advisorName: string;
   postalCode: string;
+  email?: string;
 };
 
 type AssignedAdvisor = {
@@ -299,34 +300,43 @@ async function findPostalCodeLocation(
 
 async function resolveAdvisorProfile(
   supabase: SupabaseClient,
-  advisorName: string
+  advisor: AdvisorLocation
 ): Promise<AssignedAdvisor | null> {
   const { data: profiles, error } = await supabase
     .from("profiles")
     .select("id, email, display_name, name, username");
 
   if (error) {
-    console.error(`WWW lead advisor profile lookup failed for ${advisorName}`, error);
+    console.error(`WWW lead advisor profile lookup failed for ${advisor.advisorName}`, error);
     return null;
   }
 
-  const normalizedAdvisorName = normalizeNameForMatch(advisorName);
+  const normalizedAdvisorName = normalizeNameForMatch(advisor.advisorName);
+  const advisorTokens = normalizedAdvisorName.split(" ").filter(Boolean);
+  const advisorEmail = advisor.email ? advisor.email.toLowerCase() : "";
 
   const matchedProfile = (profiles || []).find((profile) => {
-    const candidates = [
+    const rawCandidates = [
       profile.display_name,
       profile.name,
       profile.username,
       profile.email,
-    ]
-      .filter(Boolean)
-      .map((value) => normalizeNameForMatch(String(value)));
+    ].filter(Boolean) as string[];
 
-    return candidates.some((candidate) => candidate.includes(normalizedAdvisorName));
+    const normalizedCandidates = rawCandidates.map((value) => normalizeNameForMatch(String(value)));
+    const emailCandidate = typeof profile.email === "string" ? profile.email.toLowerCase() : "";
+
+    if (advisorEmail && emailCandidate === advisorEmail) return true;
+    if (normalizedCandidates.some((candidate) => candidate.includes(normalizedAdvisorName))) return true;
+
+    return normalizedCandidates.some((candidate) =>
+      advisorTokens.every((token) => candidate.includes(token)) ||
+      advisorTokens.some((token) => token.length >= 4 && candidate.includes(token))
+    );
   });
 
   if (!matchedProfile?.id) {
-    console.warn(`WWW lead advisor profile not matched for ${advisorName}`);
+    console.warn(`WWW lead advisor profile not matched for ${advisor.advisorName}`);
     return null;
   }
 
@@ -337,7 +347,7 @@ async function resolveAdvisorProfile(
       (typeof matchedProfile.display_name === "string" && matchedProfile.display_name) ||
       (typeof matchedProfile.name === "string" && matchedProfile.name) ||
       (typeof matchedProfile.username === "string" && matchedProfile.username) ||
-      advisorName,
+      advisor.advisorName,
   };
 }
 
@@ -368,6 +378,7 @@ async function assignAdvisorByPostalCode(
       }
 
       return {
+        advisor,
         advisorName: advisor.advisorName,
         distanceKm: calculateDistanceKm(
           Number(leadLocation.latitude),
@@ -380,7 +391,7 @@ async function assignAdvisorByPostalCode(
   );
 
   const sortedAdvisors = advisorDistances
-    .filter((advisor): advisor is { advisorName: string; distanceKm: number } => Boolean(advisor))
+    .filter((advisor): advisor is { advisor: AdvisorLocation; advisorName: string; distanceKm: number } => Boolean(advisor))
     .sort((a, b) => a.distanceKm - b.distanceKm);
 
   console.info(
@@ -392,7 +403,7 @@ async function assignAdvisorByPostalCode(
   );
 
   for (const advisor of sortedAdvisors) {
-    const profile = await resolveAdvisorProfile(supabase, advisor.advisorName);
+    const profile = await resolveAdvisorProfile(supabase, advisor.advisor);
 
     if (profile) {
       return {
@@ -626,6 +637,16 @@ export async function POST(request: NextRequest) {
     }
 
     const testTeamsRecipientEmail = await resolveTeamsRecipientEmail(supabase);
+    console.info("WWW lead assignment result", {
+      postalCode,
+      assignedUserId: assignedAdvisor?.id || null,
+      assignedAdvisor: assignedAdvisor?.displayName || null,
+      assignedAdvisorEmail: assignedAdvisor?.email || null,
+      distanceKm:
+        typeof assignedAdvisor?.distanceKm === "number"
+          ? Math.round(assignedAdvisor.distanceKm * 10) / 10
+          : null,
+    });
     const boardChatId = WWW_LEAD_TEST_TEAMS_EMAIL
       ? WWW_LEAD_TEST_BOARD_CHAT_ID
       : WWW_LEAD_BOARD_CHAT_ID;
