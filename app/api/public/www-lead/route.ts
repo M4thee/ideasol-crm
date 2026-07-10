@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { sendTeamsDirectCalendarNotification } from "@/lib/microsoftTeams";
+import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
+import { sendTeamsDelegatedDirectCalendarNotification } from "@/lib/microsoftTeams";
 
 export const runtime = "nodejs";
 
@@ -266,13 +267,29 @@ export async function POST(request: NextRequest) {
 
     if (teamsRecipientEmail) {
       try {
-        await sendTeamsDirectCalendarNotification({
+        const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+        if (!delegatedRefreshToken) {
+          throw new Error(
+            "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki prywatnej wiadomości Teams dla leada WWW."
+          );
+        }
+
+        const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+        const delegatedAccessToken = delegatedToken.access_token;
+
+        if (!delegatedAccessToken) {
+          throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph dla leada WWW.");
+        }
+
+        await sendTeamsDelegatedDirectCalendarNotification({
           userEmail: teamsRecipientEmail,
           message: buildTeamsText(payload, clientId || undefined),
+          accessToken: delegatedAccessToken,
         });
         teamsSent = true;
       } catch (teamsError) {
-        console.error("WWW lead Teams direct notification failed", teamsError);
+        console.error("WWW lead Teams delegated notification failed", teamsError);
         teamsErrorMessage = teamsError instanceof Error ? teamsError.message : String(teamsError);
       }
     } else {
