@@ -49,26 +49,6 @@ function displayValue(value?: string | null) {
   return normalizedValue ? escapeHtml(normalizedValue) : "brak danych";
 }
 
-function buildLeadNote(payload: WwwLeadPayload) {
-  const products = Array.isArray(payload.products)
-    ? payload.products.filter(Boolean).join(", ")
-    : "";
-
-  return [
-    "Lead z formularza WWW — Jestem zainteresowany instalacją.",
-    payload.client_type ? `Typ klienta: ${payload.client_type}` : "",
-    payload.province ? `Województwo: ${payload.province}` : "",
-    payload.postal_code ? `Kod pocztowy: ${payload.postal_code}` : "",
-    products ? `Produkty: ${products}` : "",
-    payload.message ? `Wiadomość: ${payload.message}` : "",
-    payload.page_url ? `Źródło strony: ${payload.page_url}` : "",
-    payload.ip ? `IP: ${payload.ip}` : "",
-    payload.user_agent ? `User-Agent: ${payload.user_agent}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 function buildTeamsText(payload: WwwLeadPayload, clientId?: string) {
   const products = Array.isArray(payload.products)
     ? payload.products.filter(Boolean).join(", ")
@@ -145,7 +125,6 @@ export async function POST(request: NextRequest) {
     const phone = normalizePhone(payload.phone);
     const postalCode = cleanText(payload.postal_code);
     const province = cleanText(payload.province);
-    const note = buildLeadNote(payload);
 
     if (!fullName && !email && !phone) {
       return NextResponse.json(
@@ -195,7 +174,6 @@ export async function POST(request: NextRequest) {
           city: province || null,
           status: "Nowy lead",
           lead_source: "WWW",
-          notes: note,
         })
         .select("id")
         .single();
