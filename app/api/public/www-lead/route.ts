@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { refreshMicrosoftDelegatedAccessToken } from "@/lib/microsoftGraph";
 import { sendTeamsDelegatedDirectCalendarNotification } from "@/lib/microsoftTeams";
@@ -80,6 +80,7 @@ function cleanDetectedPostalCode(value: unknown) {
   return `${match[1]}-${match[2]}`;
 }
 
+
 function normalizeNameForMatch(value: string | null | undefined): string {
   return (value || "")
     .normalize("NFD")
@@ -87,6 +88,24 @@ function normalizeNameForMatch(value: string | null | undefined): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 function escapeHtml(value: string) {
@@ -613,56 +632,64 @@ export async function POST(request: NextRequest) {
       : WWW_LEAD_BOARD_CHAT_ID;
     const teamsMessage = buildTeamsText(payload, clientId || undefined, assignedAdvisor);
     const boardTeamsMessage = buildBoardTeamsText(payload, clientId || undefined, assignedAdvisor);
-    let teamsSent = false;
-    let teamsAdvisorSent = false;
-    let teamsBoardSent = false;
-    let teamsErrorMessage: string | null = null;
+    after(async () => {
+      try {
+        const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
 
-    try {
-      const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+        if (!delegatedRefreshToken) {
+          throw new Error(
+            "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki Teams dla leada WWW."
+          );
+        }
 
-      if (!delegatedRefreshToken) {
-        throw new Error(
-          "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki Teams dla leada WWW."
+        const delegatedToken = await withTimeout(
+          refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken),
+          4000,
+          "Timeout odświeżania tokenu Microsoft Graph dla leada WWW."
         );
+        const delegatedAccessToken = delegatedToken.access_token;
+
+        if (!delegatedAccessToken) {
+          throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph dla leada WWW.");
+        }
+
+        if (WWW_LEAD_TEST_TEAMS_EMAIL) {
+          await withTimeout(
+            sendTeamsDelegatedDirectCalendarNotification({
+              userEmail: testTeamsRecipientEmail,
+              message: teamsMessage,
+              accessToken: delegatedAccessToken,
+            }),
+            4000,
+            "Timeout wysyłki prywatnego Teams dla testowego leada WWW."
+          );
+        } else if (assignedAdvisor?.email) {
+          await withTimeout(
+            sendTeamsDelegatedDirectCalendarNotification({
+              userEmail: assignedAdvisor.email,
+              message: teamsMessage,
+              accessToken: delegatedAccessToken,
+            }),
+            4000,
+            "Timeout wysyłki prywatnego Teams dla doradcy leada WWW."
+          );
+        } else {
+          console.warn("WWW lead assigned advisor email not found; skipping advisor notification.");
+        }
+
+        await withTimeout(
+          sendTeamsDelegatedChatMessage({
+            chatId: boardChatId,
+            message: boardTeamsMessage,
+            accessToken: delegatedAccessToken,
+          }),
+          4000,
+          "Timeout wysyłki Teams na czat zarządu/testowy dla leada WWW."
+        );
+      } catch (teamsError) {
+        console.error("WWW lead Teams delegated notification failed", teamsError);
       }
-
-      const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
-      const delegatedAccessToken = delegatedToken.access_token;
-
-      if (!delegatedAccessToken) {
-        throw new Error("Nie udało się pobrać delegowanego tokenu Microsoft Graph dla leada WWW.");
-      }
-
-      if (WWW_LEAD_TEST_TEAMS_EMAIL) {
-        await sendTeamsDelegatedDirectCalendarNotification({
-          userEmail: testTeamsRecipientEmail,
-          message: teamsMessage,
-          accessToken: delegatedAccessToken,
-        });
-        teamsAdvisorSent = true;
-      } else if (assignedAdvisor?.email) {
-        await sendTeamsDelegatedDirectCalendarNotification({
-          userEmail: assignedAdvisor.email,
-          message: teamsMessage,
-          accessToken: delegatedAccessToken,
-        });
-        teamsAdvisorSent = true;
-      } else {
-        console.warn("WWW lead assigned advisor email not found; skipping advisor notification.");
-      }
-
-      await sendTeamsDelegatedChatMessage({
-        chatId: boardChatId,
-        message: boardTeamsMessage,
-        accessToken: delegatedAccessToken,
-      });
-      teamsBoardSent = true;
-      teamsSent = teamsAdvisorSent || teamsBoardSent;
-    } catch (teamsError) {
-      console.error("WWW lead Teams delegated notification failed", teamsError);
-      teamsErrorMessage = teamsError instanceof Error ? teamsError.message : String(teamsError);
-    }
+    });
 
     return NextResponse.json(
       {
@@ -676,13 +703,10 @@ export async function POST(request: NextRequest) {
           typeof assignedAdvisor?.distanceKm === "number"
             ? Math.round(assignedAdvisor.distanceKm * 10) / 10
             : null,
-        teams_sent: teamsSent,
+        teams_queued: true,
         teams_test_recipient_email: WWW_LEAD_TEST_TEAMS_EMAIL ? testTeamsRecipientEmail || null : null,
-        teams_advisor_sent: teamsAdvisorSent,
         teams_advisor_email: assignedAdvisor?.email || null,
-        teams_board_sent: teamsBoardSent,
         teams_board_chat_id: boardChatId,
-        teams_error: teamsErrorMessage,
       },
       { status: existingClientId ? 200 : 201 }
     );
