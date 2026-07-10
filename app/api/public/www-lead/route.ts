@@ -315,7 +315,7 @@ async function resolveAdvisorProfile(
   if (fallbackEmail) {
     const { data: profileByEmail, error: profileByEmailError } = await supabase
       .from("profiles")
-      .select("id, email, display_name, name, username")
+      .select("id, email, display_name, username")
       .eq("email", fallbackEmail)
       .limit(1);
 
@@ -331,7 +331,6 @@ async function resolveAdvisorProfile(
         email: typeof matchedByEmail.email === "string" ? matchedByEmail.email : fallbackEmail,
         displayName:
           (typeof matchedByEmail.display_name === "string" && matchedByEmail.display_name) ||
-          (typeof matchedByEmail.name === "string" && matchedByEmail.name) ||
           (typeof matchedByEmail.username === "string" && matchedByEmail.username) ||
           advisorName,
       };
@@ -340,7 +339,7 @@ async function resolveAdvisorProfile(
 
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, email, display_name, name, username");
+    .select("id, email, display_name, username");
 
   if (error) {
     console.error(`WWW lead advisor profile lookup failed for ${advisorName}`, error);
@@ -353,7 +352,6 @@ async function resolveAdvisorProfile(
   const matchedProfile = (profiles || []).find((profile) => {
     const candidates = [
       profile.display_name,
-      profile.name,
       profile.username,
       profile.email,
       profile.email && ADVISOR_NAME_BY_EMAIL[String(profile.email).toLowerCase()],
@@ -379,7 +377,6 @@ async function resolveAdvisorProfile(
     email: typeof matchedProfile.email === "string" ? matchedProfile.email : fallbackEmail,
     displayName:
       (typeof matchedProfile.display_name === "string" && matchedProfile.display_name) ||
-      (typeof matchedProfile.name === "string" && matchedProfile.name) ||
       (typeof matchedProfile.username === "string" && matchedProfile.username) ||
       advisorName,
   };
