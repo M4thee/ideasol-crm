@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 type OcrClientRow = {
   source_file_name: string;
@@ -36,6 +37,7 @@ type PostalCodeLocation = {
   province: string | null;
 };
 
+
 const ADVISOR_POSTAL_CODES: AdvisorLocation[] = [
   { advisorName: "Mateusz Rapczewski", postalCode: "91-024" },
   { advisorName: "Mateusz Rapczewski", postalCode: "34-300" },
@@ -43,8 +45,47 @@ const ADVISOR_POSTAL_CODES: AdvisorLocation[] = [
   { advisorName: "Paweł Czupryński", postalCode: "25-015" },
   { advisorName: "Jan Osmenda", postalCode: "32-089" },
   { advisorName: "Michał Brodziński", postalCode: "32-060" },
-  { advisorName: "Aleksandra Jachowicz", postalCode: "32-444" },
+  { advisorName: "Aleksandra Jachowicz", postalCode: "42-439" },
 ];
+
+const OCR_BATCH_SIZE = 3;
+const OCR_RETRY_DELAY_MS = 1200;
+const OCR_MAX_FILES = 30;
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function analyzeImageWithRetry(file: File): Promise<OcrClientRow> {
+  const firstAttempt = await analyzeImage(file);
+
+  if (!firstAttempt.error) {
+    return firstAttempt;
+  }
+
+  console.warn(`Ponawiam OCR dla pliku ${file.name}: ${firstAttempt.error}`);
+  await wait(OCR_RETRY_DELAY_MS);
+
+  const secondAttempt = await analyzeImage(file);
+
+  if (!secondAttempt.error) {
+    return secondAttempt;
+  }
+
+  return firstAttempt;
+}
+
+async function analyzeImagesInBatches(files: File[]) {
+  const rows: OcrClientRow[] = [];
+
+  for (let index = 0; index < files.length; index += OCR_BATCH_SIZE) {
+    const batch = files.slice(index, index + OCR_BATCH_SIZE);
+    const batchRows = await Promise.all(batch.map((file) => analyzeImageWithRetry(file)));
+    rows.push(...batchRows);
+  }
+
+  return rows;
+}
 
 function normalizeText(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -131,20 +172,32 @@ function normalizeProvinceName(value: string | null): string | null {
 
   const provinceMap: Record<string, string> = {
     dolnoslaskie: "Dolnośląskie",
+    "dolny slask": "Dolnośląskie",
     "lower silesia": "Dolnośląskie",
     "lower silesian": "Dolnośląskie",
+    "lower silesian province": "Dolnośląskie",
+    "lower silesian region": "Dolnośląskie",
     "lower silesian voivodeship": "Dolnośląskie",
 
     "kujawsko pomorskie": "Kujawsko-pomorskie",
+    "kujawy pomorze": "Kujawsko-pomorskie",
     "kuyavian pomeranian": "Kujawsko-pomorskie",
+    "kuyavian pomeranian province": "Kujawsko-pomorskie",
+    "kuyavian pomeranian region": "Kujawsko-pomorskie",
     "kuyavian pomeranian voivodeship": "Kujawsko-pomorskie",
+    "cuyavian pomeranian": "Kujawsko-pomorskie",
+    "cuyavian pomeranian voivodeship": "Kujawsko-pomorskie",
 
     lubelskie: "Lubelskie",
     lublin: "Lubelskie",
+    "lublin province": "Lubelskie",
+    "lublin region": "Lubelskie",
     "lublin voivodeship": "Lubelskie",
 
     lubuskie: "Lubuskie",
     lubusz: "Lubuskie",
+    "lubusz province": "Lubuskie",
+    "lubusz region": "Lubuskie",
     "lubusz voivodeship": "Lubuskie",
 
     lodzkie: "Łódzkie",
@@ -154,52 +207,114 @@ function normalizeProvinceName(value: string | null): string | null {
     "lodz voivodeship": "Łódzkie",
 
     malopolskie: "Małopolskie",
+    malopolska: "Małopolskie",
     "lesser poland": "Małopolskie",
+    "lesser poland province": "Małopolskie",
+    "lesser poland region": "Małopolskie",
     "lesser poland voivodeship": "Małopolskie",
 
     mazowieckie: "Mazowieckie",
+    mazowsze: "Mazowieckie",
     mazovia: "Mazowieckie",
     masovia: "Mazowieckie",
     masovian: "Mazowieckie",
+    "mazovia province": "Mazowieckie",
+    "mazovia region": "Mazowieckie",
     "mazovia voivodeship": "Mazowieckie",
+    "masovia province": "Mazowieckie",
+    "masovia region": "Mazowieckie",
     "masovia voivodeship": "Mazowieckie",
+    "masovian province": "Mazowieckie",
+    "masovian region": "Mazowieckie",
     "masovian voivodeship": "Mazowieckie",
 
     opolskie: "Opolskie",
     opole: "Opolskie",
+    "opole province": "Opolskie",
+    "opole region": "Opolskie",
     "opole voivodeship": "Opolskie",
 
     podkarpackie: "Podkarpackie",
+    podkarpacie: "Podkarpackie",
+    subcarpatia: "Podkarpackie",
+    subcarpathia: "Podkarpackie",
     subcarpathian: "Podkarpackie",
+    "subcarpatia province": "Podkarpackie",
+    "subcarpatia region": "Podkarpackie",
+    "subcarpatia voivodeship": "Podkarpackie",
+    "subcarpathian province": "Podkarpackie",
+    "subcarpathian region": "Podkarpackie",
     "subcarpathian voivodeship": "Podkarpackie",
 
     podlaskie: "Podlaskie",
     podlasie: "Podlaskie",
+    "podlasie province": "Podlaskie",
+    "podlasie region": "Podlaskie",
+    "podlasie voivodeship": "Podlaskie",
+    "podlaskie province": "Podlaskie",
+    "podlaskie region": "Podlaskie",
     "podlaskie voivodeship": "Podlaskie",
 
     pomorskie: "Pomorskie",
+    pomorze: "Pomorskie",
+    pomerania: "Pomorskie",
     pomeranian: "Pomorskie",
+    "pomerania province": "Pomorskie",
+    "pomerania region": "Pomorskie",
+    "pomerania voivodeship": "Pomorskie",
+    "pomeranian province": "Pomorskie",
+    "pomeranian region": "Pomorskie",
     "pomeranian voivodeship": "Pomorskie",
 
     slaskie: "Śląskie",
+    slask: "Śląskie",
     silesia: "Śląskie",
     silesian: "Śląskie",
+    "silesia province": "Śląskie",
+    "silesia region": "Śląskie",
+    "silesia voivodeship": "Śląskie",
+    "silesian province": "Śląskie",
+    "silesian region": "Śląskie",
     "silesian voivodeship": "Śląskie",
 
     swietokrzyskie: "Świętokrzyskie",
+    "swiety krzyz": "Świętokrzyskie",
     "holy cross": "Świętokrzyskie",
+    "holy cross province": "Świętokrzyskie",
+    "holy cross region": "Świętokrzyskie",
     "holy cross voivodeship": "Świętokrzyskie",
+    "swietokrzyskie province": "Świętokrzyskie",
+    "swietokrzyskie region": "Świętokrzyskie",
+    "swietokrzyskie voivodeship": "Świętokrzyskie",
 
     "warminsko mazurskie": "Warmińsko-mazurskie",
+    "warmia mazury": "Warmińsko-mazurskie",
     "warmian masurian": "Warmińsko-mazurskie",
+    "warmian masurian province": "Warmińsko-mazurskie",
+    "warmian masurian region": "Warmińsko-mazurskie",
     "warmian masurian voivodeship": "Warmińsko-mazurskie",
 
     wielkopolskie: "Wielkopolskie",
+    wielkopolska: "Wielkopolskie",
     "greater poland": "Wielkopolskie",
+    "greater poland province": "Wielkopolskie",
+    "greater poland region": "Wielkopolskie",
     "greater poland voivodeship": "Wielkopolskie",
 
     zachodniopomorskie: "Zachodniopomorskie",
+    "pomorze zachodnie": "Zachodniopomorskie",
+    "west pomerania": "Zachodniopomorskie",
+    "western pomerania": "Zachodniopomorskie",
     "west pomeranian": "Zachodniopomorskie",
+    "western pomeranian": "Zachodniopomorskie",
+    "west pomerania province": "Zachodniopomorskie",
+    "west pomerania region": "Zachodniopomorskie",
+    "west pomerania voivodeship": "Zachodniopomorskie",
+    "western pomerania province": "Zachodniopomorskie",
+    "western pomerania region": "Zachodniopomorskie",
+    "western pomerania voivodeship": "Zachodniopomorskie",
+    "west pomeranian province": "Zachodniopomorskie",
+    "west pomeranian region": "Zachodniopomorskie",
     "west pomeranian voivodeship": "Zachodniopomorskie",
   };
 
@@ -265,22 +380,47 @@ async function findAdvisorProfileIdByName(
 
 async function findPostalCodeLocation(
   supabase: any,
-  postalCode: string
+  postalCode: string,
+  options: { allowPrefixFallback?: boolean } = {}
 ): Promise<PostalCodeLocation | null> {
   const cleanedCode = cleanDetectedPostalCode(postalCode);
   if (!cleanedCode) return null;
 
-  const { data: exactLocation, error: exactError } = await supabase
+  const { data: exactLocations, error: exactError } = await supabase
     .from("postal_code_locations")
     .select("postal_code, latitude, longitude, province")
     .eq("postal_code", cleanedCode)
-    .maybeSingle();
+    .limit(100);
 
   if (exactError) {
     console.error(`Błąd szukania kodu OCR ${cleanedCode}:`, exactError);
   }
 
-  if (exactLocation) return exactLocation as PostalCodeLocation;
+  if (exactLocations && exactLocations.length > 0) {
+    const locations = exactLocations as PostalCodeLocation[];
+
+    const latitude =
+      locations.reduce((sum, location) => sum + Number(location.latitude || 0), 0) /
+      locations.length;
+
+    const longitude =
+      locations.reduce((sum, location) => sum + Number(location.longitude || 0), 0) /
+      locations.length;
+
+    const province = locations.find((location) => location.province)?.province || null;
+
+    return {
+      postal_code: cleanedCode,
+      latitude,
+      longitude,
+      province,
+    };
+  }
+
+  if (!options.allowPrefixFallback) {
+    console.warn(`Nie znaleziono dokładnej lokalizacji kodu OCR: ${cleanedCode}`);
+    return null;
+  }
 
   const prefix = cleanedCode.slice(0, 2);
 
@@ -288,13 +428,28 @@ async function findPostalCodeLocation(
     .from("postal_code_locations")
     .select("postal_code, latitude, longitude, province")
     .like("postal_code", `${prefix}-%`)
-    .limit(1);
+    .limit(500);
 
   if (fallbackError) {
     console.error(`Błąd fallbacku kodu OCR ${cleanedCode}:`, fallbackError);
   }
 
-  return (fallbackLocations?.[0] as PostalCodeLocation | undefined) || null;
+  const targetNumber = Number(cleanedCode.replace("-", ""));
+  const fallbackLocation = (fallbackLocations as PostalCodeLocation[] | null | undefined)
+    ?.filter((location) => Boolean(cleanDetectedPostalCode(location.postal_code)))
+    .sort((a, b) => {
+      const aNumber = Number(cleanDetectedPostalCode(a.postal_code)?.replace("-", "") || "0");
+      const bNumber = Number(cleanDetectedPostalCode(b.postal_code)?.replace("-", "") || "0");
+      return Math.abs(aNumber - targetNumber) - Math.abs(bNumber - targetNumber);
+    })[0];
+
+  if (fallbackLocation) {
+    console.warn(
+      `Użyto najbliższego fallbacku lokalizacji OCR dla ${cleanedCode}: ${fallbackLocation.postal_code}`
+    );
+  }
+
+  return fallbackLocation || null;
 }
 
 async function assignAdvisorByPostalCode(postalCode: string | null) {
@@ -307,7 +462,9 @@ async function assignAdvisorByPostalCode(postalCode: string | null) {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const targetLocation = await findPostalCodeLocation(supabase, postalCode);
+  const targetLocation = await findPostalCodeLocation(supabase, postalCode, {
+    allowPrefixFallback: true,
+  });
 
   if (!targetLocation) {
     console.warn(`Nie znaleziono lokalizacji kodu klienta OCR: ${postalCode}`);
@@ -320,7 +477,8 @@ async function assignAdvisorByPostalCode(postalCode: string | null) {
   for (const advisor of ADVISOR_POSTAL_CODES) {
     const advisorLocation = await findPostalCodeLocation(
       supabase,
-      advisor.postalCode
+      advisor.postalCode,
+      { allowPrefixFallback: true }
     );
 
     if (!advisorLocation) {
@@ -413,6 +571,7 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
               type: "image_url",
               image_url: {
                 url: imageUrl,
+                detail: "low",
               },
             },
           ],
@@ -449,7 +608,8 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
         const supabase = createClient(supabaseUrl, serviceRoleKey);
         const location = await findPostalCodeLocation(
           supabase,
-          detectedPostalCode
+          detectedPostalCode,
+          { allowPrefixFallback: true }
         );
 
         detectedProvince = normalizeProvinceName(location?.province || null);
@@ -514,7 +674,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ rows: [] }, { status: 400 });
     }
 
-    const rows = await Promise.all(files.map((file) => analyzeImage(file)));
+    if (files.length > OCR_MAX_FILES) {
+      return NextResponse.json(
+        {
+          rows: [],
+          error: `Możesz zaimportować maksymalnie ${OCR_MAX_FILES} zdjęć naraz. Podziel większą paczkę na kilka importów.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const rows = await analyzeImagesInBatches(files);
 
     return NextResponse.json({ rows });
   } catch (error) {
