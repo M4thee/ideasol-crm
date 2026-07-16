@@ -681,18 +681,33 @@ function ClientsPageContent() {
     const canViewAllClients = canViewAllClientsForRole(normalizedRole);
     let allowedAssignedUserIds: string[] | null = null;
 
-    let query = supabase
-      .from("clients")
-      .select(
-        "id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at"
-      )
-      .order("created_at", { ascending: false })
-      .limit(500);
+    const CLIENTS_PAGE_SIZE = 500;
+
+    function buildClientsQuery(from: number, to: number) {
+      let query = supabase
+        .from("clients")
+        .select(
+          "id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at"
+        )
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (!canViewAllClients) {
+        if (!userId) {
+          query = query.eq("assigned_user_id", "__no_user__");
+        } else if (normalizedRole === "manager") {
+          query = query.in("assigned_user_id", allowedAssignedUserIds || []);
+        } else {
+          query = query.eq("assigned_user_id", userId);
+        }
+      }
+
+      return query;
+    }
 
     if (!canViewAllClients) {
       if (!userId) {
         allowedAssignedUserIds = [];
-        query = query.eq("assigned_user_id", "__no_user__");
       } else if (normalizedRole === "manager") {
         const { data: teamMembers, error: teamError } = await supabase
           .from("profiles")
@@ -707,21 +722,33 @@ function ClientsPageContent() {
           userId,
           ...((teamMembers || []).map((item: { id: string }) => item.id)),
         ];
-
-        query = query.in("assigned_user_id", allowedAssignedUserIds);
       } else {
         allowedAssignedUserIds = [userId];
-        query = query.eq("assigned_user_id", userId);
       }
     }
 
-    const { data, error } = await query;
+    const rawClients: ClientRow[] = [];
+    let clientsPage = 0;
 
-    if (error) {
-      console.error("Błąd ładowania klientów:", error);
+    while (true) {
+      const from = clientsPage * CLIENTS_PAGE_SIZE;
+      const to = from + CLIENTS_PAGE_SIZE - 1;
+      const { data: pageData, error: pageError } = await buildClientsQuery(from, to);
+
+      if (pageError) {
+        console.error("Błąd ładowania klientów:", pageError);
+        break;
+      }
+
+      const pageClients = (pageData || []) as ClientRow[];
+      rawClients.push(...pageClients);
+
+      if (pageClients.length < CLIENTS_PAGE_SIZE) {
+        break;
+      }
+
+      clientsPage += 1;
     }
-
-    const rawClients = (data || []) as ClientRow[];
     const clientsWithoutAssignedUsers = canViewAllClients
       ? rawClients
       : rawClients.filter(
