@@ -48,7 +48,6 @@ const ADVISOR_POSTAL_CODES: AdvisorLocation[] = [
   { advisorName: "Aleksandra Jachowicz", postalCode: "42-439" },
 ];
 
-const OCR_BATCH_SIZE = 3;
 const OCR_RETRY_DELAY_MS = 1200;
 const OCR_MAX_FILES = 30;
 
@@ -78,10 +77,9 @@ async function analyzeImageWithRetry(file: File): Promise<OcrClientRow> {
 async function analyzeImagesInBatches(files: File[]) {
   const rows: OcrClientRow[] = [];
 
-  for (let index = 0; index < files.length; index += OCR_BATCH_SIZE) {
-    const batch = files.slice(index, index + OCR_BATCH_SIZE);
-    const batchRows = await Promise.all(batch.map((file) => analyzeImageWithRetry(file)));
-    rows.push(...batchRows);
+  for (const file of files) {
+    const row = await analyzeImageWithRetry(file);
+    rows.push(row);
   }
 
   return rows;
@@ -488,13 +486,34 @@ async function assignAdvisorByPostalCode(postalCode: string | null) {
       continue;
     }
 
-    // Wzór Haversine dla dokładniejszego obliczania km
     const R = 6371;
-    const dLat = (advisorLocation.latitude - targetLocation.latitude) * Math.PI / 180;
-    const dLon = (advisorLocation.longitude - targetLocation.longitude) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 + 
-              Math.cos(targetLocation.latitude * Math.PI / 180) * Math.cos(advisorLocation.latitude * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-    const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const toRadians = (degrees: number) => degrees * (Math.PI / 180);
+
+    const targetLatitudeRadians = toRadians(Number(targetLocation.latitude));
+    const targetLongitudeRadians = toRadians(Number(targetLocation.longitude));
+    const advisorLatitudeRadians = toRadians(Number(advisorLocation.latitude));
+    const advisorLongitudeRadians = toRadians(Number(advisorLocation.longitude));
+
+    const latitudeDifference =
+      advisorLatitudeRadians - targetLatitudeRadians;
+    const longitudeDifference =
+      advisorLongitudeRadians - targetLongitudeRadians;
+
+    const haversineValue =
+      Math.sin(latitudeDifference / 2) * Math.sin(latitudeDifference / 2) +
+      Math.cos(targetLatitudeRadians) *
+        Math.cos(advisorLatitudeRadians) *
+        Math.sin(longitudeDifference / 2) *
+        Math.sin(longitudeDifference / 2);
+
+    const angularDistance =
+      2 *
+      Math.atan2(
+        Math.sqrt(haversineValue),
+        Math.sqrt(1 - haversineValue)
+      );
+
+    const distance = R * angularDistance;
 
     if (distance < nearestDistance) {
       nearestDistance = distance;
@@ -542,13 +561,13 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
     const imageUrl = await fileToDataUrl(file);
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       temperature: 0,
       messages: [
         {
           role: "system",
           content:
-            "Jesteś precyzyjnym modułem OCR dla systemu CRM. Zwracasz wyłącznie czysty JSON bez formatowania markdown.",
+            "Jesteś rygorystycznym, precyzyjnym modułem OCR dla systemu CRM. Analizujesz wyłącznie informacje faktycznie widoczne na zdjęciu. Nie zgadujesz, nie uzupełniasz braków i nie korzystasz z danych doradców jako danych klienta. Zwracasz wyłącznie poprawny, czysty JSON bez markdown, komentarzy i dodatkowego tekstu.",
         },
         {
           role: "user",
@@ -556,16 +575,23 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
             {
               type: "text",
               text:
-                'Odczytaj dane klienta ze zdjęcia/screena z systemu spotkań. Zwróć wyłącznie JSON z następującymi polami: {"full_name":string|null,"phone":string|null,"email":string|null,"street":string|null,"house_number":string|null,"city":string|null,"postal_code":string|null,"ce_meeting_datetime":string|null,"import_note":string|null}.\n\n' +
-                'STREFE WYTYCZNE DLA ADRESU KLIENTA:\n' +
-                '1. "street": Podaj tylko nazwę ulicy lub samej miejscowości (jeśli ulica nie występuje). Nie dopisuj tu kodu pocztowego, numeru domu ani miasta.\n' +
-                '2. "house_number": Podaj wyłącznie numer domu / lokalu / działki.\n' +
-                '3. "city": Podaj wyłącznie nazwę miejscowości/miasta.\n' +
-                '4. "postal_code": Podaj strictly kod pocztowy KLIENTA (format XX-XXX). UWAGA: Na screenie mogą znajdować się kody pocztowe doradców (np. Mateusz, Janusz itp.) lub numery ID systemu. Kategorycznie je zignoruj! Wyciągnij tylko ten kod, który jest bezpośrednim elementem adresu zamieszkania/montażu klienta.\n\n' +
+                'Odczytaj dane klienta ze zdjęcia lub zrzutu ekranu z systemu spotkań. Zwróć wyłącznie JSON o dokładnie takiej strukturze: {"full_name":string|null,"phone":string|null,"email":string|null,"street":string|null,"house_number":string|null,"city":string|null,"postal_code":string|null,"ce_meeting_datetime":string|null,"import_note":string|null}.\n\n' +
+                'BEZWZGLĘDNE ZASADY DLA ADRESU KLIENTA:\n' +
+                '1. "street" ma zawierać wyłącznie nazwę ulicy bez numeru domu, numeru lokalu, kodu pocztowego i miasta. Jeżeli adres nie zawiera ulicy, ale zawiera samą nazwę miejscowości, wpisz tę nazwę w "street" tylko wtedy, gdy tak wynika bezpośrednio z układu adresu.\n' +
+                '2. "house_number" ma zawierać wyłącznie numer domu, lokalu albo działki. Nie dodawaj nazwy ulicy, miasta ani kodu pocztowego.\n' +
+                '3. "city" ma zawierać wyłącznie nazwę miejscowości lub miasta. Nie dodawaj kodu pocztowego ani ulicy.\n' +
+                '4. "postal_code" ma zawierać wyłącznie kod pocztowy klienta w formacie XX-XXX. Kod musi być bezpośrednio związany z adresem zamieszkania, montażu albo spotkania klienta. KATEGORYCZNIE ZABRANIA SIĘ przepisywania kodów pocztowych przypisanych do doradców, handlowców albo użytkowników widocznych na zdjęciu, np. "Janusz 29-100", "Mateusz 91-024", "Paweł 25-015". Nie przepisuj także numerów ID systemu ani innych ciągów cyfr jako kodu pocztowego. Jeżeli nie ma pewnego kodu klienta, zwróć null.\n\n' +
+                'BEZWZGLĘDNE ZASADY DLA NOTATKI import_note:\n' +
+                '1. import_note jest polem kluczowym. Odczytaj wszystkie informacje techniczne, sprzedażowe, finansowe i opisowe widoczne na zdjęciu poza podstawowymi danymi klienta.\n' +
+                '2. ZIGNORUJ napis "Notatka: Brak" albo podobną informację o braku notatki, jeżeli w dowolnym innym miejscu zdjęcia, również niżej na ekranie, widoczne są dane techniczne, sprzedażowe, opis spotkania, uwagi albo parametry oferty.\n' +
+                '3. NIE UCINAJ, NIE STRESZCZAJ i NIE POMIJAJ widocznego tekstu. Przeczytaj całe zdjęcie od góry do dołu, również sekcje "Spotkanie handlowe", "Opis", "Uwagi", "Informacje dodatkowe" i podobne.\n' +
+                '4. Połącz informacje w jednym polu import_note, oddzielając poszczególne elementy przecinkami. Zachowaj możliwie dokładne brzmienie i wartości.\n' +
+                '5. import_note musi obejmować, jeżeli są widoczne: właściciela licznika, rodzaj pokrycia dachowego, wysokość rachunków, okres rachunku, taryfę lub stawki, informacje o umowie kompleksowej, produkt, informacje dodatkowe, wyceny, moce falowników, modele falowników, moc instalacji, parametry magazynu energii oraz inne dane techniczne.\n' +
+                '6. Właściciel licznika zawsze trafia do import_note i nigdy nie jest tworzony jako osobne pole.\n\n' +
                 'POZOSTAŁE ZASADY:\n' +
-                '- Email odczytaj jako osobne pole email tylko wtedy, gdy jest to email klienta. Ignoruj emaile zawierające columbusenergy, columbusone albo columbuselite.\n' +
-                '- Pole ce_meeting_datetime ma zawierać datę i godzinę spotkania w CE/Columbus/konkurencji widoczną na screenie, jeśli występuje. Zachowaj możliwie czytelny format, np. "21.06.2026 14:30" albo dokładnie taki, jak na screenie. Jeśli nie ma daty/godziny spotkania, zwróć null.\n' +
-'- Pole import_note ma zawierać wszystkie informacje sprzedażowe i opisowe widoczne na screenie poza podstawowymi danymi klienta, czyli m.in. produkt, rachunek, właściciel licznika, umowa kompleksowa, pokrycie dachowe, informacje dodatkowe, treść sekcji "Spotkanie handlowe", "Opis", "Uwagi". Właściciel licznika zawsze ma trafić do import_note, nie jako osobne pole. Nie traktuj pola "Notatka: Brak" jako powodu do pustej notatki, jeżeli wyżej na ekranie są informacje opisowe.',
+                '- "email" uzupełnij tylko wtedy, gdy jest to adres klienta. Ignoruj wszystkie adresy zawierające columbusenergy, columbusone albo columbuselite.\n' +
+                '- "ce_meeting_datetime" ma zawierać widoczną datę i godzinę spotkania w CE, Columbus albo innym systemie konkurencji. Zachowaj czytelny format, np. "21.06.2026 14:30", albo dokładne brzmienie ze zdjęcia. Jeżeli nie ma daty i godziny spotkania, zwróć null.\n' +
+                '- Dla każdego pola zwróć null, gdy wartości nie da się pewnie odczytać. Nie halucynuj i nie rekonstruuj danych na podstawie kontekstu.',
             },
             {
               type: "image_url",
@@ -621,13 +647,13 @@ async function analyzeImage(file: File): Promise<OcrClientRow> {
     const houseNumStr = normalizeText(parsed?.house_number);
     const cleanAddress = [streetStr, houseNumStr].filter(Boolean).join(" ");
     const ceMeetingDatetime = normalizeText(parsed?.ce_meeting_datetime);
-const importNote = normalizeText(parsed?.import_note);
-const finalImportNote = [
-  ceMeetingDatetime ? `Data spotkania w CE: ${ceMeetingDatetime}` : null,
-  importNote,
-]
-  .filter(Boolean)
-  .join("\n");
+    const importNote = normalizeText(parsed?.import_note);
+    const finalImportNote = [
+      ceMeetingDatetime ? `Data spotkania w CE: ${ceMeetingDatetime}` : null,
+      importNote,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     return {
       source_file_name: file.name,
