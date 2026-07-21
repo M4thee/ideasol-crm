@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import AdminPanel from "@/components/calculator/AdminPanel";
+import GrantAdminPanel from "@/components/calculator/GrantAdminPanel";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
 
@@ -72,7 +73,9 @@ export default function AdminUsersPage() {
     is_system: false,
   });
 
-  const [activeSection, setActiveSection] = useState<"users" | "tags" | "pricing">("users");
+  const [activeSection, setActiveSection] = useState<
+    "users" | "tags" | "pricing" | "grant"
+  >("users");
   const [adminStatus, setAdminStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
 
@@ -1288,6 +1291,18 @@ export default function AdminUsersPage() {
               >
                 Kalkulator
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection("grant")}
+                className={
+                  activeSection === "grant"
+                    ? "rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm"
+                    : "rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+                }
+              >
+                GRANT
+              </button>
               <Link
                 href="/admin/users/infobars"
                 className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
@@ -1577,6 +1592,8 @@ export default function AdminUsersPage() {
                 resetPricingOverrides={resetPricingOverrides}
               />
             )}
+
+            {activeSection === "grant" && <GrantAdminPanel />}
 
             {activeSection === "users" && (
               <>

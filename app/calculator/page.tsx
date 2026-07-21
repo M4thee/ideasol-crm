@@ -6,6 +6,7 @@ import OfferResult from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
+import GrantCalculator from "@/components/calculator/GrantCalculator";
 import {
   calculateOffer,
   type CalculatorCatalog,
@@ -424,6 +425,9 @@ function writeCachedPricingOverrides(pricing: typeof DEFAULT_PRICING_OVERRIDES) 
   }
 }
 export default function Home() {
+  const [calculatorMode, setCalculatorMode] = useState<"standard" | "grant">(
+    "standard"
+  );
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
@@ -1877,6 +1881,51 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
 
+        <div className="flex w-full flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setCalculatorMode("standard")}
+            className={
+              calculatorMode === "standard"
+                ? "rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm"
+                : "rounded-xl px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }
+          >
+            Standardowy
+          </button>
+          <button
+            type="button"
+            onClick={() => setCalculatorMode("grant")}
+            className={
+              calculatorMode === "grant"
+                ? "rounded-xl bg-[#5300EB] px-5 py-3 text-sm font-semibold text-white shadow-sm ring-2 ring-[#00C0EB] outline-none focus-visible:ring-2 focus-visible:ring-[#00C0EB]"
+                : "rounded-xl px-5 py-3 text-sm font-semibold text-slate-600 outline-none transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[#00C0EB] dark:text-slate-300 dark:hover:bg-slate-800"
+            }
+          >
+            Grant OZE — Radzionków
+          </button>
+        </div>
+
+        {calculatorMode === "grant" ? (
+          <GrantCalculator
+            canSeeInternalCosts={canSeeTechnicalView}
+            currentUserId={userProfile?.id || null}
+            advisorName={advisorName}
+            advisorPhone={advisorPhone}
+            advisorEmail={advisorEmail}
+            advisorRole={currentUserRole}
+            crmClients={crmClients}
+            selectedClientId={selectedClientId}
+            onSelectedClientIdChange={setSelectedClientId}
+            onClientEmailSaved={(clientId, email) => {
+              setCrmClients((currentClients) => currentClients.map((client) => (
+                client.id === clientId ? { ...client, email } : client
+              )));
+            }}
+          />
+        ) : (
+          <>
+
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
             <p className="font-semibold">
@@ -2001,6 +2050,8 @@ IdeaSol`;
             )}
           </div>
         </section>
+          </>
+        )}
       </div>
     </main>
   );
