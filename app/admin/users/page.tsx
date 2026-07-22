@@ -1309,6 +1309,12 @@ export default function AdminUsersPage() {
               >
                 Infobar
               </Link>
+              <Link
+                href="/admin/lead-integrations"
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+              >
+                Integracje leadów
+              </Link>
             </div>
           </div>
             {activeSection === "users" && (

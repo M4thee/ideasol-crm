@@ -49,6 +49,14 @@ export type TeamsMetaLeadNotificationPayload = {
   };
 };
 
+export type TeamsLeadAssignmentNotificationPayload = {
+  campaignName: string;
+  clientName: string;
+  crmUrl: string;
+  assignedUserName?: string | null;
+  recipientIsOwner?: boolean;
+};
+
 export type TeamsEnergyStorageLeadNotificationPayload = {
   advisorName?: string | null;
   clientName: string;
@@ -124,6 +132,24 @@ export function buildTeamsMetaLeadMessage(payload: TeamsMetaLeadNotificationPayl
   }
 
   return lines.join("\n");
+}
+
+export function buildTeamsLeadAssignmentMessage(
+  payload: TeamsLeadAssignmentNotificationPayload
+) {
+  const clientLink = `<a href="${escapeHtml(payload.crmUrl)}">${displayValue(payload.clientName)}</a>`;
+  const intro = payload.recipientIsOwner
+    ? `Do użytkownika <strong>${displayValue(payload.assignedUserName)}</strong> został przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`
+    : `Do obsługi został Ci przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`;
+
+  return [
+    "<strong>🔥 Nowy lead w CRM</strong>",
+    "",
+    intro,
+    "Niezwłocznie skontaktuj się z klientem.",
+    "",
+    `Klient: ${clientLink}`,
+  ].join("\n");
 }
 
 export function buildTeamsEnergyStorageLeadDirectMessage(
@@ -432,7 +458,67 @@ export async function sendTeamsDelegatedDirectCalendarNotification(
 }
 
 export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendarNotificationPayload) {
-  return sendTeamsDirectCalendarNotification(payload);
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+  if (!delegatedRefreshToken) {
+    throw new Error(
+      "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki indywidualnej wiadomości Teams o leadzie Meta."
+    );
+  }
+
+  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+  if (!delegatedToken.access_token) {
+    throw new Error(
+      "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla powiadomienia o leadzie Meta."
+    );
+  }
+
+  return sendTeamsDelegatedDirectCalendarNotification({
+    ...payload,
+    accessToken: delegatedToken.access_token,
+  });
+}
+
+export async function sendTeamsBoardMetaLeadNotification(
+  payload: TeamsChannelNotificationPayload
+) {
+  const boardChatId = requireEnv("MICROSOFT_TEAMS_BOARD_CHAT_ID");
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+  if (!delegatedRefreshToken) {
+    throw new Error(
+      "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki wiadomości Teams na czat Zarządu."
+    );
+  }
+
+  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+  if (!delegatedToken.access_token) {
+    throw new Error(
+      "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla czatu Zarządu."
+    );
+  }
+
+  const message = await graphApiRequestWithAccessToken<GraphChannelMessage>(
+    `https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(boardChatId)}/messages`,
+    delegatedToken.access_token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: {
+          contentType: "html",
+          content: payload.message.replaceAll("\n", "<br />"),
+        },
+      }),
+    }
+  );
+
+  return {
+    success: true,
+    chatId: boardChatId,
+    messageId: message.id,
+  };
 }
 
 export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {

@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  assignLead,
+  attachIntegrationTags,
+  findLeadIntegration,
+  type LeadIntegration,
+} from "@/lib/leadIntegrations";
+import {
+  buildTeamsLeadAssignmentMessage,
+  sendTeamsBoardMetaLeadNotification,
+  sendTeamsDirectMetaLeadNotification,
+} from "@/lib/microsoftTeams";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+
+export const runtime = "nodejs";
 
 type MetaLeadField = {
   name?: string;
@@ -10,77 +23,33 @@ type NormalizedMetaLead = {
   fullName: string | null;
   phone: string | null;
   postalCode: string | null;
-  singleFamilyHouse: string | null;
-  yearlyElectricityBills: string | null;
-  hasPhotovoltaics: string | null;
-  preferredContactTime: string | null;
+  extraAnswers: Array<{ label: string; value: string }>;
   rawFieldData: MetaLeadField[];
 };
 
-type LeadAssignment = {
-  userId: string | null;
-  status: "assigned_to_nearest_user" | "assigned_to_fallback_cc";
-  distanceKm: number | null;
+const DEFAULT_FIELD_MAPPING: Record<string, string[]> = {
+  fullName: ["full_name", "full name", "imie_i_nazwisko", "imię i nazwisko", "imie"],
+  phone: ["phone_number", "phone", "numer_telefonu", "numer telefonu", "telefon"],
+  postalCode: [
+    "postal_code",
+    "postal code",
+    "kod_pocztowy",
+    "kod pocztowy",
+    "kod_pocztowy_inwestycji",
+  ],
 };
-
-const FALLBACK_CC_NAME = "Kamil Wiśniewski";
-const META_LEAD_TAG_NAME = "MetaADS";
-const POLAND_COUNTRY_CODE = "pl";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  if (
-    mode === "subscribe" &&
-    token === process.env.META_WEBHOOK_VERIFY_TOKEN
-  ) {
+  if (mode === "subscribe" && token === process.env.META_WEBHOOK_VERIFY_TOKEN) {
     return new NextResponse(challenge ?? "", { status: 200 });
   }
 
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-}
-
-function extractLeadgenIds(body: any): string[] {
-  const ids: string[] = [];
-
-  for (const entry of body?.entry ?? []) {
-    for (const change of entry?.changes ?? []) {
-      const leadgenId = change?.value?.leadgen_id;
-
-      if (leadgenId) {
-        ids.push(String(leadgenId));
-      }
-    }
-  }
-
-  return ids;
-}
-
-async function saveMetaLead(
-  leadgenId: string,
-  body: any,
-  assignmentStatus = "received"
-) {
-  const { error } = await supabaseAdmin
-    .from("meta_leads")
-    .upsert(
-      {
-        meta_lead_id: leadgenId,
-        raw_payload: body,
-        assignment_status: assignmentStatus,
-      },
-      {
-        onConflict: "meta_lead_id",
-      }
-    );
-
-  if (error) {
-    console.error("[META WEBHOOK] saveMetaLead", error);
-  }
 }
 
 function normalizeFieldName(value?: string) {
@@ -94,501 +63,282 @@ function normalizeFieldName(value?: string) {
 
 function getFieldValue(fields: MetaLeadField[], candidates: string[]) {
   const normalizedCandidates = candidates.map(normalizeFieldName);
-
-  for (const field of fields) {
-    const normalizedName = normalizeFieldName(field.name);
-
-    if (normalizedCandidates.includes(normalizedName)) {
-      return field.values?.[0]?.trim() || null;
-    }
-  }
-
-  return null;
+  const field = fields.find((item) =>
+    normalizedCandidates.includes(normalizeFieldName(item.name))
+  );
+  return field?.values?.[0]?.trim() || null;
 }
 
 function normalizePostalCode(value: string | null) {
-  const normalizedValue = value?.trim();
-
-  if (!normalizedValue) {
-    return null;
-  }
-
-  const digits = normalizedValue.replace(/[^0-9]/g, "");
-
-  if (digits.length !== 5) {
-    return normalizedValue;
-  }
-
-  return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.length === 5 ? `${digits.slice(0, 2)}-${digits.slice(2)}` : value?.trim() || null;
 }
 
-function toRadians(value: number) {
-  return (value * Math.PI) / 180;
-}
-
-function calculateDistanceKm(
-  firstLat: number,
-  firstLng: number,
-  secondLat: number,
-  secondLng: number
-) {
-  const earthRadiusKm = 6371;
-  const latDifference = toRadians(secondLat - firstLat);
-  const lngDifference = toRadians(secondLng - firstLng);
-
-  const a =
-    Math.sin(latDifference / 2) * Math.sin(latDifference / 2) +
-    Math.cos(toRadians(firstLat)) *
-      Math.cos(toRadians(secondLat)) *
-      Math.sin(lngDifference / 2) *
-      Math.sin(lngDifference / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return earthRadiusKm * c;
-}
-
-async function getCachedPostalGeocode(postalCode: string) {
-  const { data, error } = await supabaseAdmin
-    .from("postal_geocodes")
-    .select("lat,lng")
-    .eq("postal_code", postalCode)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[META WEBHOOK] getCachedPostalGeocode", error);
-  }
-
-  if (!data?.lat || !data?.lng) {
-    return null;
-  }
-
-  return {
-    lat: Number(data.lat),
-    lng: Number(data.lng),
-  };
-}
-
-async function savePostalGeocode(
-  postalCode: string,
-  lat: number,
-  lng: number,
-  city?: string | null
-) {
-  const { error } = await supabaseAdmin
-    .from("postal_geocodes")
-    .upsert(
-      {
-        postal_code: postalCode,
-        city: city ?? null,
-        lat,
-        lng,
-        source: "nominatim",
-      },
-      {
-        onConflict: "postal_code",
-      }
-    );
-
-  if (error) {
-    console.error("[META WEBHOOK] savePostalGeocode", error);
-  }
-}
-
-async function geocodePostalCode(postalCode: string | null) {
-  const normalizedPostalCode = normalizePostalCode(postalCode);
-
-  if (!normalizedPostalCode) {
-    return null;
-  }
-
-  const cachedGeocode = await getCachedPostalGeocode(normalizedPostalCode);
-
-  if (cachedGeocode) {
-    return cachedGeocode;
-  }
-
-  const params = new URLSearchParams({
-    postalcode: normalizedPostalCode,
-    countrycodes: POLAND_COUNTRY_CODE,
-    format: "jsonv2",
-    limit: "1",
-  });
-
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-    {
-      cache: "no-store",
-      headers: {
-        "User-Agent": "IdeaSolCRM/1.0 (Meta Lead Ads webhook)",
-      },
-    }
+function normalizeMetaLead(fields: MetaLeadField[], integration: LeadIntegration) {
+  const mapping = { ...DEFAULT_FIELD_MAPPING, ...(integration.field_mapping ?? {}) };
+  const mappedNames = new Set(
+    Object.values(mapping).flat().map((fieldName) => normalizeFieldName(fieldName))
   );
 
-  if (!response.ok) {
-    console.error(
-      `[META WEBHOOK] geocodePostalCode failed ${normalizedPostalCode}: ${response.status}`
-    );
-    return null;
-  }
-
-  const results = await response.json();
-  const firstResult = Array.isArray(results) ? results[0] : null;
-
-  if (!firstResult?.lat || !firstResult?.lon) {
-    return null;
-  }
-
-  const lat = Number(firstResult.lat);
-  const lng = Number(firstResult.lon);
-
-  await savePostalGeocode(
-    normalizedPostalCode,
-    lat,
-    lng,
-    firstResult?.address?.city ?? firstResult?.address?.town ?? null
-  );
-
-  return { lat, lng };
-}
-
-function normalizeMetaLead(fields: MetaLeadField[]): NormalizedMetaLead {
   return {
-    fullName: getFieldValue(fields, [
-      "full_name",
-      "full name",
-      "imie_i_nazwisko",
-      "imię i nazwisko",
-    ]),
-    phone: getFieldValue(fields, [
-      "phone_number",
-      "phone",
-      "numer_telefonu",
-      "telefon",
-    ]),
+    fullName: getFieldValue(fields, mapping.fullName ?? DEFAULT_FIELD_MAPPING.fullName),
+    phone: getFieldValue(fields, mapping.phone ?? DEFAULT_FIELD_MAPPING.phone),
     postalCode: normalizePostalCode(
-      getFieldValue(fields, [
-        "kod_pocztowy_inwestycji",
-        "kod pocztowy inwestycji",
-        "kod_pocztowy",
-        "kod pocztowy",
-      ])
+      getFieldValue(fields, mapping.postalCode ?? DEFAULT_FIELD_MAPPING.postalCode)
     ),
-    singleFamilyHouse: getFieldValue(fields, [
-      "czy_mieszkasz_w_domu_jednorodzinnym",
-      "czy mieszkasz w domu jednorodzinnym",
-    ]),
-    yearlyElectricityBills: getFieldValue(fields, [
-      "jakie_sa_twoje_roczne_rachunki_za_energie_elektryczna",
-      "jakie są twoje roczne rachunki za energię elektryczną",
-      "ile_wynosza_twoje_roczne_rachunki_za_prad",
-      "ile wynoszą twoje roczne rachunki za prąd",
-    ]),
-    hasPhotovoltaics: getFieldValue(fields, [
-      "czy_posiadasz_instalacje_fotowoltaiczna",
-      "czy posiadasz instalację fotowoltaiczną",
-      "czy_masz_fotowoltaike",
-      "czy masz fotowoltaikę",
-    ]),
-    preferredContactTime: getFieldValue(fields, [
-      "kiedy_najwygodniej_sie_z_toba_skontaktowac",
-      "kiedy najwygodniej się z tobą skontaktować",
-      "kiedy_moge_do_ciebie_zadzwonic",
-      "kiedy mogę do ciebie zadzwonić",
-    ]),
+    extraAnswers: fields
+      .filter((field) => !mappedNames.has(normalizeFieldName(field.name)))
+      .map((field) => ({
+        label: field.name || "Pole formularza",
+        value: field.values?.join(", ") || "brak danych",
+      })),
     rawFieldData: fields,
-  };
+  } satisfies NormalizedMetaLead;
+}
+
+type MetaWebhookBody = {
+  entry?: Array<{
+    changes?: Array<{
+      value?: { leadgen_id?: string | number; form_id?: string | number };
+    }>;
+  }>;
+};
+
+function extractLeadEvents(body: unknown) {
+  const events: Array<{ leadgenId: string; formId: string | null }> = [];
+  const webhookBody = body as MetaWebhookBody;
+
+  for (const entry of webhookBody?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      if (change?.value?.leadgen_id) {
+        events.push({
+          leadgenId: String(change.value.leadgen_id),
+          formId: change.value.form_id ? String(change.value.form_id) : null,
+        });
+      }
+    }
+  }
+
+  return events;
 }
 
 async function fetchMetaLead(leadgenId: string) {
   const accessToken = process.env.META_PAGE_ACCESS_TOKEN;
-
-  if (!accessToken) {
-    throw new Error("Missing META_PAGE_ACCESS_TOKEN");
-  }
+  if (!accessToken) throw new Error("Brakuje META_PAGE_ACCESS_TOKEN.");
 
   const apiVersion = process.env.META_GRAPH_API_VERSION || "v20.0";
   const response = await fetch(
-    `https://graph.facebook.com/${apiVersion}/${leadgenId}?access_token=${accessToken}`,
+    `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(accessToken)}`,
     { cache: "no-store" }
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Meta lead fetch failed: ${response.status} ${errorText}`);
+    throw new Error(`Meta Graph API zwróciło ${response.status}: ${await response.text()}`);
   }
 
   return response.json();
 }
 
-async function findFallbackCcUserId() {
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .eq("display_name", FALLBACK_CC_NAME)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[META WEBHOOK] findFallbackCcUserId", error);
-  }
-
-  return data?.id ?? null;
-}
-
-async function findNearestAssignableUserId(postalCode: string | null): Promise<LeadAssignment> {
-  const fallbackCcUserId = await findFallbackCcUserId();
-  const leadGeocode = await geocodePostalCode(postalCode);
-
-  if (!leadGeocode) {
-    return {
-      userId: fallbackCcUserId,
-      status: "assigned_to_fallback_cc",
-      distanceKm: null,
-    };
-  }
-
-  const { data: locations, error: locationsError } = await supabaseAdmin
-    .from("user_service_locations")
-    .select("user_id,postal_code,radius_km");
-
-  if (locationsError) {
-    console.error("[META WEBHOOK] findNearestAssignableUserId locations", locationsError);
-    return {
-      userId: fallbackCcUserId,
-      status: "assigned_to_fallback_cc",
-      distanceKm: null,
-    };
-  }
-
-  const userIds = Array.from(
-    new Set((locations ?? []).map((location: any) => location.user_id).filter(Boolean))
+async function saveMetaLead(
+  leadgenId: string,
+  values: Record<string, unknown>
+) {
+  const { error } = await supabaseAdmin.from("meta_leads").upsert(
+    {
+      meta_lead_id: leadgenId,
+      ...values,
+    },
+    { onConflict: "meta_lead_id" }
   );
 
-  if (userIds.length === 0) {
-    return {
-      userId: fallbackCcUserId,
-      status: "assigned_to_fallback_cc",
-      distanceKm: null,
-    };
-  }
-
-  const { data: profiles, error: profilesError } = await supabaseAdmin
-    .from("profiles")
-    .select("id,role,is_active,hidden_from_assignment")
-    .in("id", userIds);
-
-  if (profilesError) {
-    console.error("[META WEBHOOK] findNearestAssignableUserId profiles", profilesError);
-    return {
-      userId: fallbackCcUserId,
-      status: "assigned_to_fallback_cc",
-      distanceKm: null,
-    };
-  }
-
-  const assignableUserIds = new Set(
-    (profiles ?? [])
-      .filter((profile: any) =>
-        ["seller", "manager", "owner"].includes(profile.role) &&
-        profile.is_active !== false &&
-        profile.hidden_from_assignment !== true
-      )
-      .map((profile: any) => profile.id)
-  );
-
-  let bestMatch: { userId: string; distanceKm: number } | null = null;
-
-  for (const location of locations ?? []) {
-    if (!assignableUserIds.has(location.user_id)) {
-      continue;
-    }
-
-    const locationGeocode = await geocodePostalCode(location.postal_code);
-
-    if (!locationGeocode) {
-      continue;
-    }
-
-    const distanceKm = calculateDistanceKm(
-      leadGeocode.lat,
-      leadGeocode.lng,
-      locationGeocode.lat,
-      locationGeocode.lng
-    );
-
-    const radiusKm = Number(location.radius_km ?? 80);
-
-    if (distanceKm > radiusKm) {
-      continue;
-    }
-
-    if (!bestMatch || distanceKm < bestMatch.distanceKm) {
-      bestMatch = {
-        userId: location.user_id,
-        distanceKm,
-      };
-    }
-  }
-
-  if (!bestMatch) {
-    return {
-      userId: fallbackCcUserId,
-      status: "assigned_to_fallback_cc",
-      distanceKm: null,
-    };
-  }
-
-  return {
-    userId: bestMatch.userId,
-    status: "assigned_to_nearest_user",
-    distanceKm: Math.round(bestMatch.distanceKm * 10) / 10,
-  };
+  if (error) throw error;
 }
 
-async function findMetaAdsTagId() {
+async function findExistingClientId(leadgenId: string) {
   const { data, error } = await supabaseAdmin
-    .from("client_tags")
-    .select("id")
-    .eq("name", META_LEAD_TAG_NAME)
+    .from("meta_leads")
+    .select("client_id")
+    .eq("meta_lead_id", leadgenId)
     .maybeSingle();
 
-  if (error) {
-    console.error("[META WEBHOOK] findMetaAdsTagId", error);
-  }
-
-  return data?.id ?? null;
+  if (error) throw error;
+  return data?.client_id ? String(data.client_id) : null;
 }
 
-async function attachMetaAdsTag(clientId: string) {
-  const tagId = await findMetaAdsTagId();
-
-  if (!tagId) {
-    console.error("[META WEBHOOK] MetaADS tag not found");
-    return;
-  }
-
-  const { error } = await supabaseAdmin
-    .from("client_tag_links")
-    .upsert(
-      {
-        client_id: clientId,
-        tag_id: tagId,
-      },
-      {
-        onConflict: "client_id,tag_id",
-      }
-    );
-
-  if (error) {
-    console.error("[META WEBHOOK] attachMetaAdsTag", error);
-  }
-}
-
-async function createClientFromMetaLead(
+async function createClient(
   lead: NormalizedMetaLead,
+  integration: LeadIntegration,
   assignedUserId: string | null
 ) {
+  const notes = [
+    `Lead z ${integration.name}.`,
+    `Kampania: ${integration.campaign_name}`,
+    ...lead.extraAnswers.map((answer) => `${answer.label}: ${answer.value}`),
+  ].join("\n");
+
   const { data, error } = await supabaseAdmin
     .from("clients")
     .insert({
-      full_name: lead.fullName || "Lead MetaADS",
+      full_name: lead.fullName || "Lead Meta Ads",
       phone: lead.phone,
       postal_code: lead.postalCode,
       status: assignedUserId ? "Przypisany" : "Nowy lead",
       assigned_user_id: assignedUserId,
-      lead_source: META_LEAD_TAG_NAME,
-      notes: [
-        "Lead z Meta Ads.",
-        `Dom jednorodzinny: ${lead.singleFamilyHouse ?? "brak danych"}`,
-        `Roczne rachunki: ${lead.yearlyElectricityBills ?? "brak danych"}`,
-        `Fotowoltaika: ${lead.hasPhotovoltaics ?? "brak danych"}`,
-        `Preferowana pora kontaktu: ${lead.preferredContactTime ?? "brak danych"}`,
-      ].join("\n"),
+      lead_source: "Meta Ads",
     })
     .select("id")
     .single();
 
-  if (error) {
-    throw error;
+  if (error) throw error;
+
+  if (notes) {
+    const { error: noteError } = await supabaseAdmin.from("client_notes").insert({
+      client_id: data.id,
+      content: notes,
+      created_by: null,
+    });
+
+    if (noteError) throw noteError;
   }
 
-  await attachMetaAdsTag(data.id);
-
-  return data.id as string;
+  await attachIntegrationTags(data.id, integration.tag_names);
+  return String(data.id);
 }
 
-async function processLeadgenId(leadgenId: string, webhookBody: any) {
-  await saveMetaLead(leadgenId, webhookBody, "received");
+async function sendNotifications(params: {
+  integration: LeadIntegration;
+  clientId: string;
+  clientName: string;
+  assignedUser: { id: string; email: string | null; display_name: string | null } | null;
+}) {
+  const { integration, clientId, clientName, assignedUser } = params;
+  if (!assignedUser) return;
 
-  const metaLead = await fetchMetaLead(leadgenId);
-  const fieldData = (metaLead?.field_data ?? []) as MetaLeadField[];
-  const normalizedLead = normalizeMetaLead(fieldData);
-  const assignment = await findNearestAssignableUserId(normalizedLead.postalCode);
+  const crmUrl = `${process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl"}/clients/${encodeURIComponent(clientId)}`;
+  const deliveries: Array<Promise<unknown>> = [];
 
-  const clientId = await createClientFromMetaLead(normalizedLead, assignment.userId);
+  if (integration.notify_assigned_user && assignedUser.email) {
+    deliveries.push(
+      sendTeamsDirectMetaLeadNotification({
+        userEmail: assignedUser.email,
+        message: buildTeamsLeadAssignmentMessage({
+          campaignName: integration.campaign_name,
+          clientName,
+          crmUrl,
+        }),
+      })
+    );
+  }
 
-  await supabaseAdmin
-    .from("meta_leads")
-    .update({
-      client_id: clientId,
-      assigned_user_id: assignment.userId,
+  if (integration.notify_owners) {
+    deliveries.push(
+      sendTeamsBoardMetaLeadNotification({
+        message: buildTeamsLeadAssignmentMessage({
+          campaignName: integration.campaign_name,
+          clientName,
+          crmUrl,
+          assignedUserName: assignedUser.display_name || assignedUser.email,
+          recipientIsOwner: true,
+        }),
+      })
+    );
+  }
+
+  const results = await Promise.allSettled(deliveries);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error("[META WEBHOOK] Teams notification", result.reason);
+    }
+  }
+}
+
+async function processLeadEvent(
+  event: { leadgenId: string; formId: string | null },
+  webhookBody: unknown
+) {
+  const existingClientId = await findExistingClientId(event.leadgenId);
+  if (existingClientId) {
+    return { leadgenId: event.leadgenId, clientId: existingClientId, duplicate: true };
+  }
+
+  await saveMetaLead(event.leadgenId, {
+    raw_payload: webhookBody,
+    assignment_status: "received",
+  });
+
+  const metaLead = await fetchMetaLead(event.leadgenId);
+  const formId = event.formId || (metaLead?.form_id ? String(metaLead.form_id) : null);
+  const integration = await findLeadIntegration("meta", { formId });
+
+  if (!integration) {
+    await saveMetaLead(event.leadgenId, {
       raw_payload: metaLead,
-      form_answers: normalizedLead,
-      assignment_status: assignment.status,
-    })
-    .eq("meta_lead_id", leadgenId);
+      assignment_status: "integration_not_found",
+    });
+    throw new Error(`Brak aktywnej konfiguracji Meta dla formularza ${formId || "bez ID"}.`);
+  }
+
+  const lead = normalizeMetaLead((metaLead?.field_data ?? []) as MetaLeadField[], integration);
+  if (!lead.phone) throw new Error("Lead Meta nie zawiera numeru telefonu.");
+
+  const assignment = await assignLead(integration, { postalCode: lead.postalCode });
+  const clientId = await createClient(lead, integration, assignment.user?.id ?? null);
+
+  await saveMetaLead(event.leadgenId, {
+    integration_id: integration.id,
+    client_id: clientId,
+    assigned_user_id: assignment.user?.id ?? null,
+    raw_payload: metaLead,
+    form_answers: lead,
+    assignment_status: assignment.user
+      ? `assigned_${assignment.appliedRule}`
+      : "unassigned_no_participants",
+  });
+
+  await sendNotifications({
+    integration,
+    clientId,
+    clientName: lead.fullName || "Lead Meta Ads",
+    assignedUser: assignment.user,
+  });
 
   return {
-    leadgenId,
+    leadgenId: event.leadgenId,
     clientId,
-    assignedUserId: assignment.userId,
-    assignmentStatus: assignment.status,
-    distanceKm: assignment.distanceKm,
+    integration: integration.slug,
+    assignedUserId: assignment.user?.id ?? null,
+    assignmentRule: assignment.appliedRule,
+    assignmentFallback: assignment.fallbackReason,
   };
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
+  const leadEvents = extractLeadEvents(body);
+  const processedLeads = [];
 
-  const entries = body?.entry ?? [];
-  const leadgenIds = extractLeadgenIds(body);
-
-  console.log(
-    `[META WEBHOOK] received ${entries.length} entries`
-  );
-
-  console.log("[META WEBHOOK]", JSON.stringify(body, null, 2));
-
-  const { error: systemLogError } = await supabaseAdmin.from("system_logs").insert({
+  const { error: logError } = await supabaseAdmin.from("system_logs").insert({
     source: "meta_webhook",
     message: "Webhook received",
     payload: body,
   });
+  if (logError) console.error("[META WEBHOOK] system_logs", logError);
 
-  if (systemLogError) {
-    console.error("[META WEBHOOK] system_logs", systemLogError);
-  }
-
-  const processedLeads = [];
-
-  for (const leadgenId of leadgenIds) {
+  for (const event of leadEvents) {
     try {
-      processedLeads.push(await processLeadgenId(leadgenId, body));
+      processedLeads.push(await processLeadEvent(event, body));
     } catch (error) {
-      console.error(`[META WEBHOOK] processLeadgenId ${leadgenId}`, error);
-
-      await saveMetaLead(leadgenId, body, "error");
+      console.error(`[META WEBHOOK] ${event.leadgenId}`, error);
+      await saveMetaLead(event.leadgenId, {
+        raw_payload: body,
+        assignment_status: "error",
+      }).catch((saveError) => console.error("[META WEBHOOK] error status", saveError));
     }
   }
 
-  console.log(
-    `[META WEBHOOK] processed ${processedLeads.length} lead ids`
-  );
-
   return NextResponse.json({
     success: true,
-    entries: entries.length,
-    leadgenIds,
+    received: leadEvents.length,
     processedLeads,
   });
 }
