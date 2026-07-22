@@ -138,14 +138,23 @@ export function buildTeamsLeadAssignmentMessage(
   payload: TeamsLeadAssignmentNotificationPayload
 ) {
   const clientLink = `<a href="${escapeHtml(payload.crmUrl)}">${displayValue(payload.clientName)}</a>`;
-  const intro = payload.recipientIsOwner
-    ? `Do użytkownika <strong>${displayValue(payload.assignedUserName)}</strong> został przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`
-    : `Do obsługi został Ci przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`;
+
+  if (payload.recipientIsOwner) {
+    return [
+      "<strong>🔥 Nowy lead w CRM</strong>",
+      "",
+      `Użytkownikowi <strong>${displayValue(payload.assignedUserName)}</strong> został przypisany do obsługi nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`,
+      "",
+      clientLink,
+      "",
+      "Dopilnuj, aby doradca skontaktował się z klientem i w razie konieczności przepisz leada innemu doradcy.",
+    ].join("\n");
+  }
 
   return [
     "<strong>🔥 Nowy lead w CRM</strong>",
     "",
-    intro,
+    `Do obsługi został Ci przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`,
     "Niezwłocznie skontaktuj się z klientem.",
     "",
     `Klient: ${clientLink}`,
