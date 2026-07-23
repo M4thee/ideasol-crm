@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 
 type Activity = {
   id: string;
@@ -310,29 +311,47 @@ export default function ClientActivities({
     const activityTitle =
       activityType === "phone" ? selectedPhoneStatusLabel() : title;
 
-    const { error } = await supabase.from("client_activities").insert({
-      client_id: clientId,
-      created_by: currentUserId,
-      activity_type: activityType,
-      title: activityTitle,
-      description,
-      phone_contact_type: activityType === "phone" ? phoneContactType : null,
-      phone_status: activityType === "phone" ? phoneStatus || null : null,
-      follow_up_at:
-        activityType === "phone" && shouldShowFollowUp() ? followUpAt : null,
-      meeting_at:
-        activityType === "phone" && shouldShowMeetingDate() ? meetingAt : null,
-      meeting_owner_id:
-        activityType === "phone" && shouldShowMeetingDate()
-          ? currentUserId
-          : null,
-    });
+    const { data: createdActivity, error } = await supabase
+      .from("client_activities")
+      .insert({
+        client_id: clientId,
+        created_by: currentUserId,
+        activity_type: activityType,
+        title: activityTitle,
+        description,
+        phone_contact_type: activityType === "phone" ? phoneContactType : null,
+        phone_status: activityType === "phone" ? phoneStatus || null : null,
+        follow_up_at:
+          activityType === "phone" && shouldShowFollowUp() ? followUpAt : null,
+        meeting_at:
+          activityType === "phone" && shouldShowMeetingDate() ? meetingAt : null,
+        meeting_owner_id:
+          activityType === "phone" && shouldShowMeetingDate()
+            ? currentUserId
+            : null,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       console.error("Błąd zapisu aktywności", error);
       setErrorMessage("Nie udało się zapisać aktywności");
       setSaving(false);
       return;
+    }
+
+    if (
+      createdActivity &&
+      activityType === "phone" &&
+      phoneContactType === "marketing" &&
+      phoneStatus === "meeting_scheduled"
+    ) {
+      void trackMetaCrmEvent({
+        eventName: "Schedule",
+        sourceType: "client_activity",
+        sourceId: createdActivity.id,
+        clientId,
+      });
     }
 
     setTitle("");

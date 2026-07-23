@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 
 type CalendarEvent = {
   id: string;
@@ -933,6 +934,15 @@ async function reassignEventOwner() {
         clientPhone: client?.phone || null,
         clientAddress: getClientAddress(),
       });
+
+      if (event.client_id) {
+        void trackMetaCrmEvent({
+          eventName: "Schedule",
+          sourceType: "calendar_event",
+          sourceId: meetingEvent.id,
+          clientId: event.client_id,
+        });
+      }
     }
 
     const completedStatus = `Zakończone - ${taskPhoneStatus}`;
@@ -1238,6 +1248,15 @@ async function reassignEventOwner() {
     setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
     setShowMeetingEffectPanel(false);
     setSavingMeetingEffect(false);
+
+    if (meetingEffectStatus === "Zainteresowany" && event.client_id) {
+      void trackMetaCrmEvent({
+        eventName: "QualifiedLead",
+        sourceType: "calendar_event",
+        sourceId: event.id,
+        clientId: event.client_id,
+      });
+    }
 
     alert("Efekt spotkania został zapisany, a wydarzenie oznaczono jako zakończone.");
   }

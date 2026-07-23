@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
@@ -1873,6 +1874,13 @@ if (updateClientStatusError) {
         .eq("id", sourceEventId);
     }
 
+    void trackMetaCrmEvent({
+      eventName: "Purchase",
+      sourceType: "sale",
+      sourceId: createdSale.id,
+      clientId: effectiveClientId,
+    });
+
     await sendTeamsSaleCreatedNotification(createdSale.id);
     setCreatingSale(false);
     setAllowDuplicateClientCreation(false);
@@ -2822,4 +2830,3 @@ if (updateClientStatusError) {
     </main>
   );
 }
-

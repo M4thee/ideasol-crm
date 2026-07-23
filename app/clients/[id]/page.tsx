@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
   ContactFormPayload,
 } from "../components/ClientContactForm";
@@ -1535,6 +1536,13 @@ export default function ClientPage() {
         meetingData as CalendarEvent,
         ...currentEvents,
       ]);
+
+      void trackMetaCrmEvent({
+        eventName: "Schedule",
+        sourceType: "calendar_event",
+        sourceId: (meetingData as CalendarEvent).id,
+        clientId,
+      });
 
       const assignedAdvisor =
         meetingAdvisors.find((advisor) => advisor.id === payload.assignedUserId) ||
