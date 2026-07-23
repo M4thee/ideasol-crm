@@ -33,7 +33,8 @@ type MetaApiResponse = {
   };
 };
 
-const DEFAULT_GRAPH_API_VERSION = "v23.0";
+const DEFAULT_GRAPH_API_VERSION = "v25.0";
+const CRM_EVENT_SOURCE = "IdeaSol CRM";
 
 function removeDiacritics(value: string) {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "");
@@ -137,14 +138,16 @@ export async function sendMetaCrmEvent(
     user_data: Object.fromEntries(
       Object.entries(userData).filter(([, value]) => value !== undefined)
     ),
-    ...(input.eventName === "Purchase"
-      ? {
-          custom_data: {
+    custom_data: {
+      lead_event_source: CRM_EVENT_SOURCE,
+      event_source: "crm",
+      ...(input.eventName === "Purchase"
+        ? {
             value: input.value,
             currency: input.currency,
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
   };
 
   const response = await fetch(
@@ -174,4 +177,3 @@ export async function sendMetaCrmEvent(
 
   return result;
 }
-
