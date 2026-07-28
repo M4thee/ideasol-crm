@@ -145,8 +145,8 @@ type OfferFormProps = {
   setRoofType: (value: string) => void;
   storage: string;
   setStorage: (value: string) => void;
-  withEms: boolean;
-  setWithEms: (value: boolean) => void;
+  clientHasOwnHybridInverter: boolean;
+  setClientHasOwnHybridInverter: (value: boolean) => void;
   billingSystem: "net_billing" | "net_metering";
   setBillingSystem: (value: "net_billing" | "net_metering") => void;
   includeSubsidy: boolean;
@@ -196,8 +196,8 @@ export default function OfferForm({
   setRoofType,
   storage,
   setStorage,
-  withEms,
-  setWithEms,
+  clientHasOwnHybridInverter,
+  setClientHasOwnHybridInverter,
   billingSystem,
   setBillingSystem,
   includeSubsidy,
@@ -575,7 +575,7 @@ export default function OfferForm({
     if (!nextHasPv && !nextHasStorage) {
       setOfferType("none");
       setStorage("none");
-      setWithEms(false);
+      setClientHasOwnHybridInverter(false);
       setIncludeSubsidy(false);
       setIsUpsell(false);
       setExistingPvPowerKw("0");
@@ -597,12 +597,11 @@ export default function OfferForm({
 
     if (nextOfferType === "pv") {
       setStorage("none");
-      setWithEms(false);
+      setClientHasOwnHybridInverter(false);
       setIncludeSubsidy(false);
     }
 
     if (nextOfferType === "pv_storage") {
-      setWithEms(false);
       setIncludeSubsidy(true);
       if (storage === "none") {
         setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
@@ -610,7 +609,6 @@ export default function OfferForm({
     }
 
     if (nextOfferType === "storage") {
-      setWithEms(false);
       setIncludeSubsidy(true);
       if (storage === "none") {
         setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
@@ -1089,24 +1087,23 @@ export default function OfferForm({
                   </select>
                 </label>
 
-                <label className="flex min-h-[104px] items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-950">
+                <label className="flex min-h-[104px] cursor-pointer items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-950">
                   <input
                     type="checkbox"
-                    checked={withEms}
-                    onChange={(e) => {
-                      setWithEms(e.target.checked);
+                    checked={clientHasOwnHybridInverter}
+                    onChange={(event) => {
+                      setClientHasOwnHybridInverter(event.target.checked);
+                      setSelectedInverterName("auto");
                       setResult(null);
                     }}
-                    className="h-5 w-5"
+                    className="h-5 w-5 accent-blue-600"
                   />
-
                   <div>
                     <div className="font-semibold text-slate-900 dark:text-slate-100">
-                      EMS / HEMS
+                      Klient posiada własny falownik hybrydowy
                     </div>
-
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      Dolicz system zarządzania energią.
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Falownik nie zostanie dodany do wyceny, oferty ani umowy. Bonus UE może nadal przysługiwać za magazyn wyprodukowany w UE.
                     </div>
                   </div>
                 </label>
@@ -1249,7 +1246,7 @@ export default function OfferForm({
           )}
         </div>
       )}
-      {(hasPvSelected || hasStorageSelected) && (
+      {(hasPvSelected || hasStorageSelected) && !clientHasOwnHybridInverter && (
         <label className="mb-5 block">
           <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
 
@@ -1266,10 +1263,6 @@ export default function OfferForm({
                 ? "Automatycznie dobierz falownik hybrydowy"
                 : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
             </option>
-
-            {hasStorageSelected && (
-              <option value="none">Brak — klient ma już falownik hybrydowy</option>
-            )}
 
             {invertersToShow
               .filter((inverterItem) => {

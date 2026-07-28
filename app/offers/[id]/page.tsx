@@ -1733,6 +1733,20 @@ export default function OfferDetailsPage() {
         client2_marketing_email: saleForm.client2MarketingEmail,
         client2_marketing_phone: saleForm.client2MarketingPhone,
         client2_photo_consent: saleForm.client2PhotoConsent,
+        subsidy_allocation: offer.offer_data?.result?.subsidyAllocation || null,
+        subsidy_total: Number(
+          offer.offer_data?.result?.subsidyAllocation?.total || 0
+        ),
+        subsidy_storage_subsidy: Number(
+          offer.offer_data?.result?.subsidyAllocation?.storageSubsidy || 0
+        ),
+        subsidy_eu_bonus: Number(
+          offer.offer_data?.result?.subsidyAllocation?.euBonus || 0
+        ),
+        client_has_own_hybrid_inverter: Boolean(
+          offer.offer_data?.form?.clientHasOwnHybridInverter ||
+          offer.offer_data?.result?.clientHasOwnHybridInverter
+        ),
         ...contractFinancialBreakdown,
       },
       offer_snapshot: offer,
@@ -2723,10 +2737,12 @@ if (updateClientStatusError) {
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase text-slate-400">Falownik</p>
-                <p className="mt-1 font-semibold text-slate-900">{offer.inverter || "Brak"}</p>
-              </div>
+              {offer.inverter && offer.inverter !== "Brak" && (
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">Falownik</p>
+                  <p className="mt-1 font-semibold text-slate-900">{offer.inverter}</p>
+                </div>
+              )}
 
               <div className="rounded-2xl bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">Dach</p>

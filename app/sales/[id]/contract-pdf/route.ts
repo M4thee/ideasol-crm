@@ -666,6 +666,7 @@ function getAdditionalProductsData(sale: Record<string, any>) {
 function getTechnicalData(sale: Record<string, any>) {
   const offerSnapshot = (sale.offer_snapshot || {}) as Record<string, any>;
   const offerData = (sale.offer_data || offerSnapshot.offer_data || {}) as Record<string, any>;
+  const customerData = (sale.customer_data || {}) as Record<string, any>;
   const formData = (offerData.form || offerSnapshot.form || {}) as Record<string, any>;
   const resultData = (offerData.result || offerSnapshot.result || {}) as Record<string, any>;
 
@@ -748,6 +749,7 @@ function getTechnicalData(sale: Record<string, any>) {
     soldItemsTextForTechnicalData.includes("storage");
 
   const hasEms =
+    hasStorage ||
     formData.withEms === true ||
     formData.hasEms === true ||
     formData.includeEms === true;
@@ -758,7 +760,17 @@ function getTechnicalData(sale: Record<string, any>) {
     formData.includeBackup === true ||
     formData.backup === true;
 
-  const hasInverter = hasPv || hasStorage;
+  const clientHasOwnHybridInverter = Boolean(
+    formData.clientHasOwnHybridInverter === true ||
+    formData.client_has_own_hybrid_inverter === true ||
+    resultData.clientHasOwnHybridInverter === true ||
+    resultData.client_has_own_hybrid_inverter === true ||
+    customerData.client_has_own_hybrid_inverter === true ||
+    formData.selectedInverterName === "none" ||
+    formData.selected_inverter_name === "none"
+  );
+
+  const hasInverter = !clientHasOwnHybridInverter && (hasPv || hasStorage);
 
   return {
     hasPv,
@@ -766,6 +778,7 @@ function getTechnicalData(sale: Record<string, any>) {
     hasEms,
     hasBackup,
     hasInverter,
+    clientHasOwnHybridInverter,
     pvPowerKw: (hasPv ? getNestedValue(source, ["pvPowerKw", "pv_power_kw", "powerKw", "formData.pvPowerKw", "resultData.pvPowerKw"]) : ""),
     panelModel: hasPv
       ? getNestedValue(source, [

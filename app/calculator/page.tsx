@@ -27,6 +27,7 @@ type Result = {
 
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
+  clientHasOwnHybridInverter?: boolean;
   includeSubsidy?: boolean;
   existingPvPowerKw?: number;
   subsidyProgramCap?: number;
@@ -37,6 +38,7 @@ type Result = {
     storageNet: number;
     emsNet: number;
     storageSubsidy: number;
+    euBonus?: number;
     emsBonus: number;
     total: number;
     programCap: number;
@@ -50,6 +52,12 @@ type Result = {
     storageCapacityKwh?: number;
     hasStorageMinimumCapacity?: boolean;
     hasRequiredStorageToPvRatio?: boolean;
+    qualifyingStorageCost?: number;
+    qualifyingVat?: number;
+    qualifyVat?: boolean;
+    euBonusEligible?: boolean;
+    storageIsEu?: boolean;
+    inverterIsEu?: boolean;
   };
 
   contractBreakdown?: {
@@ -119,6 +127,8 @@ type CatalogStorage = {
   installation_net: number;
   catalog_card_url?: string | null;
   catalogCardUrl?: string | null;
+  is_eu?: boolean;
+  isEu?: boolean;
 };
 
 type CatalogInverter = {
@@ -131,6 +141,8 @@ type CatalogInverter = {
   price_net: number;
   catalog_card_url?: string | null;
   catalogCardUrl?: string | null;
+  is_eu?: boolean;
+  isEu?: boolean;
 };
 
 type CatalogCardEmailAttachment = {
@@ -304,6 +316,9 @@ function removeOfflineOfferFromQueue(itemId: string) {
 
 
 const DEFAULT_PRICING_OVERRIDES = {
+  subsidy: {
+    qualifyVat: false,
+  },
   panels: {
     AMERISOLAR_450_FB: { priceNet: 230 },
     HORAY_435_BIFACIAL: { priceNet: 240 },
@@ -451,7 +466,7 @@ export default function Home() {
   const [selectedInverterName, setSelectedInverterName] = useState("auto");
   const [roofType, setRoofType] = useState("blacha");
   const [storage, setStorage] = useState("none");
-  const [withEms, setWithEms] = useState(false);
+  const [clientHasOwnHybridInverter, setClientHasOwnHybridInverter] = useState(false);
   const [includeSubsidy, setIncludeSubsidy] = useState(false);
   const [isUpsell, setIsUpsell] = useState(false);
   const [existingPvPowerKw, setExistingPvPowerKw] = useState("0");
@@ -789,6 +804,9 @@ export default function Home() {
             ...current.operator,
             percent: Number(data.warranty_percent ?? current.operator.percent),
           },
+          subsidy: {
+            qualifyVat: Boolean(data.pme_qualify_vat ?? current.subsidy.qualifyVat),
+          },
         };
 
         writeCachedPricingOverrides(nextPricing);
@@ -894,6 +912,8 @@ export default function Home() {
             voltageType: storageVoltageType,
             price_net: catalogStorage.priceNet,
             installation_net: catalogStorage.installationNet,
+            is_eu: Boolean(catalogStorage.isEu),
+            isEu: Boolean(catalogStorage.isEu),
             catalog_card_url:
               (catalogStorage as { catalogCardUrl?: string | null }).catalogCardUrl || null,
             catalogCardUrl:
@@ -916,6 +936,8 @@ export default function Home() {
           batteryVoltageType: inverterBatteryVoltageType,
           max_pv_kw: inverter.maxPvKw,
           price_net: inverter.priceNet,
+          is_eu: Boolean(inverter.isEu),
+          isEu: Boolean(inverter.isEu),
           catalog_card_url: inverterCatalogCardUrl,
           catalogCardUrl: inverterCatalogCardUrl,
         };
@@ -1004,15 +1026,18 @@ export default function Home() {
   }, [clientIdFromUrl, selectedClientId, crmClients]);
 
 
-  function updatePricingValue(path: string[], value: string) {
-    const numberValue = Number(value.replace(",", "."));
-    const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+  function updatePricingValue(path: string[], value: string | boolean) {
+    const numberValue = typeof value === "string" ? Number(value.replace(",", ".")) : 0;
+    const safeValue = typeof value === "boolean"
+      ? value
+      : Number.isFinite(numberValue) ? numberValue : 0;
 
     setPricingOverrides((current) => {
       const next = structuredClone(current);
       let target: any = next;
 
       for (let i = 0; i < path.length - 1; i++) {
+        target[path[i]] ||= {};
         target = target[path[i]];
       }
 
@@ -1050,6 +1075,7 @@ export default function Home() {
         manager_fee_percent: pricing.margins.managerFeeNet,
 
         warranty_percent: pricing.operator.percent,
+        pme_qualify_vat: Boolean(pricing.subsidy?.qualifyVat),
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);
@@ -1099,6 +1125,7 @@ export default function Home() {
           priceNet: Number(catalogStorage.price_net || 0),
           installationNet: Number(catalogStorage.installation_net || 0),
           catalogCardUrl: catalogStorage.catalog_card_url || catalogStorage.catalogCardUrl || null,
+          isEu: Boolean(catalogStorage.is_eu ?? catalogStorage.isEu),
         };
 
         return acc;
@@ -1124,6 +1151,7 @@ export default function Home() {
       maxPvKw: Number(inverter.max_pv_kw || 0),
       priceNet: Number(inverter.price_net || 0),
       catalogCardUrl: inverter.catalog_card_url || inverter.catalogCardUrl || null,
+      isEu: Boolean(inverter.is_eu ?? inverter.isEu),
     }));
 
     return {
@@ -1140,7 +1168,6 @@ export default function Home() {
       panelCount,
       roofType,
       storage,
-      withEms,
       includeSubsidy,
       isUpsell,
       existingPvPowerKw: isUpsell
@@ -1148,6 +1175,7 @@ export default function Home() {
         : 0,
       billingSystem,
       selectedInverterName,
+      clientHasOwnHybridInverter,
       sellerMarkup,
       vatRate,
       pricingOverrides,
@@ -1234,7 +1262,7 @@ export default function Home() {
     setManualPowerKw("");
     setRoofType("blacha");
     setStorage("none");
-    setWithEms(false);
+    setClientHasOwnHybridInverter(false);
     setIncludeSubsidy(false);
     setIsUpsell(false);
     setExistingPvPowerKw("0");
@@ -1309,7 +1337,8 @@ export default function Home() {
       subsidy_storage_net: result.subsidyAllocation?.storageNet ?? null,
       subsidy_ems_net: result.subsidyAllocation?.emsNet ?? null,
       subsidy_storage_subsidy: result.subsidyAllocation?.storageSubsidy ?? null,
-      subsidy_ems_bonus: result.subsidyAllocation?.emsBonus ?? null,
+      subsidy_ems_bonus: 0,
+      subsidy_eu_bonus: result.subsidyAllocation?.euBonus ?? null,
       subsidy_total: result.subsidyAllocation?.total ?? null,
       pv_power_kw: result.pvPowerKw,
       panel_model: panelModel,
@@ -1330,12 +1359,13 @@ export default function Home() {
           manualPowerKw,
           roofType,
           storage,
-          withEms,
+          withEms: Boolean(result.withEms),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw: isUpsell ? existingPvPowerKw : "0",
           billingSystem,
           selectedInverterName,
+          clientHasOwnHybridInverter,
           sellerMarkup,
           vatRate,
           defaultCalculatorMargin: userProfile?.default_seller_markup ?? null,
@@ -1495,12 +1525,13 @@ IdeaSol`;
           manualPowerKw,
           roofType,
           storage,
-          withEms,
+          withEms: Boolean(result.withEms),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw,
           billingSystem,
           selectedInverterName,
+          clientHasOwnHybridInverter,
           sellerMarkup,
           vatRate,
           selectedAdditionalServices,
@@ -1722,7 +1753,8 @@ IdeaSol`;
           subsidy_storage_net: queuedResult.subsidyAllocation?.storageNet ?? null,
           subsidy_ems_net: queuedResult.subsidyAllocation?.emsNet ?? null,
           subsidy_storage_subsidy: queuedResult.subsidyAllocation?.storageSubsidy ?? null,
-          subsidy_ems_bonus: queuedResult.subsidyAllocation?.emsBonus ?? null,
+          subsidy_ems_bonus: 0,
+          subsidy_eu_bonus: queuedResult.subsidyAllocation?.euBonus ?? null,
           subsidy_total: queuedResult.subsidyAllocation?.total ?? null,
           pv_power_kw: queuedResult.pvPowerKw,
           panel_model: snapshot.panelModel || null,
@@ -1743,12 +1775,15 @@ IdeaSol`;
               manualPowerKw: snapshot.manualPowerKw || "",
               roofType: snapshot.roofType || null,
               storage: snapshot.storage || null,
-              withEms: Boolean(snapshot.withEms),
+              withEms: Boolean(queuedResult.withEms ?? snapshot.withEms),
               includeSubsidy: Boolean(snapshot.includeSubsidy),
               isUpsell: Boolean(snapshot.isUpsell),
               existingPvPowerKw: snapshot.isUpsell ? snapshot.existingPvPowerKw || "0" : "0",
               billingSystem: snapshot.billingSystem || queuedResult.billingSystem || "net_billing",
               selectedInverterName: snapshot.selectedInverterName || "auto",
+              clientHasOwnHybridInverter: Boolean(
+                snapshot.clientHasOwnHybridInverter || queuedResult.clientHasOwnHybridInverter
+              ),
               sellerMarkup: Number(snapshot.sellerMarkup || 0),
               vatRate: Number(snapshot.vatRate || queuedResult.vatRate || 8),
               defaultCalculatorMargin: userProfile?.default_seller_markup ?? null,
@@ -1979,8 +2014,6 @@ IdeaSol`;
               setRoofType={setRoofType}
               storage={storage}
               setStorage={setStorage}
-              withEms={withEms}
-              setWithEms={setWithEms}
               billingSystem={billingSystem}
               setBillingSystem={setBillingSystem}
               includeSubsidy={includeSubsidy}
@@ -1992,6 +2025,8 @@ IdeaSol`;
               storages={storages}
               panels={panels}
               inverters={inverters}
+              clientHasOwnHybridInverter={clientHasOwnHybridInverter}
+              setClientHasOwnHybridInverter={setClientHasOwnHybridInverter}
               selectedInverterName={selectedInverterName}
               setSelectedInverterName={setSelectedInverterName}
               vatRate={vatRate}

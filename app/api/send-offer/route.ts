@@ -314,8 +314,13 @@ export async function POST(request: Request) {
     const subsidyTotal = Number(
       body.subsidyTotal ||
         body.subsidyAllocation?.total ||
-        body.subsidyAllocation?.storageSubsidy + body.subsidyAllocation?.emsBonus ||
+        (Number(body.subsidyAllocation?.storageSubsidy || 0) +
+          Number(body.subsidyAllocation?.euBonus ?? body.subsidyAllocation?.emsBonus ?? 0)) ||
         0
+    );
+    const storageSubsidy = Number(body.subsidyAllocation?.storageSubsidy || 0);
+    const euBonus = Number(
+      body.subsidyAllocation?.euBonus ?? body.subsidyAllocation?.emsBonus ?? 0
     );
 
     const hasSubsidy = includeSubsidy && subsidyTotal > 0;
@@ -422,7 +427,7 @@ Zakres wyceny:
 ${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${catalogCardsTextLine}
 Cena netto: ${formatMoney(body.finalNet)} zł
 Cena brutto ${vatRate}%: ${formatMoney(finalGross)} zł
-${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł\n` : ""}
+${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł (dotacja ME: ${formatMoney(storageSubsidy)} zł${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)} zł` : ""})\n` : ""}
 Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami).
 
 Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
@@ -479,6 +484,7 @@ ${emailSignatureText}`;
                     <div style="border:1px solid #bfdbfe; background:#eff6ff; border-radius:16px; padding:18px; min-height:92px;">
                       <p style="margin:0 0 12px; font-size:13px; color:#0369a1; font-weight:800;">Kwota dotacji PME</p>
                       <p style="margin:0; font-size:26px; line-height:1.1; font-weight:900; color:#0369a1;">${formatMoney(subsidyTotal)} zł</p>
+                      <p style="margin:6px 0 0; font-size:11px; line-height:1.35; color:#075985; font-weight:600;">Dotacja ME: ${formatMoney(storageSubsidy)} zł${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)} zł` : ""}</p>
                       <p style="margin:8px 0 0; font-size:11px; line-height:1.35; color:#075985; font-weight:600;">Koszt po uwzględnieniu dotacji: ${formatMoney(Math.max(0, finalGross - subsidyTotal))} zł</p>
                     </div>
                   </td>` : ""}

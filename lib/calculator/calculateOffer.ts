@@ -1,3 +1,5 @@
+import { calculatePmeSubsidy } from "@/lib/calculator/pmeSubsidy";
+
 export type CalculatorCatalog = {
   panels: Record<string, PanelItem>;
   inverters: InverterItem[];
@@ -28,6 +30,7 @@ export type CalculatorSettingsRow = {
   pv_large_fixed?: number | null;
   storage_per_owner?: number | null;
   manager_fee_percent?: number | null;
+  pme_qualify_vat?: boolean | null;
 } | null;
 
 export type CalculateOfferInput = {
@@ -53,6 +56,7 @@ export type InverterItem = {
   maxPvKw: number;
   priceNet: number;
   catalogCardUrl?: string | null;
+  isEu?: boolean;
 };
 
 export type StorageItem = {
@@ -63,6 +67,7 @@ export type StorageItem = {
   priceNet: number;
   installationNet: number;
   catalogCardUrl?: string | null;
+  isEu?: boolean;
 };
 
 type AdditionalServiceInput = {
@@ -639,7 +644,8 @@ export function calculateOffer(input: CalculateOfferInput) {
       ? "net_metering"
       : "net_billing";
 
-  const shouldAddEms = Boolean(body.withEms);
+  // Każdy sprzedawany falownik ma EMS; nie doliczamy go jako osobnej pozycji.
+  const shouldAddEms = false;
   const includeSubsidy = body.includeSubsidy === false ? false : true;
   const existingPvPowerKw = Math.max(0, Number(body.existingPvPowerKw || 0));
 
@@ -711,6 +717,10 @@ export function calculateOffer(input: CalculateOfferInput) {
   const inverterSizingPvPowerKw = Number((existingPvPowerKw + pvPowerKw).toFixed(2));
 
   const hasStorageSelected = storage.displayName !== "Brak";
+  const clientHasOwnHybridInverter = Boolean(
+    hasStorageSelected &&
+    (body.clientHasOwnHybridInverter || body.selectedInverterName === "none")
+  );
   const selectedStorageVoltageType = hasStorageSelected
     ? storage.voltageType || "low_voltage"
     : null;
@@ -740,7 +750,7 @@ export function calculateOffer(input: CalculateOfferInput) {
   );
 
   const inverter =
-    selectedInverterName === "none"
+    clientHasOwnHybridInverter
       ? { name: "Brak", priceNet: 0 }
       : compatibleManuallySelectedInverter ||
         automaticallySelectedInverter ||
@@ -756,7 +766,7 @@ export function calculateOffer(input: CalculateOfferInput) {
     ? 0
     : pricing.roofPlaceholders[roofType] ?? 2000;
 
-  const emsNet = shouldAddEms ? pricing.placeholders.ems : 0;
+  const emsNet = 0;
 
   const placeholdersTotalNet =
     pricing.placeholders.protections +
@@ -877,39 +887,33 @@ export function calculateOffer(input: CalculateOfferInput) {
     storage.capacityKwh >= requiredStorageCapacityKwh;
   const hasStorageForSubsidy =
     includeSubsidy && hasStorageMinimumCapacity && hasRequiredStorageToPvRatio;
-  const storageCapByKwh = hasStorageForSubsidy ? storage.capacityKwh * 800 : 0;
-  const maxStorageSubsidy = hasStorageForSubsidy
-    ? Math.min(storageCapByKwh, subsidyProgramCap)
-    : 0;
-
-  const optimizedEmsNet = hasStorageForSubsidy && shouldAddEms
-    ? Math.min(4000, finalNet)
-    : 0;
-
-  const availableForStorageAfterEmsNet = Math.max(finalNet - optimizedEmsNet, 0);
-  const idealStorageNetForMaxSubsidy = maxStorageSubsidy / 0.3;
-
-  const optimizedStorageNet = hasStorageForSubsidy
-    ? Math.min(idealStorageNetForMaxSubsidy, availableForStorageAfterEmsNet)
-    : 0;
-
-  const storageSubsidy = hasStorageForSubsidy
-    ? Math.min(
-      optimizedStorageNet * 0.3,
-      storageCapByKwh,
-      subsidyProgramCap
-    )
-    : 0;
-
-  const emsBonus = hasStorageForSubsidy && shouldAddEms
-    ? Math.min(optimizedEmsNet * 0.5, 2000)
-    : 0;
+  const qualifyVat = Boolean(
+    body.pricingOverrides?.subsidy?.qualifyVat ??
+    settingsRow?.pme_qualify_vat ??
+    false
+  );
+  const storageIsEu = Boolean(storage.isEu);
+  const inverterIsEu = Boolean(
+    !clientHasOwnHybridInverter && "isEu" in inverter && inverter.isEu
+  );
+  const pmeSubsidy = calculatePmeSubsidy({
+    enabled: hasStorageForSubsidy,
+    billingSystem,
+    storageCapacityKwh: storage.capacityKwh,
+    availableOfferNet: finalNet,
+    vatRate,
+    qualifyVat,
+    storageIsEu,
+    inverterIsEu,
+  });
+  const optimizedStorageNet = pmeSubsidy.storageNet;
+  const optimizedEmsNet = 0;
 
   const optimizedPvNet = hasStorageForSubsidy
     ? Math.max(finalNet - optimizedStorageNet - optimizedEmsNet, hasPv ? 1 / (1 + vatRate / 100) : 0)
     : 0;
 
-  const subsidyTotal = Math.round(storageSubsidy + emsBonus);
+  const subsidyTotal = Math.round(pmeSubsidy.total);
 
   const subsidyAllocation = {
     enabled: hasStorageForSubsidy,
@@ -918,12 +922,19 @@ export function calculateOffer(input: CalculateOfferInput) {
     pvNet: Math.round(optimizedPvNet),
     storageNet: Math.round(optimizedStorageNet),
     emsNet: Math.round(optimizedEmsNet),
-    storageSubsidy: Math.round(storageSubsidy),
-    emsBonus: Math.round(emsBonus),
+    storageSubsidy: Math.round(pmeSubsidy.storageSubsidy),
+    euBonus: Math.round(pmeSubsidy.euBonus),
+    emsBonus: 0,
     total: subsidyTotal,
-    programCap: subsidyProgramCap,
-    storageCapByKwh: Math.round(storageCapByKwh),
-    maxStorageSubsidy: Math.round(maxStorageSubsidy),
+    programCap: pmeSubsidy.programCap,
+    storageCapByKwh: Math.round(pmeSubsidy.storageCapByKwh),
+    maxStorageSubsidy: Math.round(pmeSubsidy.maxStorageSubsidy),
+    qualifyingStorageCost: Math.round(pmeSubsidy.qualifyingStorageCost),
+    qualifyingVat: Math.round(pmeSubsidy.qualifyingVat),
+    qualifyVat: pmeSubsidy.qualifyVat,
+    euBonusEligible: pmeSubsidy.euBonusEligible,
+    storageIsEu,
+    inverterIsEu,
     existingPvPowerKw,
     newPvPowerKw: pvPowerKw,
     totalPvPowerForSubsidyKw,
@@ -978,7 +989,8 @@ export function calculateOffer(input: CalculateOfferInput) {
     storageCapacityKwh: storage.capacityKwh,
     offerType,
     billingSystem,
-    withEms: shouldAddEms,
+    withEms: hasStorageSelected && inverter.name !== "Brak",
+    clientHasOwnHybridInverter,
     includeSubsidy,
     existingPvPowerKw,
     basePriceNet: Math.round(

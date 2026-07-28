@@ -31,6 +31,9 @@ type ClientTag = {
 };
 
 const DEFAULT_PRICING_OVERRIDES = {
+  subsidy: {
+    qualifyVat: false,
+  },
   installation: {
     pvPerKwNet: 500,
   },
@@ -172,7 +175,7 @@ export default function AdminUsersPage() {
     const { data, error } = await supabase
       .from("pricing_settings")
       .select(
-        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent"
+        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent, pme_qualify_vat"
       )
       .eq("id", 1)
       .maybeSingle();
@@ -215,18 +218,24 @@ export default function AdminUsersPage() {
         ...current.operator,
         percent: Number(data.warranty_percent ?? current.operator.percent),
       },
+      subsidy: {
+        qualifyVat: Boolean(data.pme_qualify_vat ?? current.subsidy.qualifyVat),
+      },
     }));
   }
 
-  function updatePricingValue(path: string[], value: string) {
-    const numberValue = Number(value.replace(",", "."));
-    const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+  function updatePricingValue(path: string[], value: string | boolean) {
+    const numberValue = typeof value === "string" ? Number(value.replace(",", ".")) : 0;
+    const safeValue = typeof value === "boolean"
+      ? value
+      : Number.isFinite(numberValue) ? numberValue : 0;
 
     setPricingOverrides((current) => {
       const next = structuredClone(current);
       let target: any = next;
 
       for (let index = 0; index < path.length - 1; index++) {
+        target[path[index]] ||= {};
         target = target[path[index]];
       }
 
@@ -261,6 +270,7 @@ export default function AdminUsersPage() {
         storage_per_owner: pricing.margins.storagePerOwner,
         manager_fee_percent: pricing.margins.managerFeeNet,
         warranty_percent: pricing.operator.percent,
+        pme_qualify_vat: Boolean(pricing.subsidy?.qualifyVat),
         updated_at: new Date().toISOString(),
       })
       .eq("id", 1);

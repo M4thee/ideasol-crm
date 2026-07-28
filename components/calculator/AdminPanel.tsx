@@ -28,6 +28,7 @@ type InverterItem = {
   max_pv_kw: number;
   price_net: number;
   catalog_card_url: string | null;
+  is_eu: boolean;
   active: boolean;
 };
 
@@ -43,6 +44,7 @@ type StorageItem = {
   price_net: number;
   installation_net: number;
   catalog_card_url: string | null;
+  is_eu: boolean;
   active: boolean;
 };
 
@@ -58,7 +60,7 @@ type AdditionalServiceItem = {
 type AdminPanelProps = {
   adminStatus: string;
   pricingOverrides: any;
-  updatePricingValue: (path: string[], value: string) => void;
+  updatePricingValue: (path: string[], value: string | boolean) => void;
   savePricingSettings: (pricing: any) => void;
   resetPricingOverrides: () => void;
 };
@@ -84,6 +86,7 @@ const EMPTY_INVERTER_FORM = {
   max_pv_kw: "10",
   price_net: "0",
   catalog_card_url: "",
+  is_eu: false,
 };
 
 const EMPTY_STORAGE_FORM = {
@@ -97,6 +100,7 @@ const EMPTY_STORAGE_FORM = {
   price_net: "0",
   installation_net: "1500",
   catalog_card_url: "",
+  is_eu: false,
 };
 
 const EMPTY_ADDITIONAL_SERVICE_FORM = {
@@ -154,7 +158,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, active")
+      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
@@ -170,7 +174,7 @@ export default function AdminPanel({
   async function loadStorages() {
     const { data, error } = await supabase
       .from("storages")
-      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, active")
+      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
       .eq("active", true)
       .order("voltage_type", { ascending: true })
       .order("capacity_kwh", { ascending: true });
@@ -424,6 +428,7 @@ export default function AdminPanel({
           max_pv_kw: Number(inverter.max_pv_kw),
           price_net: Number(inverter.price_net),
           catalog_card_url: inverter.catalog_card_url?.trim() || null,
+          is_eu: Boolean(inverter.is_eu),
           active: Boolean(inverter.active),
         })
         .eq("id", inverter.id);
@@ -458,6 +463,7 @@ export default function AdminPanel({
       max_pv_kw: Number(inverterForm.max_pv_kw),
       price_net: Number(inverterForm.price_net),
       catalog_card_url: inverterForm.catalog_card_url.trim() || null,
+      is_eu: Boolean(inverterForm.is_eu),
       active: true,
     });
 
@@ -525,6 +531,7 @@ export default function AdminPanel({
           price_net: parseDecimal(storage.price_net),
           installation_net: parseDecimal(storage.installation_net),
           catalog_card_url: storage.catalog_card_url?.trim() || null,
+          is_eu: Boolean(storage.is_eu),
           active: Boolean(storage.active),
         })
         .eq("id", storage.id);
@@ -559,6 +566,7 @@ export default function AdminPanel({
       price_net: parseDecimal(storageForm.price_net),
       installation_net: parseDecimal(storageForm.installation_net),
       catalog_card_url: storageForm.catalog_card_url.trim() || null,
+      is_eu: Boolean(storageForm.is_eu),
       active: true,
     });
 
@@ -728,6 +736,25 @@ export default function AdminPanel({
 
       {activeTab === "global" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <label className="flex items-center justify-between gap-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 md:col-span-2 xl:col-span-3">
+            <span>
+              <span className="block text-sm font-bold text-slate-900">
+                Dotacja PME: kwalifikować podatek VAT?
+              </span>
+              <span className="mt-1 block text-xs text-slate-600">
+                Domyślnie wyłączone — kalkulator liczy koszty kwalifikowane od ceny netto.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={Boolean(pricingOverrides.subsidy?.qualifyVat)}
+              onChange={(event) =>
+                updatePricingValue(["subsidy", "qualifyVat"], event.target.checked)
+              }
+              className="h-6 w-6 shrink-0 accent-blue-600"
+            />
+          </label>
+
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Montaż PV netto / kWp</span>
             <input
@@ -1185,6 +1212,18 @@ export default function AdminPanel({
                   setInverterForm({ ...inverterForm, catalog_card_url: e.target.value })
                 }
               />
+
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 md:col-span-7">
+                <input
+                  type="checkbox"
+                  checked={Boolean(inverterForm.is_eu)}
+                  onChange={(event) =>
+                    setInverterForm({ ...inverterForm, is_eu: event.target.checked })
+                  }
+                  className="h-5 w-5 accent-blue-600"
+                />
+                EU? — wyprodukowano na terenie UE
+              </label>
             </div>
 
             <button
@@ -1296,6 +1335,18 @@ export default function AdminPanel({
                       updateInverter(inverter.id, "catalog_card_url", e.target.value)
                     }
                   />
+
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(inverter.is_eu)}
+                      onChange={(event) =>
+                        updateInverter(inverter.id, "is_eu", event.target.checked)
+                      }
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    EU?
+                  </label>
 
                   <button
                     type="button"
@@ -1418,6 +1469,18 @@ export default function AdminPanel({
                   setStorageForm({ ...storageForm, catalog_card_url: e.target.value })
                 }
               />
+
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 md:col-span-4">
+                <input
+                  type="checkbox"
+                  checked={Boolean(storageForm.is_eu)}
+                  onChange={(event) =>
+                    setStorageForm({ ...storageForm, is_eu: event.target.checked })
+                  }
+                  className="h-5 w-5 accent-blue-600"
+                />
+                EU? — wyprodukowano na terenie UE
+              </label>
             </div>
 
             <button
@@ -1541,6 +1604,18 @@ export default function AdminPanel({
                       updateStorage(storage.id, "catalog_card_url", e.target.value)
                     }
                   />
+
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(storage.is_eu)}
+                      onChange={(event) =>
+                        updateStorage(storage.id, "is_eu", event.target.checked)
+                      }
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    EU?
+                  </label>
 
                   <button
                     type="button"

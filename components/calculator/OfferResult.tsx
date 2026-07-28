@@ -26,6 +26,7 @@ type Result = {
     storageNet: number;
     emsNet: number;
     storageSubsidy: number;
+    euBonus?: number;
     emsBonus: number;
     total: number;
     programCap: number;
@@ -38,6 +39,12 @@ type Result = {
     storageCapacityKwh?: number;
     hasStorageMinimumCapacity?: boolean;
     hasRequiredStorageToPvRatio?: boolean;
+    qualifyingStorageCost?: number;
+    qualifyingVat?: number;
+    qualifyVat?: boolean;
+    euBonusEligible?: boolean;
+    storageIsEu?: boolean;
+    inverterIsEu?: boolean;
   };
   basePriceNet: number;
   sellerMarkupNet: number;
@@ -345,15 +352,7 @@ export default function OfferResult({
   const pdfQuantity = Math.max(Number(identicalSetCount || 1), 1);
 
 
-  const inverterGrossForSubsidy = Math.round(
-    inverterNetFromBreakdown * (1 + result.vatRate / 100)
-  );
-  const emsGrossForSubsidy = Math.round(
-    emsNetFromBreakdown * (1 + result.vatRate / 100)
-  );
-
   const inverterGrossFromBreakdown = inverterNetFromBreakdown * (1 + result.vatRate / 100);
-  const emsGrossFromBreakdown = emsNetFromBreakdown * (1 + result.vatRate / 100);
   const backupGrossFromBreakdown = backupNetFromBreakdown * (1 + result.vatRate / 100);
 
 
@@ -427,16 +426,11 @@ export default function OfferResult({
           pvGross: pvGrossForPdf,
           storageNet: storageNetForPdf,
           storageGross: storageGrossForPdf,
-          withEms: Boolean(result.withEms),
-          emsName: result.withEms
-            ? "ZERONEST Świetlik D300 - zaawansowany system zarządzania energią EMS i integratora. Urządzenie w całości projektowane, produkowane i testowane w Polsce."
-            : "",
-          emsNet: result.withEms
-            ? result.subsidyAllocation?.emsNet || emsNetFromBreakdown
-            : 0,
-          emsGross: result.withEms
-            ? (result.subsidyAllocation?.emsNet || emsNetFromBreakdown) * (1 + result.vatRate / 100)
-            : 0,
+          // EMS jest funkcją falownika, więc nie trafia do PDF jako osobna pozycja cenowa.
+          withEms: false,
+          emsName: "",
+          emsNet: 0,
+          emsGross: 0,
           withBackup: hasBackupForPdf,
           backupName: hasBackupForPdf ? "Backup zasilania awaryjnego" : "",
           backupNet: backupNetFromBreakdown,
@@ -854,16 +848,8 @@ export default function OfferResult({
         {storageDisplayName !== "Brak" &&
           (result.includeSubsidy || result.subsidyAllocation?.requested) && (
           <SubsidyOptimizer
-            storageCapacity={result.storageCapacityKwh || result.subsidyAllocation?.storageCapacityKwh || 0}
             totalOfferNetPrice={result.finalNet}
-            inverterGrossPrice={result.withEms ? emsGrossForSubsidy : inverterGrossForSubsidy}
-            isNetBilling={result.billingSystem !== "net_metering"}
-            isEuStorage={true}
-            isEuHybridInverter={true}
-            subsidyEnabled={Boolean(result.subsidyAllocation?.enabled)}
-            withEms={Boolean(result.withEms)} 
-            requiredStorageCapacityKwh={result.subsidyAllocation?.requiredStorageCapacityKwh || 0}
-            totalPvPowerForSubsidyKw={result.subsidyAllocation?.totalPvPowerForSubsidyKw || result.pvPowerKw || 0}
+            allocation={result.subsidyAllocation}
           />
         )}
 

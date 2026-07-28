@@ -41,6 +41,7 @@ type OfferPdfData = {
     emsNet?: number;
     total?: number;
     storageSubsidy?: number;
+    euBonus?: number;
     emsBonus?: number;
   };
   finalNet?: number;
@@ -137,7 +138,8 @@ function getSubsidyTotal(data: OfferPdfData) {
   return Number(
     data.subsidyTotal ||
       data.subsidyAllocation?.total ||
-      ((data.subsidyAllocation?.storageSubsidy || 0) + (data.subsidyAllocation?.emsBonus || 0)) ||
+      ((data.subsidyAllocation?.storageSubsidy || 0) +
+        (data.subsidyAllocation?.euBonus ?? data.subsidyAllocation?.emsBonus ?? 0)) ||
       0
   );
 }
@@ -787,10 +789,14 @@ async function createOfferPdf(data: OfferPdfData) {
   y -= 70;
 
   const subsidyTotal = data.subsidyAllocation?.enabled ? getSubsidyTotal(data) : 0;
+  const storageSubsidy = Number(data.subsidyAllocation?.storageSubsidy || 0);
+  const euBonus = Number(
+    data.subsidyAllocation?.euBonus ?? data.subsidyAllocation?.emsBonus ?? 0
+  );
 
   if (subsidyTotal > 0) {
-    page.drawRectangle({ x: marginX, y: y - 104, width: cardWidth, height: 104, color: hexToRgb("#ECFDF5") });
-    page.drawRectangle({ x: marginX, y: y - 104, width: 5, height: 104, color: hexToRgb("#10B981") });
+    page.drawRectangle({ x: marginX, y: y - 112, width: cardWidth, height: 112, color: hexToRgb("#ECFDF5") });
+    page.drawRectangle({ x: marginX, y: y - 112, width: 5, height: 112, color: hexToRgb("#10B981") });
 
     page.drawText("Informacja o dotacji", {
       x: marginX + 20,
@@ -812,12 +818,23 @@ async function createOfferPdf(data: OfferPdfData) {
       }
     );
 
+    page.drawText(
+      `Dotacja ME: ${formatMoney(storageSubsidy)}${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)}` : ""}`,
+      {
+        x: marginX + 20,
+        y: y - 37,
+        size: 6.5,
+        font: headingFont,
+        color: hexToRgb("#047857"),
+      }
+    );
+
     drawWrappedText(
       page,
       "Powyższa cena nie uwzględnia dotacji rządowej w Programie Priorytetowym Przydomowe Magazyny Energii, która wypłacana jest przez Narodowy Fundusz Ochrony Środowiska i Gospodarki Wodnej na rachunek bankowy beneficjenta na podstawie złożonego wniosku o dofinansowanie, na podstawie faktur i protokołów potwierdzających montaż urządzeń dofinansowywanych przez program. IdeaSol składa wnioski o dofinansowanie w imieniu swoich klientów, jeżeli tak zostanie ustalone podczas zawierania umowy sprzedaży i montażu instalacji fotowoltaicznej i/lub magazynu energii. Szacowana kwota dotacji została wyliczona na podstawie oficjalnych informacji zawartych na stronie internetowej Programu Priorytetowego Przydomowe Magazyny Energii część II. IdeaSol nie odpowiada za decyzje instytucji prowadzących nabór co do ich terminu, wcześniejszego zakończenia lub zmian w regulaminie PP Przydomowe Magazyny, a takze za decyzje co do przyznania dofinansowania.",
       {
         x: marginX + 20,
-        y: y - 43,
+        y: y - 51,
         maxWidth: 470,
         size: 6.5,
         lineHeight: 7.7,
@@ -826,7 +843,7 @@ async function createOfferPdf(data: OfferPdfData) {
       }
     );
 
-    y -= 116;
+    y -= 124;
   }
 
   page.drawRectangle({ x: marginX, y: 52, width: cardWidth, height: 2, color: hexToRgb("#10B981") });

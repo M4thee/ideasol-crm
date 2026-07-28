@@ -29,6 +29,7 @@ type InverterItem = {
   type: "ongrid" | "hybrid";
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   catalogCardUrl?: string | null;
+  isEu?: boolean;
 };
 
 type StorageItem = {
@@ -39,6 +40,7 @@ type StorageItem = {
   priceNet: number;
   installationNet: number;
   catalogCardUrl?: string | null;
+  isEu?: boolean;
 };
 
 type AdditionalServiceInput = {
@@ -273,12 +275,12 @@ async function loadCatalogFromSupabase() {
       .eq("active", true),
     supabase
       .from("inverters")
-      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, active")
+      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
     supabase
       .from("storages")
-      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, active")
+      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
       .eq("active", true),
   ]);
 
@@ -310,6 +312,7 @@ async function loadCatalogFromSupabase() {
       catalogCardUrl: inverter.catalog_card_url || null,
       maxPvKw: Number(inverter.max_pv_kw),
       priceNet: Number(inverter.price_net),
+      isEu: Boolean(inverter.is_eu),
     }))
     : FALLBACK_INVERTERS;
 
@@ -325,6 +328,7 @@ async function loadCatalogFromSupabase() {
           priceNet: Number(storage.price_net),
           installationNet: Number(storage.installation_net),
           catalogCardUrl: storage.catalog_card_url || null,
+          isEu: Boolean(storage.is_eu),
         },
       ])
     )
@@ -516,7 +520,7 @@ export async function GET() {
       supabase
         .from("pricing_settings")
         .select(
-          "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent"
+          "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
         )
         .eq("id", 1)
         .single(),
@@ -578,7 +582,7 @@ export async function POST(request: Request) {
     supabase
       .from("pricing_settings")
       .select(
-        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent"
+        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
       )
       .eq("id", 1)
       .single(),
