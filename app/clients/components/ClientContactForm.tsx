@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import MeetingConfirmationReminderFields, {
+  meetingConfirmationReminderToIso,
+  validateMeetingConfirmationReminder,
+} from "@/components/MeetingConfirmationReminderFields";
 
 export type ContactFormPayload = {
   contactMethod: "phone" | "sms" | "email" | "meeting";
@@ -10,6 +14,8 @@ export type ContactFormPayload = {
   reminderAt?: string;
   meetingAt?: string;
   assignedUserId?: string;
+  confirmationRequired?: boolean;
+  confirmationReminderAt?: string;
 };
 
 type AdvisorOption = {
@@ -36,6 +42,8 @@ export default function ClientContactForm({ onSubmit, isSubmitting, advisors = [
   const [description, setDescription] = useState("");
   const [reminderAt, setReminderAt] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
+  const [confirmationRequired, setConfirmationRequired] = useState(false);
+  const [confirmationReminderAt, setConfirmationReminderAt] = useState("");
   const [advisorId, setAdvisorId] = useState("");
   const [advisorSearch, setAdvisorSearch] = useState("");
 
@@ -269,20 +277,32 @@ System rozliczeń: net-billing / net-metering`;
         return;
       }
 
-      if (requiresMeeting && !meetingAt) {
-        alert("Ustaw datę i godzinę spotkania.");
-        return;
-      }
+    }
 
-      if (requiresMeeting && isPastDateTime(meetingAt)) {
-        alert("Data spotkania musi być w przyszłości.");
-        return;
-      }
+    if (requiresMeeting && !meetingAt) {
+      alert("Ustaw datę i godzinę spotkania.");
+      return;
+    }
 
-      if (requiresMeeting && !advisorId) {
-        alert("Wybierz doradcę do spotkania.");
-        return;
-      }
+    if (requiresMeeting && isPastDateTime(meetingAt)) {
+      alert("Data spotkania musi być w przyszłości.");
+      return;
+    }
+
+    if (requiresMeeting && !advisorId) {
+      alert("Wybierz doradcę do spotkania.");
+      return;
+    }
+
+    const confirmationValidationError = validateMeetingConfirmationReminder({
+      required: requiresMeeting && confirmationRequired,
+      reminderAt: confirmationReminderAt,
+      meetingAt,
+    });
+
+    if (confirmationValidationError) {
+      alert(confirmationValidationError);
+      return;
     }
 
     await onSubmit({
@@ -296,11 +316,19 @@ System rozliczeń: net-billing / net-metering`;
       reminderAt: requiresReminder ? localDateTimeToIso(reminderAt) : undefined,
       meetingAt: requiresMeeting ? localDateTimeToIso(meetingAt) : undefined,
       assignedUserId: requiresMeeting ? advisorId : undefined,
+      confirmationRequired: requiresMeeting && confirmationRequired,
+      confirmationReminderAt:
+        meetingConfirmationReminderToIso(
+          requiresMeeting && confirmationRequired,
+          confirmationReminderAt
+        ) || undefined,
     });
 
     setDescription("");
     setReminderAt("");
     setMeetingAt("");
+    setConfirmationRequired(false);
+    setConfirmationReminderAt("");
     setPhoneStatus("");
     setAdvisorId("");
     setAdvisorSearch("");
@@ -332,6 +360,8 @@ System rozliczeń: net-billing / net-metering`;
                     setPhoneStatus("");
                     setReminderAt("");
                     setMeetingAt("");
+                    setConfirmationRequired(false);
+                    setConfirmationReminderAt("");
                     setAdvisorId("");
                     setAdvisorSearch("");
                     setDescription(
@@ -363,6 +393,8 @@ System rozliczeń: net-billing / net-metering`;
                 setPhoneStatus("");
                 setReminderAt("");
                 setMeetingAt("");
+                setConfirmationRequired(false);
+                setConfirmationReminderAt("");
                 setAdvisorId("");
                 setAdvisorSearch("");
               }}
@@ -385,6 +417,8 @@ System rozliczeń: net-billing / net-metering`;
               onChange={(e) => {
                 setReminderAt("");
                 setMeetingAt("");
+                setConfirmationRequired(false);
+                setConfirmationReminderAt("");
                 setAdvisorId("");
                 setAdvisorSearch("");
                 const nextStatus = e.target.value;
@@ -424,6 +458,17 @@ System rozliczeń: net-billing / net-metering`;
             label="Data i godzina spotkania"
             value={meetingAt}
             onChange={setMeetingAt}
+          />
+        )}
+
+        {requiresMeeting && (
+          <MeetingConfirmationReminderFields
+            required={confirmationRequired}
+            reminderAt={confirmationReminderAt}
+            meetingAt={meetingAt}
+            onRequiredChange={setConfirmationRequired}
+            onReminderAtChange={setConfirmationReminderAt}
+            className="md:col-span-2"
           />
         )}
 

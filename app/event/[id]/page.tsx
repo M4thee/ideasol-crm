@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
+import MeetingConfirmationReminderFields, {
+  meetingConfirmationReminderToIso,
+  validateMeetingConfirmationReminder,
+} from "@/components/MeetingConfirmationReminderFields";
 
 type CalendarEvent = {
   id: string;
@@ -20,6 +24,13 @@ type CalendarEvent = {
   microsoft_event_url: string | null;
   microsoft_sync_status: string | null;
   microsoft_sync_error: string | null;
+  confirmation_required: boolean;
+  confirmation_reminder_at: string | null;
+  confirmation_reminder_attempted_at: string | null;
+  confirmation_reminder_sent_at: string | null;
+  confirmation_reminder_error: string | null;
+  client_confirmed_at: string | null;
+  client_confirmed_by: string | null;
 };
 
 type Client = {
@@ -66,6 +77,8 @@ type MeetingEffectStatus =
   | "Sprzedaż";
 
 type NextContactType = "phone" | "meeting";
+type ConfirmationDecision = "" | "yes" | "no";
+type MissingConfirmationAction = "" | "new_date" | "resignation" | "follow_up";
 
 type SaleInsertPayload = {
   event_id: string;
@@ -85,6 +98,9 @@ type SupabaseErrorDetails = {
   hint?: string;
   code?: string;
 };
+
+const calendarEventSelect =
+  "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error, confirmation_required, confirmation_reminder_at, confirmation_reminder_attempted_at, confirmation_reminder_sent_at, confirmation_reminder_error, client_confirmed_at, client_confirmed_by";
 
 export default function EventPage() {
   const params = useParams<{ id: string }>();
@@ -108,17 +124,31 @@ export default function EventPage() {
   const [taskDescription, setTaskDescription] = useState("");
   const [taskReminderAt, setTaskReminderAt] = useState("");
   const [taskMeetingAt, setTaskMeetingAt] = useState("");
+  const [taskMeetingConfirmationRequired, setTaskMeetingConfirmationRequired] = useState(false);
+  const [taskMeetingConfirmationReminderAt, setTaskMeetingConfirmationReminderAt] = useState("");
   const [savingTaskEffect, setSavingTaskEffect] = useState(false);
   const [showMeetingEffectPanel, setShowMeetingEffectPanel] = useState(false);
   const [meetingEffectStatus, setMeetingEffectStatus] = useState<MeetingEffectStatus>("");
   const [meetingEffectDescription, setMeetingEffectDescription] = useState("");
   const [nextContactType, setNextContactType] = useState<NextContactType>("phone");
   const [nextContactAt, setNextContactAt] = useState("");
+  const [nextMeetingConfirmationRequired, setNextMeetingConfirmationRequired] = useState(false);
+  const [nextMeetingConfirmationReminderAt, setNextMeetingConfirmationReminderAt] = useState("");
   const [savingMeetingEffect, setSavingMeetingEffect] = useState(false);
   const [rescheduledMeetingAt, setRescheduledMeetingAt] = useState("");
+  const [rescheduledConfirmationRequired, setRescheduledConfirmationRequired] = useState(false);
+  const [rescheduledConfirmationReminderAt, setRescheduledConfirmationReminderAt] = useState("");
   const [showReassignPanel, setShowReassignPanel] = useState(false);
   const [selectedReassignUserId, setSelectedReassignUserId] = useState("");
   const [savingReassign, setSavingReassign] = useState(false);
+  const [confirmationDecision, setConfirmationDecision] = useState<ConfirmationDecision>("");
+  const [missingConfirmationAction, setMissingConfirmationAction] =
+    useState<MissingConfirmationAction>("");
+  const [missingConfirmationActionAt, setMissingConfirmationActionAt] = useState("");
+  const [missingConfirmationReminderRequired, setMissingConfirmationReminderRequired] =
+    useState(false);
+  const [missingConfirmationReminderAt, setMissingConfirmationReminderAt] = useState("");
+  const [savingConfirmationDecision, setSavingConfirmationDecision] = useState(false);
 
   function getClientAddress() {
     if (!client) return "Brak adresu";
@@ -716,7 +746,7 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
   return data?.[0] || null;
 }
 
-async function reassignEventOwner() {
+  async function reassignEventOwner() {
     if (!event) return;
 
     if (!canReassignEvent()) {
@@ -773,7 +803,7 @@ async function reassignEventOwner() {
         assigned_user_id: selectedReassignUserId,
       })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+      .select(calendarEventSelect)
       .single();
 
     if (updateError || !updatedEvent) {
@@ -808,6 +838,220 @@ async function reassignEventOwner() {
     });
 
     alert("Spotkanie zostało przepisane na innego doradcę.");
+  }
+
+  function resetConfirmationDecisionForm() {
+    setConfirmationDecision("");
+    setMissingConfirmationAction("");
+    setMissingConfirmationActionAt("");
+    setMissingConfirmationReminderRequired(false);
+    setMissingConfirmationReminderAt("");
+  }
+
+  async function saveConfirmationDecision() {
+    if (!event || event.event_type !== "meeting") return;
+
+    if (!confirmationDecision) {
+      alert("Wybierz TAK albo NIE.");
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const actingUserId = user?.id || currentUserId;
+
+    if (confirmationDecision === "yes") {
+      setSavingConfirmationDecision(true);
+
+      const { data: confirmedEvent, error } = await supabase
+        .from("calendar_events")
+        .update({
+          client_confirmed_at: new Date().toISOString(),
+          client_confirmed_by: actingUserId,
+          confirmation_reminder_error: null,
+        })
+        .eq("id", event.id)
+        .select(calendarEventSelect)
+        .single();
+
+      if (error || !confirmedEvent) {
+        alert(`Nie udało się zapisać potwierdzenia: ${error?.message || "Brak danych."}`);
+        setSavingConfirmationDecision(false);
+        return;
+      }
+
+      setEvent(confirmedEvent as CalendarEvent);
+      setConfirmationDecision("yes");
+      setSavingConfirmationDecision(false);
+      return;
+    }
+
+    if (!missingConfirmationAction) {
+      alert("Wybierz dalsze działanie.");
+      return;
+    }
+
+    const actionNeedsDate =
+      missingConfirmationAction === "new_date" ||
+      missingConfirmationAction === "follow_up";
+
+    if (actionNeedsDate && !missingConfirmationActionAt) {
+      alert(
+        missingConfirmationAction === "new_date"
+          ? "Wybierz nową datę spotkania."
+          : "Wybierz termin ponownego kontaktu."
+      );
+      return;
+    }
+
+    if (
+      actionNeedsDate &&
+      new Date(missingConfirmationActionAt).getTime() <= Date.now()
+    ) {
+      alert("Wybrany termin musi być w przyszłości.");
+      return;
+    }
+
+    const newDateConfirmationError = validateMeetingConfirmationReminder({
+      required:
+        missingConfirmationAction === "new_date" &&
+        missingConfirmationReminderRequired,
+      reminderAt: missingConfirmationReminderAt,
+      meetingAt: missingConfirmationActionAt,
+    });
+
+    if (newDateConfirmationError) {
+      alert(newDateConfirmationError);
+      return;
+    }
+
+    setSavingConfirmationDecision(true);
+
+    const actionLabels: Record<Exclude<MissingConfirmationAction, "">, string> = {
+      new_date: "Nowa data spotkania",
+      resignation: "Rezygnacja",
+      follow_up: "Ponowny kontakt",
+    };
+
+    const { error: activityError } = await supabase.from("client_activities").insert({
+      client_id: event.client_id,
+      activity_type: "meeting",
+      contact_type: "Potwierdzenie spotkania",
+      status: actionLabels[missingConfirmationAction],
+      description: "Klient nie potwierdził pierwotnego terminu spotkania.",
+      follow_up_at:
+        missingConfirmationAction === "follow_up"
+          ? localDateTimeToIso(missingConfirmationActionAt)
+          : null,
+      created_by: actingUserId,
+    });
+
+    if (activityError) {
+      console.error("Nie udało się zapisać wyniku potwierdzenia spotkania:", activityError);
+    }
+
+    if (missingConfirmationAction === "new_date") {
+      const newEventAt = localDateTimeToIso(missingConfirmationActionAt);
+      const { data: rescheduledEvent, error } = await supabase
+        .from("calendar_events")
+        .update({
+          event_at: newEventAt,
+          status: "planned",
+          confirmation_required: missingConfirmationReminderRequired,
+          confirmation_reminder_at: meetingConfirmationReminderToIso(
+            missingConfirmationReminderRequired,
+            missingConfirmationReminderAt
+          ),
+          confirmation_reminder_attempted_at: null,
+          confirmation_reminder_sent_at: null,
+          confirmation_reminder_error: null,
+          client_confirmed_at: null,
+          client_confirmed_by: null,
+        })
+        .eq("id", event.id)
+        .select(calendarEventSelect)
+        .single();
+
+      if (error || !rescheduledEvent) {
+        alert(`Nie udało się przełożyć spotkania: ${error?.message || "Brak danych."}`);
+        setSavingConfirmationDecision(false);
+        return;
+      }
+
+      await updateOutlookEventAfterReschedule({
+        calendarEventId: rescheduledEvent.id,
+        microsoftEventId: rescheduledEvent.microsoft_event_id || event.microsoft_event_id,
+        ownerId:
+          rescheduledEvent.assigned_user_id ||
+          rescheduledEvent.created_by ||
+          event.assigned_user_id ||
+          event.created_by,
+        title: rescheduledEvent.title,
+        description: rescheduledEvent.description,
+        eventAt: rescheduledEvent.event_at,
+        clientName: client?.full_name || client?.company_name || "Klient",
+        clientPhone: client?.phone || null,
+        clientAddress: getClientAddress(),
+      });
+
+      setEvent(rescheduledEvent as CalendarEvent);
+      resetConfirmationDecisionForm();
+      setSavingConfirmationDecision(false);
+      alert("Spotkanie zostało przełożone.");
+      return;
+    }
+
+    if (missingConfirmationAction === "follow_up") {
+      const { error: reminderError } = await supabase.from("calendar_events").insert({
+        client_id: event.client_id,
+        source_activity_id: event.source_activity_id,
+        title: "Ponowny kontakt: brak potwierdzenia spotkania",
+        description: "Klient nie potwierdził terminu spotkania.",
+        event_type: "reminder",
+        event_at: localDateTimeToIso(missingConfirmationActionAt),
+        status: "planned",
+        created_by: actingUserId,
+        assigned_user_id: event.assigned_user_id || event.created_by || actingUserId,
+      });
+
+      if (reminderError) {
+        alert(`Nie udało się utworzyć ponownego kontaktu: ${reminderError.message}`);
+        setSavingConfirmationDecision(false);
+        return;
+      }
+    }
+
+    const completedStatus =
+      missingConfirmationAction === "resignation"
+        ? "Zakończone - Rezygnacja"
+        : "Zakończone - Ponowny kontakt";
+
+    const { data: completedEvent, error: completeError } = await supabase
+      .from("calendar_events")
+      .update({
+        status: completedStatus,
+        confirmation_required: false,
+        confirmation_reminder_at: null,
+        confirmation_reminder_attempted_at: null,
+        confirmation_reminder_sent_at: null,
+        confirmation_reminder_error: null,
+      })
+      .eq("id", event.id)
+      .select(calendarEventSelect)
+      .single();
+
+    if (completeError || !completedEvent) {
+      alert(
+        `Nie udało się zamknąć spotkania: ${completeError?.message || "Brak danych."}`
+      );
+      setSavingConfirmationDecision(false);
+      return;
+    }
+
+    setEvent(completedEvent as CalendarEvent);
+    resetConfirmationDecisionForm();
+    setSavingConfirmationDecision(false);
   }
 
   async function saveTaskEffect() {
@@ -850,6 +1094,17 @@ async function reassignEventOwner() {
     }
     if (needsMeeting && new Date(taskMeetingAt).getTime() <= Date.now()) {
       alert("Termin spotkania musi być w przyszłości.");
+      return;
+    }
+
+    const taskConfirmationError = validateMeetingConfirmationReminder({
+      required: needsMeeting && taskMeetingConfirmationRequired,
+      reminderAt: taskMeetingConfirmationReminderAt,
+      meetingAt: taskMeetingAt,
+    });
+
+    if (taskConfirmationError) {
+      alert(taskConfirmationError);
       return;
     }
 
@@ -911,10 +1166,15 @@ async function reassignEventOwner() {
           event_type: "meeting",
           event_at: meetingEventAt,
           status: "planned",
-          created_by: chosenMeetingOwnerId,
+          created_by: user?.id || null,
           assigned_user_id: chosenMeetingOwnerId,
+          confirmation_required: taskMeetingConfirmationRequired,
+          confirmation_reminder_at: meetingConfirmationReminderToIso(
+            taskMeetingConfirmationRequired,
+            taskMeetingConfirmationReminderAt
+          ),
         })
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .select(calendarEventSelect)
         .single();
 
       if (meetingError || !meetingEvent) {
@@ -951,7 +1211,7 @@ async function reassignEventOwner() {
       .from("calendar_events")
       .update({ status: completedStatus })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+      .select(calendarEventSelect)
       .single();
 
     if (completeEventError || !completedEvent) {
@@ -975,6 +1235,8 @@ async function reassignEventOwner() {
     setTaskDescription("");
     setTaskReminderAt("");
     setTaskMeetingAt("");
+    setTaskMeetingConfirmationRequired(false);
+    setTaskMeetingConfirmationReminderAt("");
     setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
     setShowTaskEffectPanel(false);
     setSavingTaskEffect(false);
@@ -1036,6 +1298,31 @@ async function reassignEventOwner() {
       return;
     }
 
+    const nextMeetingConfirmationError = validateMeetingConfirmationReminder({
+      required:
+        needsNextContact &&
+        nextContactType === "meeting" &&
+        nextMeetingConfirmationRequired,
+      reminderAt: nextMeetingConfirmationReminderAt,
+      meetingAt: nextContactAt,
+    });
+
+    if (nextMeetingConfirmationError) {
+      alert(nextMeetingConfirmationError);
+      return;
+    }
+
+    const rescheduledConfirmationError = validateMeetingConfirmationReminder({
+      required: needsReschedule && rescheduledConfirmationRequired,
+      reminderAt: rescheduledConfirmationReminderAt,
+      meetingAt: rescheduledMeetingAt,
+    });
+
+    if (rescheduledConfirmationError) {
+      alert(rescheduledConfirmationError);
+      return;
+    }
+
     if (meetingEffectStatus === "Sprzedaż") {
       setSavingMeetingEffect(true);
 
@@ -1063,7 +1350,7 @@ async function reassignEventOwner() {
         .from("calendar_events")
         .update({ status: "Zakończone - Sprzedaż" })
         .eq("id", event.id)
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .select(calendarEventSelect)
         .single();
 
       if (completeEventError || !completedEvent) {
@@ -1085,7 +1372,11 @@ async function reassignEventOwner() {
       setMeetingEffectDescription("");
       setNextContactType("phone");
       setNextContactAt("");
+      setNextMeetingConfirmationRequired(false);
+      setNextMeetingConfirmationReminderAt("");
       setRescheduledMeetingAt("");
+      setRescheduledConfirmationRequired(false);
+      setRescheduledConfirmationReminderAt("");
       setShowMeetingEffectPanel(false);
       setSavingMeetingEffect(false);
 
@@ -1126,9 +1417,19 @@ async function reassignEventOwner() {
           description:
             description ||
             `Spotkanie przełożone z terminu ${new Date(event.event_at).toLocaleString("pl-PL")}.`,
+          confirmation_required: rescheduledConfirmationRequired,
+          confirmation_reminder_at: meetingConfirmationReminderToIso(
+            rescheduledConfirmationRequired,
+            rescheduledConfirmationReminderAt
+          ),
+          confirmation_reminder_attempted_at: null,
+          confirmation_reminder_sent_at: null,
+          confirmation_reminder_error: null,
+          client_confirmed_at: null,
+          client_confirmed_by: null,
         })
         .eq("id", event.id)
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .select(calendarEventSelect)
         .single();
 
       if (rescheduleError || !rescheduledEvent) {
@@ -1159,7 +1460,11 @@ async function reassignEventOwner() {
       setMeetingEffectDescription("");
       setNextContactType("phone");
       setNextContactAt("");
+      setNextMeetingConfirmationRequired(false);
+      setNextMeetingConfirmationReminderAt("");
       setRescheduledMeetingAt("");
+      setRescheduledConfirmationRequired(false);
+      setRescheduledConfirmationReminderAt("");
       setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
       setShowMeetingEffectPanel(false);
       setSavingMeetingEffect(false);
@@ -1184,10 +1489,19 @@ async function reassignEventOwner() {
           event_type: nextContactType === "phone" ? "reminder" : "meeting",
           event_at: nextEventAt,
           status: "planned",
-          created_by: nextEventOwnerId,
+          created_by: user?.id || null,
           assigned_user_id: nextEventOwnerId,
+          confirmation_required:
+            nextContactType === "meeting" && nextMeetingConfirmationRequired,
+          confirmation_reminder_at:
+            nextContactType === "meeting"
+              ? meetingConfirmationReminderToIso(
+                  nextMeetingConfirmationRequired,
+                  nextMeetingConfirmationReminderAt
+                )
+              : null,
         })
-        .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+        .select(calendarEventSelect)
         .single();
 
       if (nextEventError || !nextEvent) {
@@ -1222,7 +1536,7 @@ async function reassignEventOwner() {
       .from("calendar_events")
       .update({ status: completedStatus })
       .eq("id", event.id)
-      .select("id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error")
+      .select(calendarEventSelect)
       .single();
 
     if (completeEventError || !completedEvent) {
@@ -1244,7 +1558,11 @@ async function reassignEventOwner() {
     setMeetingEffectDescription("");
     setNextContactType("phone");
     setNextContactAt("");
+    setNextMeetingConfirmationRequired(false);
+    setNextMeetingConfirmationReminderAt("");
     setRescheduledMeetingAt("");
+    setRescheduledConfirmationRequired(false);
+    setRescheduledConfirmationReminderAt("");
     setSelectedMeetingOwnerId(canChooseMeetingOwner() ? "" : currentUserId || "");
     setShowMeetingEffectPanel(false);
     setSavingMeetingEffect(false);
@@ -1325,18 +1643,14 @@ async function reassignEventOwner() {
 
     let { data: eventData, error: eventError } = await supabase
       .from("calendar_events")
-      .select(
-        "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
-      )
+      .select(calendarEventSelect)
       .eq("id", eventId)
       .maybeSingle();
 
     if (eventError || !eventData) {
       const { data: fallbackEventData, error: fallbackEventError } = await supabase
         .from("calendar_events")
-        .select(
-          "id, source_activity_id, client_id, title, description, event_type, event_at, status, created_by, assigned_user_id, microsoft_event_id, microsoft_event_url, microsoft_sync_status, microsoft_sync_error"
-        )
+        .select(calendarEventSelect)
         .eq("source_activity_id", eventId)
         .maybeSingle();
 
@@ -1541,6 +1855,132 @@ async function reassignEventOwner() {
             </div>
           )}
 
+          {isMeetingEvent && event.confirmation_required && (
+            <div
+              className={`mt-4 rounded-2xl border p-4 ${
+                event.client_confirmed_at
+                  ? "border-slate-200 bg-slate-100 text-slate-500"
+                  : "border-blue-200 bg-blue-50"
+              }`}
+            >
+              <p className="text-sm font-bold text-slate-900">
+                Czy klient potwierdził spotkanie?
+              </p>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:max-w-xs">
+                <button
+                  type="button"
+                  disabled={Boolean(event.client_confirmed_at)}
+                  onClick={() => {
+                    setConfirmationDecision("yes");
+                    setMissingConfirmationAction("");
+                    setMissingConfirmationActionAt("");
+                  }}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed ${
+                    event.client_confirmed_at || confirmationDecision === "yes"
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50"
+                  }`}
+                >
+                  TAK
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(event.client_confirmed_at)}
+                  onClick={() => setConfirmationDecision("no")}
+                  className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 ${
+                    confirmationDecision === "no"
+                      ? "border-red-500 bg-red-500 text-white"
+                      : "border-red-300 bg-white text-red-700 hover:bg-red-50"
+                  }`}
+                >
+                  NIE
+                </button>
+              </div>
+
+              {event.client_confirmed_at ? (
+                <p className="mt-3 text-xs font-semibold text-slate-500">
+                  Potwierdzono {new Date(event.client_confirmed_at).toLocaleString("pl-PL")}.
+                </p>
+              ) : (
+                <>
+                  {confirmationDecision === "no" && (
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Co robimy dalej?
+                        </label>
+                        <select
+                          value={missingConfirmationAction}
+                          onChange={(input) => {
+                            setMissingConfirmationAction(
+                              input.target.value as MissingConfirmationAction
+                            );
+                            setMissingConfirmationActionAt("");
+                            setMissingConfirmationReminderRequired(false);
+                            setMissingConfirmationReminderAt("");
+                          }}
+                          className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-400"
+                        >
+                          <option value="">Wybierz działanie</option>
+                          <option value="new_date">Nowa data spotkania</option>
+                          <option value="resignation">Rezygnacja</option>
+                          <option value="follow_up">Ponowny kontakt</option>
+                        </select>
+                      </div>
+
+                      {missingConfirmationAction === "new_date" && (
+                        <>
+                          <DateTimePicker
+                            label="Nowa data spotkania"
+                            value={missingConfirmationActionAt}
+                            onChange={setMissingConfirmationActionAt}
+                          />
+                          <MeetingConfirmationReminderFields
+                            required={missingConfirmationReminderRequired}
+                            reminderAt={missingConfirmationReminderAt}
+                            meetingAt={missingConfirmationActionAt}
+                            onRequiredChange={setMissingConfirmationReminderRequired}
+                            onReminderAtChange={setMissingConfirmationReminderAt}
+                          />
+                        </>
+                      )}
+
+                      {missingConfirmationAction === "follow_up" && (
+                        <DateTimePicker
+                          label="Termin ponownego kontaktu"
+                          value={missingConfirmationActionAt}
+                          onChange={setMissingConfirmationActionAt}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {confirmationDecision && (
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={saveConfirmationDecision}
+                        disabled={
+                          savingConfirmationDecision ||
+                          (confirmationDecision === "no" && !missingConfirmationAction) ||
+                          (confirmationDecision === "no" &&
+                            ["new_date", "follow_up"].includes(
+                              missingConfirmationAction
+                            ) &&
+                            !missingConfirmationActionAt)
+                        }
+                        className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {savingConfirmationDecision ? "Zapisywanie..." : "Zapisz"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-2 mt-5 flex-wrap">
             <span
               className={`px-3 py-1 rounded-full text-sm font-semibold ${
@@ -1738,6 +2178,15 @@ async function reassignEventOwner() {
                   onChange={setTaskMeetingAt}
                 />
 
+                <MeetingConfirmationReminderFields
+                  required={taskMeetingConfirmationRequired}
+                  reminderAt={taskMeetingConfirmationReminderAt}
+                  meetingAt={taskMeetingAt}
+                  onRequiredChange={setTaskMeetingConfirmationRequired}
+                  onReminderAtChange={setTaskMeetingConfirmationReminderAt}
+                  className="mt-4"
+                />
+
                 {canChooseMeetingOwner() && (
                   <div className="mt-4">
                     <label className="block text-xs uppercase font-semibold text-blue-700 mb-2">
@@ -1897,6 +2346,17 @@ async function reassignEventOwner() {
                     </select>
                   </div>
                 )}
+
+                {nextContactType === "meeting" && (
+                  <MeetingConfirmationReminderFields
+                    required={nextMeetingConfirmationRequired}
+                    reminderAt={nextMeetingConfirmationReminderAt}
+                    meetingAt={nextContactAt}
+                    onRequiredChange={setNextMeetingConfirmationRequired}
+                    onReminderAtChange={setNextMeetingConfirmationReminderAt}
+                    className="mt-4"
+                  />
+                )}
               </div>
             )}
             {meetingEffectStatus === "Przełożenie" && (
@@ -1905,6 +2365,14 @@ async function reassignEventOwner() {
                   label="Nowy termin spotkania"
                   value={rescheduledMeetingAt}
                   onChange={setRescheduledMeetingAt}
+                />
+                <MeetingConfirmationReminderFields
+                  required={rescheduledConfirmationRequired}
+                  reminderAt={rescheduledConfirmationReminderAt}
+                  meetingAt={rescheduledMeetingAt}
+                  onRequiredChange={setRescheduledConfirmationRequired}
+                  onReminderAtChange={setRescheduledConfirmationReminderAt}
+                  className="mt-4"
                 />
               </div>
             )}

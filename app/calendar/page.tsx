@@ -4,6 +4,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import MeetingConfirmationReminderFields, {
+  meetingConfirmationReminderToIso,
+  validateMeetingConfirmationReminder,
+} from "@/components/MeetingConfirmationReminderFields";
 
 type CalendarItem = {
   id: string;
@@ -81,6 +85,8 @@ export default function CalendarPage() {
   const [newEventClientSearch, setNewEventClientSearch] = useState("");
   const [newEventType, setNewEventType] = useState<"meeting" | "phone_call" | "vacation">("meeting");
   const [newEventAt, setNewEventAt] = useState("");
+  const [newEventConfirmationRequired, setNewEventConfirmationRequired] = useState(false);
+  const [newEventConfirmationReminderAt, setNewEventConfirmationReminderAt] = useState("");
   const [newVacationStartDate, setNewVacationStartDate] = useState("");
   const [newVacationEndDate, setNewVacationEndDate] = useState("");
   const [newEventDescription, setNewEventDescription] = useState("");
@@ -607,6 +613,8 @@ async function openCreateEventModal() {
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
+  setNewEventConfirmationRequired(false);
+  setNewEventConfirmationReminderAt("");
   setNewVacationStartDate("");
   setNewVacationEndDate("");
   setNewEventDescription(meetingDescriptionTemplate);
@@ -829,6 +837,17 @@ async function createCalendarEventFromModal() {
     return;
   }
 
+  const confirmationValidationError = validateMeetingConfirmationReminder({
+    required: newEventType === "meeting" && newEventConfirmationRequired,
+    reminderAt: newEventConfirmationReminderAt,
+    meetingAt: newEventAt,
+  });
+
+  if (confirmationValidationError) {
+    setCreateEventError(confirmationValidationError);
+    return;
+  }
+
   const selectedClient =
     newEventType === "vacation"
       ? null
@@ -916,6 +935,8 @@ async function createCalendarEventFromModal() {
     setNewEventAdvisorSearch("");
     setNewEventType("meeting");
     setNewEventAt("");
+    setNewEventConfirmationRequired(false);
+    setNewEventConfirmationReminderAt("");
     setNewVacationStartDate("");
     setNewVacationEndDate("");
     setNewEventDescription("");
@@ -936,6 +957,15 @@ async function createCalendarEventFromModal() {
       created_by: currentUserId,
       assigned_user_id: newEventAdvisorId,
       microsoft_sync_status: newEventType === "meeting" ? "pending" : "not_synced",
+      confirmation_required:
+        newEventType === "meeting" && newEventConfirmationRequired,
+      confirmation_reminder_at:
+        newEventType === "meeting"
+          ? meetingConfirmationReminderToIso(
+              newEventConfirmationRequired,
+              newEventConfirmationReminderAt
+            )
+          : null,
     })
     .select("id")
     .single();
@@ -980,6 +1010,8 @@ async function createCalendarEventFromModal() {
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
   setNewEventAt("");
+  setNewEventConfirmationRequired(false);
+  setNewEventConfirmationReminderAt("");
   setNewVacationStartDate("");
   setNewVacationEndDate("");
   setNewEventDescription("");
@@ -1691,6 +1723,8 @@ async function createCalendarEventFromModal() {
       onClick={() => {
         setNewEventType("meeting");
         setNewEventDescription(meetingDescriptionTemplate);
+        setNewEventConfirmationRequired(false);
+        setNewEventConfirmationReminderAt("");
       }}
       className={`rounded-xl border px-4 py-3 text-left transition ${
         newEventType === "meeting"
@@ -1707,6 +1741,8 @@ async function createCalendarEventFromModal() {
       onClick={() => {
         setNewEventType("phone_call");
         setNewEventDescription("");
+        setNewEventConfirmationRequired(false);
+        setNewEventConfirmationReminderAt("");
       }}
       className={`rounded-xl border px-4 py-3 text-left transition ${
         newEventType === "phone_call"
@@ -1725,6 +1761,8 @@ async function createCalendarEventFromModal() {
         setNewEventClientId("");
         setNewEventClientSearch("");
         setNewEventDescription("");
+        setNewEventConfirmationRequired(false);
+        setNewEventConfirmationReminderAt("");
       }}
       className={`rounded-xl border px-4 py-3 text-left transition ${
         newEventType === "vacation"
@@ -1915,11 +1953,22 @@ async function createCalendarEventFromModal() {
                       </p>
                     </div>
                   ) : (
-                    <DateTimePicker
-                      label="Data i godzina"
-                      value={newEventAt}
-                      onChange={setNewEventAt}
-                    />
+                    <>
+                      <DateTimePicker
+                        label="Data i godzina"
+                        value={newEventAt}
+                        onChange={setNewEventAt}
+                      />
+                      {newEventType === "meeting" && (
+                        <MeetingConfirmationReminderFields
+                          required={newEventConfirmationRequired}
+                          reminderAt={newEventConfirmationReminderAt}
+                          meetingAt={newEventAt}
+                          onRequiredChange={setNewEventConfirmationRequired}
+                          onReminderAtChange={setNewEventConfirmationReminderAt}
+                        />
+                      )}
+                    </>
                   )}
 
                   <label className="block">

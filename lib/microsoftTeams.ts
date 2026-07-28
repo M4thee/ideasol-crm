@@ -3,6 +3,7 @@ import {
   graphApiRequestWithAccessToken,
   refreshMicrosoftDelegatedAccessToken,
 } from "@/lib/microsoftGraph";
+import { buildMeetingConfirmationReminderMessage } from "@/lib/meetingConfirmation";
 
 export type TeamsCalendarNotificationPayload = {
   userEmail: string;
@@ -14,6 +15,14 @@ export type TeamsNoteMentionNotificationPayload = {
   mentionedByName: string;
   clientName: string;
   noteUrl: string;
+};
+
+export type TeamsMeetingConfirmationReminderPayload = {
+  userEmail: string;
+  advisorName: string;
+  clientName: string;
+  eventAt: string;
+  eventUrl: string;
 };
 
 export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificationPayload & {
@@ -221,6 +230,12 @@ export function buildTeamsNoteMentionMessage(payload: TeamsNoteMentionNotificati
   ];
 
   return lines.join("\n");
+}
+
+export function buildTeamsMeetingConfirmationReminderMessage(
+  payload: TeamsMeetingConfirmationReminderPayload
+) {
+  return buildMeetingConfirmationReminderMessage(payload);
 }
 
 export async function sendTeamsCalendarNotification(
@@ -556,6 +571,34 @@ export async function sendTeamsDirectNoteMentionNotification(
     userEmail: payload.userEmail,
     message: buildTeamsNoteMentionMessage(payload),
     accessToken: delegatedAccessToken,
+  });
+}
+
+export async function sendTeamsDirectMeetingConfirmationReminder(
+  payload: TeamsMeetingConfirmationReminderPayload
+) {
+  const message = buildTeamsMeetingConfirmationReminderMessage(payload);
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
+
+  if (delegatedRefreshToken) {
+    const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+    if (!delegatedToken.access_token) {
+      throw new Error(
+        "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla przypomnienia o potwierdzeniu spotkania."
+      );
+    }
+
+    return sendTeamsDelegatedDirectCalendarNotification({
+      userEmail: payload.userEmail,
+      message,
+      accessToken: delegatedToken.access_token,
+    });
+  }
+
+  return sendTeamsDirectCalendarNotification({
+    userEmail: payload.userEmail,
+    message,
   });
 }
 

@@ -9,6 +9,10 @@ import {
   canViewCompanySales,
   canViewTeamCalendar,
 } from "@/lib/permissions";
+import MeetingConfirmationReminderFields, {
+  meetingConfirmationReminderToIso,
+  validateMeetingConfirmationReminder,
+} from "@/components/MeetingConfirmationReminderFields";
 
 type AuthUser = {
   id: string;
@@ -187,6 +191,10 @@ export default function Home() {
   const [resolutionDescription, setResolutionDescription] = useState("");
   const [resolutionFollowUpAt, setResolutionFollowUpAt] = useState("");
   const [resolutionMeetingAt, setResolutionMeetingAt] = useState("");
+  const [resolutionMeetingConfirmationRequired, setResolutionMeetingConfirmationRequired] =
+    useState(false);
+  const [resolutionMeetingConfirmationReminderAt, setResolutionMeetingConfirmationReminderAt] =
+    useState("");
   const [resolutionError, setResolutionError] = useState("");
   const [savingResolution, setSavingResolution] = useState(false);
   const meetingsRef = useRef<HTMLDivElement | null>(null);
@@ -1212,6 +1220,8 @@ export default function Home() {
     setResolutionDescription("");
     setResolutionFollowUpAt("");
     setResolutionMeetingAt("");
+    setResolutionMeetingConfirmationRequired(false);
+    setResolutionMeetingConfirmationReminderAt("");
     setResolutionError("");
   }
 
@@ -1435,6 +1445,18 @@ export default function Home() {
       return;
     }
 
+    const meetingConfirmationError = validateMeetingConfirmationReminder({
+      required:
+        needsMeeting(resolutionStatus) && resolutionMeetingConfirmationRequired,
+      reminderAt: resolutionMeetingConfirmationReminderAt,
+      meetingAt: resolutionMeetingAt,
+    });
+
+    if (meetingConfirmationError) {
+      setResolutionError(meetingConfirmationError);
+      return;
+    }
+
     setSavingResolution(true);
 
     const completedStatus = `Zakończone - ${getResolutionStatusLabel(resolutionStatus)}`;
@@ -1512,6 +1534,11 @@ export default function Home() {
           created_by: currentUser.id,
           assigned_user_id: currentUser.id,
           microsoft_sync_status: "pending",
+          confirmation_required: resolutionMeetingConfirmationRequired,
+          confirmation_reminder_at: meetingConfirmationReminderToIso(
+            resolutionMeetingConfirmationRequired,
+            resolutionMeetingConfirmationReminderAt
+          ),
         })
         .select("id")
         .single();
@@ -2487,11 +2514,20 @@ export default function Home() {
               )}
 
               {needsMeeting(resolutionStatus) && (
-                <DateTimePicker
-                  label="Data i godzina spotkania"
-                  value={resolutionMeetingAt}
-                  onChange={setResolutionMeetingAt}
-                />
+                <>
+                  <DateTimePicker
+                    label="Data i godzina spotkania"
+                    value={resolutionMeetingAt}
+                    onChange={setResolutionMeetingAt}
+                  />
+                  <MeetingConfirmationReminderFields
+                    required={resolutionMeetingConfirmationRequired}
+                    reminderAt={resolutionMeetingConfirmationReminderAt}
+                    meetingAt={resolutionMeetingAt}
+                    onRequiredChange={setResolutionMeetingConfirmationRequired}
+                    onReminderAtChange={setResolutionMeetingConfirmationReminderAt}
+                  />
+                </>
               )}
 
               <textarea
@@ -2530,4 +2566,4 @@ export default function Home() {
 
     </main>
   );
-} 
+}
