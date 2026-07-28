@@ -1,0 +1,3 @@
+# IdeaSol short links: keep the public URL on ideasol.pl and resolve it in CRM.
+RewriteEngine On
+RewriteRule ^([A-Za-z0-9]{4})/?$ https://crm.ideasol.pl/$1 [R=302,L,NE]

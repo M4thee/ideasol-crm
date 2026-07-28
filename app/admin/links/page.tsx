@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+
+const SHORT_LINK_BASE_URL = "https://ideasol.pl";
 
 type ShortLink = {
   id: string;
@@ -27,7 +29,6 @@ function formatDate(value: string | null) {
 export default function AdminShortLinksPage() {
   const [links, setLinks] = useState<ShortLink[]>([]);
   const [destinationUrl, setDestinationUrl] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -35,10 +36,9 @@ export default function AdminShortLinksPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
-  const createdShortUrl = useMemo(
-    () => (createdLink && baseUrl ? `${baseUrl}/${createdLink.code}` : ""),
-    [baseUrl, createdLink]
-  );
+  const createdShortUrl = createdLink
+    ? `${SHORT_LINK_BASE_URL}/${createdLink.code}`
+    : "";
 
   async function authorizedFetch(
     input: RequestInfo | URL,
@@ -73,7 +73,6 @@ export default function AdminShortLinksPage() {
         throw new Error(payload.error || "Nie udało się pobrać linków.");
       }
 
-      setBaseUrl(window.location.origin);
       setLinks(payload.links ?? []);
     } catch (loadError) {
       setError(
@@ -317,7 +316,7 @@ export default function AdminShortLinksPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {links.map((link) => {
-                        const shortUrl = `${baseUrl}/${link.code}`;
+                        const shortUrl = `${SHORT_LINK_BASE_URL}/${link.code}`;
 
                         return (
                           <tr
