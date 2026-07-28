@@ -1102,9 +1102,6 @@ export default function OfferForm({
                     <div className="font-semibold text-slate-900 dark:text-slate-100">
                       Klient posiada własny falownik hybrydowy
                     </div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Falownik nie zostanie dodany do wyceny, oferty ani umowy. Bonus UE może nadal przysługiwać za magazyn wyprodukowany w UE.
-                    </div>
                   </div>
                 </label>
               </div>
