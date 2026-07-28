@@ -40,7 +40,9 @@ function serializeError(error: unknown) {
 }
 
 function isCronAuthorized(request: Request) {
-  const cronSecret = process.env.CRON_SECRET?.trim();
+  const cronSecret =
+    process.env.CRON_SECRET?.trim() ||
+    process.env.REPORTS_CRON_SECRET?.trim();
 
   if (!cronSecret) {
     return false;
@@ -50,9 +52,12 @@ function isCronAuthorized(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (!process.env.CRON_SECRET?.trim()) {
+  if (
+    !process.env.CRON_SECRET?.trim() &&
+    !process.env.REPORTS_CRON_SECRET?.trim()
+  ) {
     return NextResponse.json(
-      { ok: false, error: "Brak konfiguracji CRON_SECRET." },
+      { ok: false, error: "Brak konfiguracji sekretu harmonogramu." },
       { status: 503 }
     );
   }

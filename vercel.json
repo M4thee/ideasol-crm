@@ -3,10 +3,6 @@
     {
       "path": "/reports/daily-teams",
       "schedule": "30 5 * * *"
-    },
-    {
-      "path": "/api/cron/meeting-confirmation-reminders",
-      "schedule": "* * * * *"
     }
   ]
 }
