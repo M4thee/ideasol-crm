@@ -13,6 +13,7 @@ import MeetingConfirmationReminderFields, {
   meetingConfirmationReminderToIso,
   validateMeetingConfirmationReminder,
 } from "@/components/MeetingConfirmationReminderFields";
+import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
 
 type AuthUser = {
   id: string;
@@ -505,6 +506,17 @@ export default function Home() {
     salesSummaryMode,
     JSON.stringify(visibleUserIds),
   ]);
+
+  useCrmResumeRefresh(async () => {
+    if (!currentUser || visibleUserIds === undefined) return;
+
+    await Promise.all([
+      loadClients(),
+      loadFollowUps(),
+      loadMeetings(),
+      currentUserRole === "cc" ? loadCcSummary() : loadSalesSummary(),
+    ]);
+  });
 
   async function loadClients() {
     setLoadingClients(true);

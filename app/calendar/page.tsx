@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
 import MeetingConfirmationReminderFields, {
   meetingConfirmationReminderToIso,
   validateMeetingConfirmationReminder,
@@ -102,6 +103,12 @@ export default function CalendarPage() {
 
     loadCalendarItems();
   }, [currentUserId, currentUserRole, selectedOwnerIds, visibleUserIds, currentDate]);
+
+  useCrmResumeRefresh(async () => {
+    if (!currentUserId) return;
+
+    await loadCalendarItems();
+  });
 
   // --- Manager-aware calendar visibility scopes ---
   async function loadVisibleUserIds(

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
 
 const statusStyles: Record<string, string> = {
   "Nowy lead": "bg-blue-100 text-blue-900",
@@ -339,6 +340,12 @@ function ClientsPageContent() {
     clientsLoadedRef.current = true;
     loadClients(currentUserId, currentUserRole);
   }, [filtersHydrated, currentUserId, currentUserRole]);
+
+  useCrmResumeRefresh(async () => {
+    if (!filtersHydrated || !currentUserId || !currentUserRole) return;
+
+    await loadClients(currentUserId, currentUserRole);
+  });
 
   useEffect(() => {
     if (filtersHydratedRef.current) return;
