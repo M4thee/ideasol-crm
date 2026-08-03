@@ -1251,6 +1251,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const templateBytes = await readFile(templatePath);
   const pdfDoc = await PDFDocument.load(templateBytes);
   pdfDoc.registerFontkit(fontkit);
+  const { width: contractPageWidth, height: contractPageHeight } =
+    pdfDoc.getPage(0).getSize();
+
+  // Keep each generated document on a separate sheet when printing duplex.
+  pdfDoc.addPage([contractPageWidth, contractPageHeight]);
 
   const zmTemplateBytes = await readFile(
     path.join(process.cwd(), "public", "templates", "ZM.pdf")
@@ -1258,6 +1263,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const zmTemplate = await PDFDocument.load(zmTemplateBytes);
   const [zmPage] = await pdfDoc.copyPages(zmTemplate, [0]);
   pdfDoc.addPage(zmPage);
+
+  pdfDoc.addPage([contractPageWidth, contractPageHeight]);
 
   const ppozTemplateBytes = await readFile(
     path.join(process.cwd(), "public", "templates", "PPOZ.pdf")
@@ -1267,7 +1274,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
     ppozTemplate,
     ppozTemplate.getPageIndices()
   );
-  ppozPages.forEach((page) => pdfDoc.addPage(page));
+  ppozPages.forEach((page, index) => {
+    pdfDoc.addPage(page);
+
+    if (index === 0 && ppozPages.length > 1) {
+      pdfDoc.addPage([contractPageWidth, contractPageHeight]);
+    }
+  });
 
   const regularFontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "NotoSans-Regular.ttf"));
   let boldFontBytes = regularFontBytes;
@@ -1432,7 +1445,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
             ? y < 600
               ? { width: 12.05, height: 18.05 }
               : { width: 6.89, height: 10.31 }
-            : pageIndex === 17
+            : pageIndex === 18
               ? { width: 6.46, height: 9.67 }
               : { width: 6.03, height: 9.02 };
     const box = metrics || defaultMetrics;
@@ -2242,11 +2255,11 @@ if (hasOptimizers) {
     });
   };
 
-  // Page 18 — ZM power of attorney, appended after the contract.
-  drawProsument(17, prosuments[0], contractPdfPositions.zm.prosument1, 215);
-  drawProsument(17, prosuments[1], contractPdfPositions.zm.prosument2, 220);
+  // Page 18 is blank; page 19 contains the ZM power of attorney.
+  drawProsument(18, prosuments[0], contractPdfPositions.zm.prosument1, 215);
+  drawProsument(18, prosuments[1], contractPdfPositions.zm.prosument2, 220);
   drawFittedOnPage(
-    17,
+    18,
     customer.installationAddress,
     contractPdfPositions.zm.installationAddress.x,
     contractPdfPositions.zm.installationAddress.y,
@@ -2254,7 +2267,7 @@ if (hasOptimizers) {
     { size: contractPdfPositions.zm.installationAddress.size }
   );
   drawFittedOnPage(
-    17,
+    18,
     `NR LICZNIKA: ${customer.meterNumber || "—"}    NUMER PPE: ${customer.ppeNumber || "—"}`,
     contractPdfPositions.zm.meterAndPpe.x,
     contractPdfPositions.zm.meterAndPpe.y,
@@ -2268,22 +2281,22 @@ if (hasOptimizers) {
     ];
 
   if (osdPosition) {
-    drawCheck(17, osdPosition.x, osdPosition.y);
+    drawCheck(18, osdPosition.x, osdPosition.y);
   }
 
-  // Pages 19–20 — full PPOZ file; CRM data is placed on its first page.
+  // Page 20 is blank; PPOZ is on pages 21 and 23, separated by blank page 22.
   drawFittedOnPage(
-    18,
+    20,
     `${customer.contractPlace}, ${formatDateFromInput(customer.contractDate)}`,
     contractPdfPositions.ppoz.placeAndDate.x,
     contractPdfPositions.ppoz.placeAndDate.y,
     205,
     { size: contractPdfPositions.ppoz.placeAndDate.size }
   );
-  drawProsument(18, prosuments[0], contractPdfPositions.ppoz.prosument1, 250);
-  drawProsument(18, prosuments[1], contractPdfPositions.ppoz.prosument2, 240);
+  drawProsument(20, prosuments[0], contractPdfPositions.ppoz.prosument1, 250);
+  drawProsument(20, prosuments[1], contractPdfPositions.ppoz.prosument2, 240);
   drawFittedOnPage(
-    18,
+    20,
     customer.installationAddress,
     contractPdfPositions.ppoz.installationAddress.x,
     contractPdfPositions.ppoz.installationAddress.y,
