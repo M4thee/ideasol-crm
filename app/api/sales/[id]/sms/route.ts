@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { canAccessSaleForSms, requireSmsRequest } from "@/lib/auth/requireSmsRequest";
 import {
   buildSaleSmsTemplates,
+  type SmsTemplateDefinition,
+  type SmsTemplateRequiredField,
+  type SmsTemplateTone,
   type SaleSmsTemplateType,
 } from "@/lib/saleSms";
 import {
@@ -17,24 +20,6 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 type JsonRecord = Record<string, unknown>;
 type SmsRecipientSource = "sale" | "client";
-
-const TEMPLATE_TYPES = new Set<SaleSmsTemplateType>([
-  "deposit_reminder",
-  "payment_reminder_1",
-  "payment_reminder_2",
-  "payment_demand",
-  "installation_confirmation",
-]);
-
-function emptyTemplateSentCounts(): Record<SaleSmsTemplateType, number> {
-  return {
-    deposit_reminder: 0,
-    payment_reminder_1: 0,
-    payment_reminder_2: 0,
-    payment_demand: 0,
-    installation_confirmation: 0,
-  };
-}
 
 function numberValue(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -88,7 +73,7 @@ async function loadSaleSmsData(saleId: string) {
     paymentsResponse,
     installerResponse,
     historyResponse,
-    clientTemplateHistoryResponse,
+    templatesResponse,
   ] =
     await Promise.all([
       sale.client_id
@@ -117,17 +102,14 @@ async function loadSaleSmsData(saleId: string) {
         .eq("sale_id", saleId)
         .order("created_at", { ascending: false })
         .limit(30),
-      sale.client_id
-        ? supabaseAdmin
-            .from("sms_messages")
-            .select("message_type, provider_response")
-            .eq("client_id", sale.client_id)
-            .eq("status", "sent")
-            .in(
-              "message_type",
-              [...TEMPLATE_TYPES].map((type) => `sale_${type}`)
-            )
-        : Promise.resolve({ data: [], error: null }),
+      supabaseAdmin
+        .from("sms_templates")
+        .select(
+          "id,template_key,title,message_template,tone,required_fields,is_active,is_system,sort_order"
+        )
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
     ]);
 
   if (clientResponse.error) {
@@ -142,9 +124,9 @@ async function loadSaleSmsData(saleId: string) {
   if (historyResponse.error) {
     throw new Error(`Nie udało się pobrać historii SMS: ${historyResponse.error.message}`);
   }
-  if (clientTemplateHistoryResponse.error) {
+  if (templatesResponse.error) {
     throw new Error(
-      `Nie udało się pobrać liczników SMS klienta: ${clientTemplateHistoryResponse.error.message}`
+      `Nie udało się pobrać szablonów SMS: ${templatesResponse.error.message}`
     );
   }
 
@@ -175,17 +157,62 @@ async function loadSaleSmsData(saleId: string) {
     client?.contact_phone
   );
   const installer = installerResponse.data;
-  const templates = buildSaleSmsTemplates({
-    contractNumber,
-    depositAmount: numberValue(sale.deposit_amount),
-    outstandingAmount,
-    installationDate: sale.installation_date,
-    installationTime: sale.installation_time,
-    installerCompanyName: installer?.company_name || null,
-  }).map((template) => ({
+  const templateDefinitions = (templatesResponse.data || []).map(
+    (template): SmsTemplateDefinition => ({
+      id: template.id,
+      type: template.template_key,
+      title: template.title,
+      messageTemplate: template.message_template,
+      tone: template.tone as SmsTemplateTone,
+      requiredFields: (template.required_fields || []) as SmsTemplateRequiredField[],
+      isActive: template.is_active,
+      isSystem: template.is_system,
+      sortOrder: template.sort_order,
+    })
+  );
+  const templateTypes = new Set(
+    templateDefinitions.map((template) => template.type)
+  );
+  const clientTemplateHistoryResponse = sale.client_id && templateTypes.size > 0
+    ? await supabaseAdmin
+        .from("sms_messages")
+        .select("message_type, provider_response")
+        .eq("client_id", sale.client_id)
+        .eq("status", "sent")
+        .in(
+          "message_type",
+          [...templateTypes].map((type) => `sale_${type}`)
+        )
+    : { data: [], error: null };
+
+  if (clientTemplateHistoryResponse.error) {
+    throw new Error(
+      `Nie udało się pobrać liczników SMS klienta: ${clientTemplateHistoryResponse.error.message}`
+    );
+  }
+
+  const templates = buildSaleSmsTemplates(
+    {
+      clientName: firstText(client?.company_name, client?.full_name),
+      contractNumber,
+      contractValue,
+      depositAmount: numberValue(sale.deposit_amount),
+      paidTotal,
+      outstandingAmount,
+      installationDate: sale.installation_date,
+      installationTime: sale.installation_time,
+      installerCompanyName: installer?.company_name || null,
+      installerContactName: installer?.contact_name || null,
+      installerPhone: installer?.phone || null,
+    },
+    templateDefinitions
+  ).map((template) => ({
     ...template,
     message: removePolishDiacritics(template.message),
   }));
+  const emptyTemplateSentCounts = Object.fromEntries(
+    [...templateTypes].map((type) => [type, 0])
+  ) as Record<string, number>;
   const templateSentCounts = (clientTemplateHistoryResponse.data || []).reduce(
     (counts, item) => {
       if (!wasDeliveredToIntendedRecipient(item.provider_response)) return counts;
@@ -195,13 +222,13 @@ async function loadSaleSmsData(saleId: string) {
         ""
       ) as SaleSmsTemplateType;
 
-      if (TEMPLATE_TYPES.has(templateType)) {
+      if (templateTypes.has(templateType)) {
         counts[templateType] += 1;
       }
 
       return counts;
     },
-    emptyTemplateSentCounts()
+    emptyTemplateSentCounts
   );
 
   return {
@@ -303,7 +330,7 @@ export async function POST(request: Request, context: RouteContext) {
     const templateType = String(body.templateType || "") as SaleSmsTemplateType;
     const recipientSource = String(body.recipientSource || "") as SmsRecipientSource;
 
-    if (!TEMPLATE_TYPES.has(templateType)) {
+    if (!/^[a-z0-9_]{3,80}$/.test(templateType)) {
       return NextResponse.json({ ok: false, error: "Nieprawidłowy szablon SMS." }, { status: 400 });
     }
 

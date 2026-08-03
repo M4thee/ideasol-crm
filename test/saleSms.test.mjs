@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildInstallationReminderMessage,
   buildSaleSmsTemplates,
+  getUnknownSmsTemplatePlaceholders,
 } from "../lib/saleSms.ts";
 import {
   isValidDateOnly,
@@ -55,6 +56,59 @@ test("potwierdzenie montażu wymaga daty, godziny i instalatora", () => {
 
   assert.equal(confirmation?.enabled, false);
   assert.match(confirmation?.reason || "", /godziny montażu/i);
+});
+
+test("własny szablon uzupełnia pola z CRM i respektuje dodatkowe wymagania", () => {
+  const [template] = buildSaleSmsTemplates(
+    {
+      ...completeContext,
+      clientName: "Jan Kowalski",
+      contractValue: 60_000,
+      paidTotal: 12_678.5,
+    },
+    [
+      {
+        id: "custom-id",
+        type: "custom_payment_status",
+        title: "Stan płatności",
+        messageTemplate:
+          "Dzień dobry {{client_name}}. Wpłacono {{paid_total}} PLN, pozostało {{outstanding_amount}} PLN do umowy {{contract_number}}.",
+        tone: "standard",
+        requiredFields: ["outstanding_amount"],
+      },
+    ]
+  );
+
+  assert.equal(template.enabled, true);
+  assert.equal(template.type, "custom_payment_status");
+  assert.match(template.message, /Jan Kowalski/);
+  assert.match(template.message, /12[\s\u00a0]678,50 PLN/);
+  assert.match(template.message, /47[\s\u00a0]321,50 PLN/);
+});
+
+test("własny szablon jest blokowany, gdy brakuje danych użytych w treści", () => {
+  const [template] = buildSaleSmsTemplates(
+    { ...completeContext, clientName: null },
+    [
+      {
+        type: "custom_greeting",
+        title: "Powitanie",
+        messageTemplate: "Dzień dobry {{client_name}}.",
+        tone: "standard",
+        requiredFields: [],
+      },
+    ]
+  );
+
+  assert.equal(template.enabled, false);
+  assert.match(template.reason || "", /klienta/i);
+});
+
+test("walidacja wykrywa nieobsługiwane pola dynamiczne", () => {
+  assert.deepEqual(
+    getUnknownSmsTemplatePlaceholders("Umowa {{contract_number}}, pole {{nieznane_pole}}"),
+    ["nieznane_pole"]
+  );
 });
 
 test("automatyczne przypomnienie zawiera kontakt do instalatora", () => {

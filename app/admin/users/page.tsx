@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import AdminPanel from "@/components/calculator/AdminPanel";
 import GrantAdminPanel from "@/components/calculator/GrantAdminPanel";
 import InstallersAdmin from "@/components/admin/InstallersAdmin";
+import SmsTemplatesAdmin from "@/components/admin/SmsTemplatesAdmin";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
 
@@ -83,7 +84,7 @@ export default function AdminUsersPage() {
   });
 
   const [activeSection, setActiveSection] = useState<
-    "users" | "installers" | "tags" | "pricing" | "grant"
+    "users" | "installers" | "tags" | "pricing" | "grant" | "sms"
   >("users");
   const [adminStatus, setAdminStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
@@ -1402,6 +1403,18 @@ export default function AdminUsersPage() {
 
               <button
                 type="button"
+                onClick={() => setActiveSection("sms")}
+                className={
+                  activeSection === "sms"
+                    ? "rounded-xl bg-fuchsia-800 px-4 py-2 text-sm font-semibold text-white shadow-sm"
+                    : "rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+                }
+              >
+                SMS
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveSection("pricing")}
                 className={
                   activeSection === "pricing"
@@ -1716,6 +1729,8 @@ export default function AdminUsersPage() {
             )}
 
             {activeSection === "installers" && <InstallersAdmin />}
+
+            {activeSection === "sms" && <SmsTemplatesAdmin />}
 
             {activeSection === "pricing" && (
               <AdminPanel
