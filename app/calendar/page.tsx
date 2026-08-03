@@ -30,6 +30,9 @@ type CalendarItem = {
 
 type CalendarView = "month" | "week" | "day";
 
+const MONTH_VIEW_DAY_COUNT = 35;
+const WEEKDAY_LABELS = ["Niedz", "Pon", "Wt", "Śr", "Czw", "Pt", "Sob"];
+
 type CalendarOwner = {
   id: string;
   display_name: string | null;
@@ -1200,13 +1203,19 @@ async function createCalendarEventFromModal() {
     const multiplier = direction === "previous" ? -1 : 1;
 
     if (calendarView === "month") {
-      setCurrentDate(
-        new Date(
-          currentDate.getFullYear(),
-          currentDate.getMonth() + multiplier,
-          1
-        )
+      const targetMonth = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth() + multiplier,
+        1
       );
+      const lastDayOfTargetMonth = new Date(
+        targetMonth.getFullYear(),
+        targetMonth.getMonth() + 1,
+        0
+      ).getDate();
+
+      targetMonth.setDate(Math.min(currentDate.getDate(), lastDayOfTargetMonth));
+      setCurrentDate(targetMonth);
       return;
     }
 
@@ -1224,10 +1233,20 @@ async function createCalendarEventFromModal() {
 
   const headerLabel = (() => {
     if (calendarView === "month") {
-      return currentDate.toLocaleDateString("pl-PL", {
-        month: "long",
+      const rangeEnd = new Date(currentDate);
+      rangeEnd.setDate(currentDate.getDate() + MONTH_VIEW_DAY_COUNT - 1);
+
+      const rangeStartLabel = currentDate.toLocaleDateString("pl-PL", {
+        day: "numeric",
+        month: "short",
+      });
+      const rangeEndLabel = rangeEnd.toLocaleDateString("pl-PL", {
+        day: "numeric",
+        month: "short",
         year: "numeric",
       });
+
+      return `${rangeStartLabel} – ${rangeEndLabel}`;
     }
 
     if (calendarView === "week") {
@@ -1254,57 +1273,30 @@ async function createCalendarEventFromModal() {
   })();
 
   const calendarDays = useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
+    return Array.from({ length: MONTH_VIEW_DAY_COUNT }, (_, index) => {
+      const date = new Date(currentDate);
+      date.setDate(currentDate.getDate() + index);
 
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-
-    const startDay = (firstDay.getDay() + 6) % 7;
-    const totalDays = lastDay.getDate();
-
-    const days: Array<{
+      return {
+        date,
+        isCurrentMonth: date.getMonth() === currentDate.getMonth(),
+        items: getItemsForDate(date),
+      };
+    }) satisfies Array<{
       date: Date;
       isCurrentMonth: boolean;
       items: CalendarItem[];
-    }> = [];
-
-    for (let i = startDay - 1; i >= 0; i--) {
-      const date = new Date(year, month, -i);
-
-      days.push({
-        date,
-        isCurrentMonth: false,
-        items: [],
-      });
-    }
-
-    for (let day = 1; day <= totalDays; day++) {
-      const date = new Date(year, month, day);
-
-      days.push({
-        date,
-        isCurrentMonth: true,
-        items: getItemsForDate(date),
-      });
-    }
-
-    while (days.length % 7 !== 0) {
-      const nextDate = new Date(
-        year,
-        month,
-        totalDays + (days.length % 7) + 1
-      );
-
-      days.push({
-        date: nextDate,
-        isCurrentMonth: false,
-        items: [],
-      });
-    }
-
-    return days;
+    }>;
   }, [currentDate, calendarItems, selectedEventTypes]);
+
+  const monthWeekdayLabels = useMemo(
+    () =>
+      Array.from(
+        { length: 7 },
+        (_, index) => WEEKDAY_LABELS[(currentDate.getDay() + index) % 7]
+      ),
+    [currentDate]
+  );
 
   const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
   function getRoleLabel(role: string | null) {
@@ -1534,7 +1526,7 @@ async function createCalendarEventFromModal() {
             <div className="-mx-1 overflow-x-auto px-1 pb-2">
               <div className="min-w-[720px]">
                 <div className="grid grid-cols-7 border border-slate-200 rounded-t-2xl overflow-hidden">
-                {["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Niedz"].map(
+                {monthWeekdayLabels.map(
                   (day) => (
                     <div
                       key={day}
