@@ -1,8 +1,9 @@
 
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireSmsRequest } from "@/lib/auth/requireSmsRequest";
 import { normalizePolishPhoneNumber, sendSmsApiMessage } from "@/lib/smsapi";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 type SendSmsRequest = {
   clientId?: string | null;
@@ -12,32 +13,6 @@ type SendSmsRequest = {
   message?: string;
   messageType?: string;
 };
-
-function getSupabaseAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji Supabase service role dla endpointu SMS.");
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
-
-function getBearerToken(request: Request) {
-  const authorization = request.headers.get("authorization") || "";
-
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return "";
-  }
-
-  return authorization.slice(7).trim();
-}
 
 function serializeError(error: unknown) {
   if (error instanceof Error) {
@@ -61,29 +36,13 @@ function serializeError(error: unknown) {
 
 export async function POST(request: Request) {
   let smsMessageId: string | null = null;
-  let supabaseAdmin: ReturnType<typeof getSupabaseAdminClient> | null = null;
 
   try {
-    const token = getBearerToken(request);
-
-    if (!token) {
+    const profile = await requireSmsRequest(request);
+    if (!profile) {
       return NextResponse.json(
-        { ok: false, error: "Brak tokenu autoryzacji użytkownika." },
-        { status: 401 }
-      );
-    }
-
-    supabaseAdmin = getSupabaseAdminClient();
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseAdmin.auth.getUser(token);
-
-    if (userError || !user) {
-      return NextResponse.json(
-        { ok: false, error: "Nie udało się potwierdzić użytkownika." },
-        { status: 401 }
+        { ok: false, error: "Brak uprawnienia SMS." },
+        { status: 403 }
       );
     }
 
@@ -114,7 +73,7 @@ export async function POST(request: Request) {
         client_id: body.clientId || null,
         sale_id: body.saleId || null,
         meeting_id: body.meetingId || null,
-        sent_by_user_id: user.id,
+        sent_by_user_id: profile.id,
         recipient_phone: recipientPhone,
         sender: senderLabel,
         message,
@@ -176,7 +135,7 @@ export async function POST(request: Request) {
           ? String((details as { message?: unknown }).message || "")
           : String(details || "");
 
-      if (smsMessageId && supabaseAdmin) {
+      if (smsMessageId) {
         const { error: updateError } = await supabaseAdmin
           .from("sms_messages")
           .update({

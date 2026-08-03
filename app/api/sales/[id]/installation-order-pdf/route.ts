@@ -8,6 +8,11 @@ import {
   type InstallationSupplySources,
 } from "@/lib/installationOrderPdf";
 import { getInstallationOrderScope } from "@/lib/installationOrderScope";
+import {
+  isValidDateOnly,
+  isValidTimeOnly,
+  polishLocalDateTimeToIso,
+} from "@/lib/polishDateTime";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -526,6 +531,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const body = await request.json();
     const installerId = cleanText(body.installerId);
     const installationDate = cleanText(body.installationDate);
+    const installationTime = cleanText(body.installationTime).slice(0, 5);
     const supplySources = parseSupplySources(body.supplySources);
     const includedItems = parseIncludedItems(body.includedItems);
     const generationJobId = cleanText(body.generationJobId);
@@ -536,8 +542,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!installationDate) {
       return NextResponse.json({ error: "Wybierz datę montażu." }, { status: 400 });
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(installationDate)) {
+    if (!isValidDateOnly(installationDate)) {
       return NextResponse.json({ error: "Nieprawidłowa data montażu." }, { status: 400 });
+    }
+    if (!isValidTimeOnly(installationTime)) {
+      return NextResponse.json({ error: "Wybierz poprawną godzinę montażu." }, { status: 400 });
+    }
+    const installationAt = polishLocalDateTimeToIso(installationDate, installationTime);
+    if (!installationAt) {
+      return NextResponse.json(
+        { error: "Wybrana data i godzina montażu nie istnieją w polskiej strefie czasowej." },
+        { status: 400 }
+      );
     }
     if (!supplySources) {
       return NextResponse.json({ error: "Nieprawidłowe źródło dostawy." }, { status: 400 });
@@ -681,6 +697,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         sale_id: saleId,
         installer_id: installer.id,
         installation_date: installationDate,
+        installation_time: installationTime,
+        installation_at: installationAt,
         installer_snapshot: installerSnapshot,
         supply_sources: supplySources,
         generated_by: user.id,
@@ -700,6 +718,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
       return NextResponse.json(
         { error: "Nie udało się zapisać danych zlecenia montażu." },
+        { status: 500 }
+      );
+    }
+
+    const { error: saleScheduleError } = await supabaseAdmin
+      .from("sales")
+      .update({
+        installation_date: installationDate,
+        installation_time: installationTime,
+        installation_at: installationAt,
+        installation_installer_id: installer.id,
+        installation_sms_reminder_attempted_at: null,
+        installation_sms_reminder_sent_at: null,
+        installation_sms_reminder_error: null,
+      })
+      .eq("id", saleId);
+
+    if (saleScheduleError) {
+      console.error("Błąd zapisu terminu montażu na sprzedaży", saleScheduleError);
+      return NextResponse.json(
+        { error: "Zlecenie zapisano, ale nie udało się zapisać terminu montażu na sprzedaży." },
         { status: 500 }
       );
     }
@@ -740,7 +779,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const pv = getPvDetails(sale, equipment.panel, scope.hasPv);
     const { pdfDoc, regularFont, boldFont } = await createInstallationOrderCover({
       saleNumber,
-      installationDate: formatPolishDate(installationDate),
+      installationDate: `${formatPolishDate(installationDate)}, godz. ${installationTime}`,
       installer: {
         companyName: installer.company_name,
         address: installer.address || "Brak danych",

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
 import { getInstallationOrderScope } from "@/lib/installationOrderScope";
 import {
   DOCUMENT_GROUPS,
@@ -31,6 +32,10 @@ type Sale = {
   offer_snapshot?: Record<string, any> | null;
   payment_method?: string | null;
   deposit_amount?: number | null;
+  installation_date?: string | null;
+  installation_time?: string | null;
+  installation_at?: string | null;
+  installation_installer_id?: string | null;
   created_at: string;
 };
 
@@ -91,6 +96,7 @@ type Installer = {
 type InstallationOrder = {
   installer_id: string;
   installation_date: string | null;
+  installation_time: string | null;
   supply_sources?: Partial<InstallationSupplySources> | null;
 };
 
@@ -281,7 +287,7 @@ function formatEstimatedGenerationTime(seconds: number | null) {
 }
 
 
-type ActiveTab = "sale" | "documents" | "financial" | "notes";
+type ActiveTab = "sale" | "documents" | "financial" | "notes" | "sms";
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
@@ -455,11 +461,13 @@ export default function SalePage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("sale");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [hasRealizationAccess, setHasRealizationAccess] = useState(false);
+  const [hasSmsAccess, setHasSmsAccess] = useState(false);
 
   const [showInstallationOrderModal, setShowInstallationOrderModal] = useState(false);
   const [installers, setInstallers] = useState<Installer[]>([]);
   const [selectedInstallerId, setSelectedInstallerId] = useState("");
   const [installationDate, setInstallationDate] = useState("");
+  const [installationTime, setInstallationTime] = useState("");
   const [installationSupplySources, setInstallationSupplySources] =
     useState<InstallationSupplySources>(DEFAULT_INSTALLATION_SUPPLY_SOURCES);
   const [installationOrderIncludedItems, setInstallationOrderIncludedItems] =
@@ -588,7 +596,7 @@ export default function SalePage() {
 
       const { data: permissionData, error: permissionError } = await supabase
         .from("user_permissions")
-        .select("realization")
+        .select("realization, sms")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -598,8 +606,10 @@ export default function SalePage() {
 
       resolvedRealizationAccess = Boolean(permissionData?.realization);
       setHasRealizationAccess(resolvedRealizationAccess);
+      setHasSmsAccess(Boolean(permissionData?.sms));
     } else {
       setHasRealizationAccess(false);
+      setHasSmsAccess(false);
     }
 
     const normalizedRole = String(resolvedRole || "seller").toLowerCase();
@@ -1321,7 +1331,7 @@ export default function SalePage() {
         .order("company_name", { ascending: true }),
       supabase
         .from("installation_orders")
-        .select("installer_id, installation_date, supply_sources")
+        .select("installer_id, installation_date, installation_time, supply_sources")
         .eq("sale_id", sale.id)
         .maybeSingle(),
     ]);
@@ -1350,6 +1360,7 @@ export default function SalePage() {
         ""
     );
     setInstallationDate(existingOrder?.installation_date || "");
+    setInstallationTime(existingOrder?.installation_time?.slice(0, 5) || "");
     setInstallationSupplySources(
       normalizeInstallationSupplySources(existingOrder?.supply_sources)
     );
@@ -1365,8 +1376,8 @@ export default function SalePage() {
   }
 
   async function generateInstallationOrder() {
-    if (!sale || !selectedInstallerId || !installationDate) {
-      setInstallationOrderStatus("Wybierz instalatora i datę montażu.");
+    if (!sale || !selectedInstallerId || !installationDate || !installationTime) {
+      setInstallationOrderStatus("Wybierz instalatora, datę i godzinę montażu.");
       return;
     }
 
@@ -1439,6 +1450,7 @@ export default function SalePage() {
         body: JSON.stringify({
           installerId: selectedInstallerId,
           installationDate,
+          installationTime,
           supplySources: installationSupplySources,
           includedItems: installationOrderIncludedItems,
           generationJobId,
@@ -1481,6 +1493,16 @@ export default function SalePage() {
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 30_000);
       setInstallationOrderStatus("Zlecenie montażu zostało wygenerowane.");
+      setSale((current) =>
+        current
+          ? {
+              ...current,
+              installation_date: installationDate,
+              installation_time: installationTime,
+              installation_installer_id: selectedInstallerId,
+            }
+          : current
+      );
     } catch (error) {
       console.error("Błąd generowania zlecenia montażu", error);
       setInstallationOrderStatus("Wystąpił błąd podczas generowania PDF.");
@@ -1850,6 +1872,19 @@ export default function SalePage() {
               >
                 Notatki
               </button>
+
+              {hasSmsAccess ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("sms")}
+                  className={`px-4 py-2 rounded-xl font-semibold whitespace-nowrap ${activeTab === "sms"
+                    ? "bg-fuchsia-800 text-white"
+                    : "bg-fuchsia-50 text-fuchsia-800"
+                    }`}
+                >
+                  SMS i wpłaty
+                </button>
+              ) : null}
             </div>
 
             <div className="p-6 space-y-6">
@@ -2625,6 +2660,10 @@ export default function SalePage() {
                   </div>
                 </div>
               )}
+
+              {activeTab === "sms" && hasSmsAccess ? (
+                <SaleSmsPanel saleId={sale.id} />
+              ) : null}
             </div>
           </section>
         </div>
@@ -2673,6 +2712,22 @@ export default function SalePage() {
                     />
                     <p className="mt-1 text-xs text-slate-500">
                       Data zostanie zapisana w CRM i umieszczona w wygenerowanym PDF.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-slate-700">
+                      Godzina montażu *
+                    </label>
+                    <input
+                      type="time"
+                      value={installationTime}
+                      onChange={(event) => setInstallationTime(event.target.value)}
+                      required
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      Godzina zostanie zapisana w CRM i użyta w potwierdzeniu SMS.
                     </p>
                   </div>
 
@@ -2850,7 +2905,8 @@ export default function SalePage() {
                     loadingInstallationOrder ||
                     generatingInstallationOrder ||
                     !selectedInstallerId ||
-                    !installationDate
+                    !installationDate ||
+                    !installationTime
                   }
                   className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >

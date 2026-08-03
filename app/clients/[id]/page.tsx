@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
   ContactFormPayload,
@@ -61,6 +62,7 @@ type CalendarEvent = {
 type Sale = {
   id: string;
   public_id: number | null;
+  contract_number: string | null;
   sale_date: string;
   contract_value: number | null;
   status: string;
@@ -221,13 +223,14 @@ const contactChannelStyles: Record<
   },
 };
 
-type ActiveTab = "dashboard" | "sales" | "offers" | "meetings";
+type ActiveTab = "dashboard" | "sales" | "offers" | "meetings" | "sms";
 
 const tabs: { id: ActiveTab; label: string }[] = [
   { id: "dashboard", label: "Pulpit" },
   { id: "sales", label: "Sprzedaże" },
   { id: "offers", label: "Oferty" },
   { id: "meetings", label: "Spotkania" },
+  { id: "sms", label: "SMS i wpłaty" },
 ];
 
 export default function ClientPage() {
@@ -256,6 +259,8 @@ export default function ClientPage() {
   const [showAllActivities, setShowAllActivities] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
+  const [hasSmsAccess, setHasSmsAccess] = useState(false);
+  const [selectedSmsSaleId, setSelectedSmsSaleId] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -315,6 +320,17 @@ export default function ClientPage() {
 
     const role = (profileData?.role || "seller") as UserRole;
     setCurrentUserRole(role);
+
+    const { data: permissionData, error: permissionError } = await supabase
+      .from("user_permissions")
+      .select("sms")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (permissionError) {
+      console.error("Błąd ładowania uprawnienia SMS:", permissionError);
+    }
+    setHasSmsAccess(Boolean(permissionData?.sms));
 
     const normalizedRole = String(role || "seller").toLowerCase();
     const canViewAllClients = ["owner", "admin", "cc"].includes(normalizedRole);
@@ -437,7 +453,7 @@ export default function ClientPage() {
 
     const { data: salesData, error: salesError } = await supabase
       .from("sales")
-      .select("id, public_id, sale_date, contract_value, status")
+      .select("id, public_id, contract_number, sale_date, contract_value, status")
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
 
@@ -445,7 +461,11 @@ export default function ClientPage() {
       console.error("Błąd ładowania sprzedaży klienta:", salesError);
     }
 
-    setSales((salesData as Sale[]) || []);
+    const loadedSales = (salesData as Sale[]) || [];
+    setSales(loadedSales);
+    setSelectedSmsSaleId((current) =>
+      loadedSales.some((sale) => sale.id === current) ? current : loadedSales[0]?.id || ""
+    );
 
     const { data: offersData, error: offersError } = await supabase
       .from("client_offers")
@@ -1924,7 +1944,7 @@ export default function ClientPage() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center gap-3 overflow-x-auto border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-            {tabs.map((tab) => (
+            {tabs.filter((tab) => tab.id !== "sms" || hasSmsAccess).map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -2211,6 +2231,37 @@ export default function ClientPage() {
                 )}
               </div>
             )}
+
+            {activeTab === "sms" && hasSmsAccess ? (
+              <div className="space-y-5">
+                {sales.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                    Klient nie ma sprzedaży, dla której można wysłać gotową wiadomość.
+                  </p>
+                ) : (
+                  <>
+                    <label className="block text-sm font-bold text-slate-700">
+                      Sprzedaż / umowa
+                      <select
+                        value={selectedSmsSaleId}
+                        onChange={(event) => setSelectedSmsSaleId(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-fuchsia-600"
+                      >
+                        {sales.map((sale) => (
+                          <option key={sale.id} value={sale.id}>
+                            {sale.contract_number ||
+                              (sale.public_id
+                                ? `SALE-${String(sale.public_id).padStart(6, "0")}`
+                                : `SALE-${sale.id.slice(0, 8).toUpperCase()}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedSmsSaleId ? <SaleSmsPanel saleId={selectedSmsSaleId} /> : null}
+                  </>
+                )}
+              </div>
+            ) : null}
 
 
             {activeTab === "offers" && (

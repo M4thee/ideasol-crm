@@ -21,6 +21,7 @@ type Profile = {
   is_active?: boolean;
   hidden_from_assignment?: boolean | null;
   realization_access: boolean;
+  sms_access: boolean;
 };
 
 type ClientTag = {
@@ -426,7 +427,7 @@ export default function AdminUsersPage() {
 
     const { data: permissionsData, error: permissionsError } = await supabase
       .from("user_permissions")
-      .select("user_id, realization");
+      .select("user_id, realization, sms");
 
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
@@ -438,11 +439,18 @@ export default function AdminUsersPage() {
         Boolean(permission.realization),
       ])
     );
+    const smsByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.sms),
+      ])
+    );
 
     setProfiles(
       (data ?? []).map((profile) => ({
         ...profile,
         realization_access: realizationByUserId.get(profile.id) || false,
+        sms_access: smsByUserId.get(profile.id) || false,
       })) as Profile[]
     );
     setLoading(false);
@@ -454,7 +462,11 @@ export default function AdminUsersPage() {
   ) {
     setSavingUserId(userId);
 
-    const { realization_access: realizationAccess, ...profileValues } = values;
+    const {
+      realization_access: realizationAccess,
+      sms_access: smsAccess,
+      ...profileValues
+    } = values;
     const payload: Partial<Profile> = profileValues;
 
     console.log("UPDATE USER ID", userId);
@@ -489,7 +501,7 @@ export default function AdminUsersPage() {
       }
     }
 
-    if (realizationAccess !== undefined) {
+    if (realizationAccess !== undefined || smsAccess !== undefined) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -500,12 +512,15 @@ export default function AdminUsersPage() {
         return;
       }
 
+      const currentProfile = profiles.find((profile) => profile.id === userId);
       const { error: permissionError } = await supabase
         .from("user_permissions")
         .upsert(
           {
             user_id: userId,
-            realization: realizationAccess,
+            realization:
+              realizationAccess ?? currentProfile?.realization_access ?? false,
+            sms: smsAccess ?? currentProfile?.sms_access ?? false,
             updated_by: user.id,
             updated_at: new Date().toISOString(),
           },
@@ -513,8 +528,8 @@ export default function AdminUsersPage() {
         );
 
       if (permissionError) {
-        console.error("Błąd zapisu uprawnienia Realizacja", permissionError);
-        alert("Nie udało się zapisać uprawnienia Realizacja.");
+        console.error("Błąd zapisu uprawnień dodatkowych", permissionError);
+        alert("Nie udało się zapisać uprawnień dodatkowych.");
         setSavingUserId(null);
         return;
       }
@@ -1036,6 +1051,16 @@ export default function AdminUsersPage() {
       changeLines.push(
         `Uprawnienie Realizacja: ${profile.realization_access ? "Tak" : "Nie"} → ${
           changes.realization_access ? "Tak" : "Nie"
+        }`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "sms_access") &&
+      changes.sms_access !== profile.sms_access
+    ) {
+      changeLines.push(
+        `Uprawnienie SMS: ${profile.sms_access ? "Tak" : "Nie"} → ${
+          changes.sms_access ? "Tak" : "Nie"
         }`
       );
     }
@@ -1842,6 +1867,7 @@ export default function AdminUsersPage() {
                       </button>
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
+                    <th className="px-4 py-3 text-center">SMS</th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -1959,6 +1985,22 @@ export default function AdminUsersPage() {
                             )
                               ? "Tak"
                               : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.sms_access ?? profile.sms_access}
+                              onChange={(event) => {
+                                updateEditedProfile(profile.id, {
+                                  sms_access: event.target.checked,
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 accent-fuchsia-700"
+                            />
+                            {(editedProfile.sms_access ?? profile.sms_access) ? "Tak" : "Nie"}
                           </label>
                         </td>
 
