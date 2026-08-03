@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getInstallationOrderScope } from "@/lib/installationOrderScope";
+import {
+  DOCUMENT_GROUPS,
+  getPhotoGalleryDocuments,
+  getSaleDocumentGroupKey,
+  type DocumentGroupKey,
+} from "@/lib/saleDocumentGrouping";
 
 type Sale = {
   id: string;
@@ -297,90 +303,6 @@ const SALE_STATUSES = [
   "Utrzymanie - uratowana",
 ];
 
-const DOCUMENT_GROUPS = [
-  {
-    key: "contracts",
-    title: "Umowa wraz z załącznikami",
-    description:
-      "Umowa, załączniki do umowy, dokumenty podpisowe, potwierdzenia wpłat i dokumenty kredytowe.",
-    acceptedTypes: [
-      "Umowa",
-      "Umowa i załączniki",
-      "Umowa wraz z załącznikami",
-      "Potwierdzenie wpłaty",
-      "Umowa kredytowa",
-    ],
-    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 50,
-  },
-  {
-    key: "technical_audit",
-    title: "Audyt techniczny",
-    description:
-      "Audyt techniczny, protokoły, schematy, karty techniczne i dokumentacja techniczna montażu.",
-    acceptedTypes: ["Audyt techniczny", "Dokumenty techniczne", "Protokół montażu"],
-    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 20,
-  },
-  {
-    key: "photos",
-    title: "Zdjęcia",
-    description:
-      "Zdjęcia z audytu, montażu, miejsca instalacji i dokumentacji fotograficznej.",
-    acceptedTypes: ["Zdjęcia", "Zdjęcie", "Galeria zdjęć"],
-    accept: "image/*",
-    maxSizeMb: 30,
-  },
-  {
-    key: "osd_invoice",
-    title: "Faktura OSD",
-    description:
-      "Faktura OSD i dokumenty związane z operatorem sieci dystrybucyjnej.",
-    acceptedTypes: ["Faktura OSD"],
-    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 15,
-  },
-  {
-    key: "zm_power_of_attorney",
-    title: "Pełnomocnictwo ZM",
-    description:
-      "Pełnomocnictwo ZM oraz dokumenty do zgłoszenia mikroinstalacji.",
-    acceptedTypes: ["Pełnomocnictwo ZM"],
-    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 15,
-  },
-  {
-    key: "ppoz",
-    title: "PPOŻ",
-    description:
-      "Dokumenty PPOŻ, uzgodnienia i pełnomocnictwa związane ze strażą pożarną.",
-    acceptedTypes: ["PPOŻ", "PPOZ", "Pełnomocnictwo do straży pożarnej"],
-    accept: ".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 15,
-  },
-  {
-    key: "pme_grant",
-    title: "Dotacja PME",
-    description:
-      "Dokumenty dotacyjne programu PME i materiały potrzebne do rozliczenia dotacji.",
-    acceptedTypes: ["Dotacja PME", "Dokumenty związane z dotacją"],
-    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 25,
-  },
-  {
-    key: "other",
-    title: "Inne",
-    description:
-      "Pozostałe dokumenty i pliki, których nie da się jednoznacznie przypisać do wcześniejszych kontenerów.",
-    acceptedTypes: ["Inne"],
-    accept: ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp",
-    maxSizeMb: 50,
-  },
-] as const;
-
-
-type DocumentGroupKey = (typeof DOCUMENT_GROUPS)[number]["key"];
-
 type DocumentContainerStatus = "draft" | "submitted" | "approved" | "rejected";
 
 type SaleDocumentContainer = {
@@ -594,7 +516,7 @@ export default function SalePage() {
   useEffect(() => {
     async function loadPhotoPreviews() {
       const photoDocuments = documents.filter(
-        (document) => getDocumentGroupKey(document) === "photos"
+        (document) => getSaleDocumentGroupKey(document) === "photos"
       );
 
       if (photoDocuments.length === 0) {
@@ -1158,7 +1080,7 @@ export default function SalePage() {
 
   function getDocumentGroupUsedBytes(groupKey: DocumentGroupKey) {
     return documents
-      .filter((document) => getDocumentGroupKey(document) === groupKey)
+      .filter((document) => getSaleDocumentGroupKey(document) === groupKey)
       .reduce((sum, document) => sum + (document.file_size || 0), 0);
   }
 
@@ -1221,74 +1143,12 @@ export default function SalePage() {
   }
 
   function canDeleteSaleDocument(document: SaleDocument) {
-    const containerStatus = getDocumentContainerStatus(getDocumentGroupKey(document));
+    const containerStatus = getDocumentContainerStatus(getSaleDocumentGroupKey(document));
 
     if (currentUserRole === "admin" || currentUserRole === "owner") return true;
     if (!canUploadDocuments) return false;
 
     return containerStatus === "draft";
-  }
-
-  function getDocumentGroupKey(document: SaleDocument): DocumentGroupKey {
-    const normalizedType = String(document.document_type || "").trim().toLowerCase();
-    const normalizedName = String(document.file_name || "").trim().toLowerCase();
-    const normalizedFileType = String(document.file_type || "").trim().toLowerCase();
-    const searchableText = `${normalizedType} ${normalizedName}`;
-
-    if (
-      normalizedFileType.startsWith("image/") ||
-      searchableText.includes("zdję") ||
-      searchableText.includes("zdjec") ||
-      normalizedName.match(/\.(jpg|jpeg|png|webp|heic)$/)
-    ) {
-      return "photos";
-    }
-
-    if (
-      searchableText.includes("ppoż") ||
-      searchableText.includes("ppoz") ||
-      searchableText.includes("straż") ||
-      searchableText.includes("straz") ||
-      searchableText.includes("pożar") ||
-      searchableText.includes("pozar")
-    ) {
-      return "ppoz";
-    }
-
-    if (
-      searchableText.includes("faktura osd") ||
-      searchableText.includes("osd")
-    ) {
-      return "osd_invoice";
-    }
-
-    if (
-      searchableText.includes("pełnomocnictwo zm") ||
-      searchableText.includes("pelnomocnictwo zm") ||
-      searchableText.includes("zgłoszenie mikro") ||
-      searchableText.includes("zgloszenie mikro") ||
-      searchableText.includes(" zm ")
-    ) {
-      return "zm_power_of_attorney";
-    }
-
-    if (
-      searchableText.includes("dotac") ||
-      searchableText.includes("pme")
-    ) {
-      return "pme_grant";
-    }
-
-    if (
-      searchableText.includes("audyt") ||
-      searchableText.includes("techn") ||
-      searchableText.includes("protok") ||
-      searchableText.includes("schemat")
-    ) {
-      return "technical_audit";
-    }
-
-    return "other";
   }
 
   async function getSaleDocumentSignedUrl(document: SaleDocument) {
@@ -1312,14 +1172,17 @@ export default function SalePage() {
     window.open(signedUrl, "_blank");
   }
 
-  async function openPhotoPreview(photoDocuments: SaleDocument[], index: number) {
-    const document = photoDocuments[index];
+  async function openPhotoPreview(photoDocuments: SaleDocument[], documentId: string) {
+    const galleryDocuments = getPhotoGalleryDocuments(photoDocuments);
+    const index = galleryDocuments.findIndex((item) => item.id === documentId);
+    const document = galleryDocuments[index];
+
     if (!document) return;
 
     const signedUrl = await getSaleDocumentSignedUrl(document);
     if (!signedUrl) return;
 
-    setPhotoPreviewDocuments(photoDocuments);
+    setPhotoPreviewDocuments(galleryDocuments);
     setPhotoPreviewIndex(index);
     setPhotoPreviewUrl(signedUrl);
   }
@@ -2365,7 +2228,7 @@ export default function SalePage() {
                   <div className="space-y-4">
                     {DOCUMENT_GROUPS.map((group) => {
                       const groupDocuments = documents.filter(
-                        (document) => getDocumentGroupKey(document) === group.key
+                        (document) => getSaleDocumentGroupKey(document) === group.key
                       );
                       const containerStatus = getDocumentContainerStatus(group.key);
                       const canUploadToContainer = canUploadToDocumentContainer(group.key);
@@ -2541,11 +2404,11 @@ export default function SalePage() {
                                 </div>
                               ) : (
                                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-                                  {groupDocuments.map((document, index) => (
+                                  {groupDocuments.map((document) => (
                                     <button
                                       key={document.id}
                                       type="button"
-                                      onClick={() => openPhotoPreview(groupDocuments, index)}
+                                      onClick={() => openPhotoPreview(groupDocuments, document.id)}
                                       className="group overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 text-left transition hover:border-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:hover:border-emerald-500/60"
                                     >
                                       <div className="aspect-square bg-slate-200 dark:bg-slate-800">
