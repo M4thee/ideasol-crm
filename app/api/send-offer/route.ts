@@ -20,6 +20,43 @@ function formatMoney(value: number) {
   return Number(value || 0).toLocaleString("pl-PL");
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeSellerNote(value: unknown) {
+  return String(value || "").trim().slice(0, 2000);
+}
+
+function getOfferPdfAttachment(base64Value: unknown): MailAttachment | null {
+  const rawValue = String(base64Value || "").trim();
+
+  if (!rawValue) return null;
+
+  const base64 = rawValue.replace(/^data:application\/pdf;base64,/i, "");
+
+  if (base64.length > 14_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new Error("Nieprawidłowy plik oferty PDF");
+  }
+
+  const content = Buffer.from(base64, "base64");
+
+  if (content.length === 0 || content.length > 10_000_000 || content.subarray(0, 4).toString() !== "%PDF") {
+    throw new Error("Nieprawidłowy plik oferty PDF");
+  }
+
+  return {
+    filename: "oferta-ideasol.pdf",
+    content,
+    contentType: "application/pdf",
+  };
+}
+
 function getInverterTypeLabel(inverterType: unknown) {
   const normalizedType = String(inverterType || "")
     .trim()
@@ -251,6 +288,18 @@ export async function POST(request: Request) {
     const replyTo = isPublicSend && advisorEmail ? advisorEmail : generalReplyTo;
     const vatRate = Number(body.vatRate || 8);
     const finalGross = Number(body.finalGross || body.finalGross8 || 0);
+    const sellerNote = normalizeSellerNote(body.sellerNote);
+    const includeOfferPdf = Boolean(body.includeOfferPdf || body.attachOfferPdf);
+    const offerPdfAttachment = includeOfferPdf
+      ? getOfferPdfAttachment(body.offerPdfBase64)
+      : null;
+
+    if (includeOfferPdf && !offerPdfAttachment) {
+      return NextResponse.json(
+        { error: "Nie udało się przygotować oferty PDF do załączenia" },
+        { status: 400 }
+      );
+    }
 
     const includeCatalogCards = Boolean(
       body.includeCatalogCards || body.attachCatalogCards || body.sendCatalogCards
@@ -348,6 +397,18 @@ export async function POST(request: Request) {
     const catalogCardsTextLine = catalogCardAttachments.length
       ? `\nW załączniku przesyłam również karty katalogowe wybranych urządzeń.\n`
       : "";
+    const offerPdfTextLine = offerPdfAttachment
+      ? `\nW załączniku przesyłam ofertę w formacie PDF.\n`
+      : "";
+    const sellerNoteText = sellerNote
+      ? `\nWiadomość od handlowca:\n${sellerNote}\n`
+      : "";
+    const sellerNoteHtml = sellerNote
+      ? `<div style="border-left:5px solid #16a34a; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:14px; padding:16px 18px; margin:0 0 22px;">
+                <p style="margin:0 0 8px; font-size:13px; color:#047857; font-weight:800;">Wiadomość od handlowca</p>
+                <p style="margin:0; font-size:15px; color:#111827; line-height:1.65; white-space:pre-wrap;">${escapeHtml(sellerNote).replace(/\r?\n/g, "<br />")}</p>
+              </div>`
+      : "";
 
     const panelDetailsParts = [
       panelCount ? `${panelCount} szt.` : "",
@@ -422,9 +483,10 @@ www.ideasol.pl`;
     const text = `Dzień dobry,
 
 ${offerIntro}
+${sellerNoteText}
 
 Zakres wyceny:
-${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${catalogCardsTextLine}
+${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${offerPdfTextLine}${catalogCardsTextLine}
 Cena netto: ${formatMoney(body.finalNet)} zł
 Cena brutto ${vatRate}%: ${formatMoney(finalGross)} zł
 ${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł (dotacja ME: ${formatMoney(storageSubsidy)} zł${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)} zł` : ""})\n` : ""}
@@ -457,6 +519,8 @@ ${emailSignatureText}`;
               <p style="font-size:17px; margin:0 0 26px; line-height:1.65; color:#111827;">
                 ${offerIntro.replace(offerProductName, `<strong style="color:#047857;">${offerProductName}</strong>`)}
               </p>
+
+              ${sellerNoteHtml}
 
               <table style="border-collapse:separate; border-spacing:0; width:100%; margin:20px 0 26px; font-size:15px; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden;">
                 ${pvTableRows}
@@ -525,7 +589,10 @@ ${emailSignatureText}`;
       subject,
       text,
       html,
-      attachments: catalogCardAttachments,
+      attachments: [
+        ...(offerPdfAttachment ? [offerPdfAttachment] : []),
+        ...catalogCardAttachments,
+      ],
     });
 
     return NextResponse.json({ ok: true });

@@ -28,12 +28,9 @@ type ContractForm = {
   storageNetAfterDiscount: string;
   storageGrossBeforeDiscount: string;
   storageGrossAfterDiscount: string;
-  emsNetAfterDiscount: string;
-  emsGrossBeforeDiscount: string;
-  emsGrossAfterDiscount: string;
-  backupNetAfterDiscount: string;
-  backupGrossBeforeDiscount: string;
-  backupGrossAfterDiscount: string;
+  inverterNetAfterDiscount: string;
+  inverterGrossBeforeDiscount: string;
+  inverterGrossAfterDiscount: string;
   additionalServicesNetAfterDiscount: string;
   additionalServicesGrossBeforeDiscount: string;
   additionalServicesGrossAfterDiscount: string;
@@ -113,12 +110,9 @@ export default function SaleContractPage() {
     storageNetAfterDiscount: "",
     storageGrossBeforeDiscount: "",
     storageGrossAfterDiscount: "",
-    emsNetAfterDiscount: "",
-    emsGrossBeforeDiscount: "",
-    emsGrossAfterDiscount: "",
-    backupNetAfterDiscount: "",
-    backupGrossBeforeDiscount: "",
-    backupGrossAfterDiscount: "",
+    inverterNetAfterDiscount: "",
+    inverterGrossBeforeDiscount: "",
+    inverterGrossAfterDiscount: "",
     additionalServicesNetAfterDiscount: "",
     additionalServicesGrossBeforeDiscount: "",
     additionalServicesGrossAfterDiscount: "",
@@ -242,12 +236,9 @@ export default function SaleContractPage() {
       storageNetAfterDiscount: formatMoneyInput(customerData.contract_storage_net_after_discount),
       storageGrossBeforeDiscount: formatMoneyInput(customerData.contract_storage_gross_before_discount),
       storageGrossAfterDiscount: formatMoneyInput(customerData.contract_storage_gross_after_discount || customerData.contract_storage_gross),
-      emsNetAfterDiscount: formatMoneyInput(customerData.contract_ems_net_after_discount),
-      emsGrossBeforeDiscount: formatMoneyInput(customerData.contract_ems_gross_before_discount),
-      emsGrossAfterDiscount: formatMoneyInput(customerData.contract_ems_gross_after_discount || customerData.contract_ems_gross),
-      backupNetAfterDiscount: formatMoneyInput(customerData.contract_backup_net_after_discount),
-      backupGrossBeforeDiscount: formatMoneyInput(customerData.contract_backup_gross_before_discount),
-      backupGrossAfterDiscount: formatMoneyInput(customerData.contract_backup_gross_after_discount || customerData.contract_backup_gross),
+      inverterNetAfterDiscount: formatMoneyInput(customerData.contract_inverter_net_after_discount),
+      inverterGrossBeforeDiscount: formatMoneyInput(customerData.contract_inverter_gross_before_discount),
+      inverterGrossAfterDiscount: formatMoneyInput(customerData.contract_inverter_gross_after_discount || customerData.contract_inverter_gross),
       additionalServicesNetAfterDiscount: formatMoneyInput(customerData.contract_additional_services_net_after_discount),
       additionalServicesGrossBeforeDiscount: formatMoneyInput(customerData.contract_additional_services_gross_before_discount),
       additionalServicesGrossAfterDiscount: formatMoneyInput(
@@ -322,10 +313,8 @@ export default function SaleContractPage() {
       pvGrossAfterDiscount: form.pvGrossAfterDiscount,
       storageGrossBeforeDiscount: form.storageGrossBeforeDiscount,
       storageGrossAfterDiscount: form.storageGrossAfterDiscount,
-      emsGrossBeforeDiscount: form.emsGrossBeforeDiscount,
-      emsGrossAfterDiscount: form.emsGrossAfterDiscount,
-      backupGrossBeforeDiscount: form.backupGrossBeforeDiscount,
-      backupGrossAfterDiscount: form.backupGrossAfterDiscount,
+      inverterGrossBeforeDiscount: form.inverterGrossBeforeDiscount,
+      inverterGrossAfterDiscount: form.inverterGrossAfterDiscount,
       additionalServicesGrossBeforeDiscount: form.additionalServicesGrossBeforeDiscount,
       additionalServicesGrossAfterDiscount: form.additionalServicesGrossAfterDiscount,
       paymentMethod: form.paymentMethod,
@@ -669,16 +658,10 @@ export default function SaleContractPage() {
                       after: form.storageGrossAfterDiscount,
                     },
                     {
-                      label: "System zarządzania energią (EMS)",
-                      net: form.emsNetAfterDiscount,
-                      before: form.emsGrossBeforeDiscount,
-                      after: form.emsGrossAfterDiscount,
-                    },
-                    {
-                      label: "Backup wraz z montażem",
-                      net: form.backupNetAfterDiscount,
-                      before: form.backupGrossBeforeDiscount,
-                      after: form.backupGrossAfterDiscount,
+                      label: "Inwerter",
+                      net: form.inverterNetAfterDiscount,
+                      before: form.inverterGrossBeforeDiscount,
+                      after: form.inverterGrossAfterDiscount,
                     },
                     {
                       label: "Usługi dodatkowe",

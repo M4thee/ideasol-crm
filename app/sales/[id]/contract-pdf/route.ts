@@ -14,104 +14,104 @@ type RouteContext = {
 
 const contractPdfPositions = {
   page1: {
-    contractNumber: { x: 55, y: 739, size: 9 },
-    placeAndDate: { x: 400, y: 650, size: 9 },
-    clientName: { x: 40, y: 600, size: 9 },
-    pesel: { x: 400, y: 600, size: 9 },
-    secondClientName: { x: 40, y: 570, size: 9 },
-    secondClientPesel: { x: 400, y: 570, size: 9 },
-    contractAddress: { x: 40, y: 540, size: 9 },
-    correspondenceAddress: { x: 40, y: 512, size: 9 },
-    installationAddress: { x: 40, y: 485, size: 9 },
-    email: { x: 40, y: 456, size: 9 },
-    phone: { x: 400, y: 456, size: 9 },
-    salesRepresentative: { x: 140, y: 295, size: 9 },
+    contractNumber: { x: 55, y: 742, size: 9 },
+    placeAndDate: { x: 400, y: 653, size: 9 },
+    clientName: { x: 40, y: 603, size: 9 },
+    pesel: { x: 400, y: 603, size: 9 },
+    secondClientName: { x: 40, y: 573, size: 9 },
+    secondClientPesel: { x: 400, y: 573, size: 9 },
+    contractAddress: { x: 40, y: 543, size: 9 },
+    correspondenceAddress: { x: 40, y: 515, size: 9 },
+    installationAddress: { x: 40, y: 488, size: 9 },
+    email: { x: 40, y: 459, size: 9 },
+    phone: { x: 400, y: 459, size: 9 },
+    salesRepresentative: { x: 140, y: 308, size: 9 },
+    scheduledVisitCheck: { x: 301, y: 253 },
+    unscheduledVisitCheck: { x: 39, y: 239 },
+    meetingDate: { x: 146, y: 225, size: 8 },
   },
   page2: {
     soldItems: { x: 30, y: 600, lineHeight: 14, size: 8 },
-    additionalServicesList: { x: 50, y: 290, lineHeight: 12, size: 7 },
-    additionalServicesCheck: { x: 45, y: 302 },
-    optimizersCheck: { x: 44, y: 440 },
-    storageCheck: { x: 44, y: 558 },
-    backupCheck: { x: 185, y: 440 },
-    emsCheck: { x: 399, y: 440 },
+    additionalServicesList: { x: 66, y: 266, lineHeight: 13, size: 7 },
+    additionalServicesCheck: { x: 42, y: 280 },
+    optimizersCheck: { x: 42, y: 420 },
+    storageCheck: { x: 42, y: 538 },
+    backupCheck: { x: 183, y: 420 },
+    emsCheck: { x: 397, y: 420 },
 
-    inverterGridCheck: { x: 245, y: 500 },
-    inverterHybridCheck: { x: 290, y: 794 },
-    inverterMicroCheck: { x: 348, y: 500 },
-    inverterOwnCheck: { x: 416, y: 500 },
+    inverterGridCheck: { x: 244, y: 764 },
+    inverterHybridCheck: { x: 288, y: 764 },
+    inverterMicroCheck: { x: 346, y: 764 },
+    inverterOwnCheck: { x: 414, y: 764 },
 
-    mountingSheetMetalCheck: { x: 43, y: 660 },
-    mountingTileCheck: { x: 86, y: 660 },
-    mountingGroundCheck: { x: 180, y: 660 },
-    mountingCarportCheck: { x: 227, y: 660 },
-    mountingFlatRoofCheck: { x: 274, y: 660 },
+    mountingSheetMetalCheck: { x: 42, y: 630 },
+    mountingTileCheck: { x: 84, y: 630 },
+    mountingGroundCheck: { x: 179, y: 630 },
+    mountingCarportCheck: { x: 226, y: 630 },
+    mountingFlatRoofCheck: { x: 272, y: 630 },
 
-    pvPower: { x: 40, y: 765, size: 8 },
-    panelModel: { x: 40, y: 735, size: 8 },
-    panelPower: { x: 40, y: 705, size: 8 },
+    pvPower: { x: 42, y: 740, size: 8 },
+    panelModel: { x: 42, y: 710, size: 8 },
+    panelPower: { x: 42, y: 681, size: 8 },
 
-    inverterType: { x: 245, y: 765, size: 8 },
-    inverterModel: { x: 245, y: 735, size: 8 },
-    inverterPower: { x: 245, y: 705, size: 8 },
+    inverterType: { x: 244, y: 740, size: 8 },
+    inverterModel: { x: 244, y: 710, size: 8 },
+    inverterPower: { x: 244, y: 681, size: 8 },
 
-    storageBrand: { x: 207, y: 553, size: 8 },
-    storageModel: { x: 207, y: 527, size: 8 },
-    storageCapacity: { x: 207, y: 500, size: 8 },
+    storageBrand: { x: 310, y: 536, size: 8 },
+    storageModel: { x: 310, y: 510, size: 8 },
+    storageCapacity: { x: 310, y: 485, size: 8 },
   },
   page3: {
-    pvGrossBeforeDiscount: { x: 370, y: 170, size: 9, maxWidth: 72 },
-    pvGrossAfterDiscount: { x: 470, y: 170, size: 9, maxWidth: 88 },
-    storageGrossBeforeDiscount: { x: 370, y: 140, size: 9, maxWidth: 72 },
-    storageGrossAfterDiscount: { x: 470, y: 140, size: 9, maxWidth: 88 },
-    emsGrossBeforeDiscount: { x: 370, y: 110, size: 9, maxWidth: 72 },
-    emsGrossAfterDiscount: { x: 470, y: 110, size: 9, maxWidth: 88 },
+    pvGrossBeforeDiscount: { x: 346, y: 205, size: 9, maxWidth: 92 },
+    pvGrossAfterDiscount: { x: 452, y: 205, size: 9, maxWidth: 90 },
+    storageGrossBeforeDiscount: { x: 346, y: 177, size: 9, maxWidth: 92 },
+    storageGrossAfterDiscount: { x: 452, y: 177, size: 9, maxWidth: 90 },
+    inverterGrossBeforeDiscount: { x: 346, y: 149, size: 9, maxWidth: 92 },
+    inverterGrossAfterDiscount: { x: 452, y: 149, size: 9, maxWidth: 90 },
+    additionalServicesGrossBeforeDiscount: { x: 346, y: 123, size: 9, maxWidth: 92 },
+    additionalServicesGrossAfterDiscount: { x: 452, y: 123, size: 9, maxWidth: 90 },
   },
   page4: {
-    backupGrossBeforeDiscount: { x: 370, y: 784, size: 9, maxWidth: 72 },
-    backupGrossAfterDiscount: { x: 470, y: 784, size: 9, maxWidth: 88 },
-    additionalServicesLabel: { x: 40, y: 758, size: 7 },
-    additionalServicesGrossBeforeDiscount: { x: 370, y: 758, size: 9, maxWidth: 72 },
-    additionalServicesGrossAfterDiscount: { x: 470, y: 758, size: 9, maxWidth: 88 },
-    cashPaymentCheck: { x: 39, y: 559 },
-    creditPaymentCheck: { x: 39, y: 426 },
-    creditOwnContribution: { x: 160, y: 400, size: 9 },
-    creditDeposit: { x: 355, y: 400, size: 9 },
-    creditDepositDueDate: { x: 160, y: 375, size: 9 },
-    deposit: { x: 155, y: 532, size: 9 },
-    depositDueDate: { x: 308, y: 532, size: 9 },
-    finalPayment: { x: 185, y: 510, size: 9 },
-    totalGross: { x: 325, y: 705, size: 9, maxWidth: 95 },
-    totalGrossWords: { x: 40, y: 684, size: 8 },
+    cashPaymentCheck: { x: 36, y: 514 },
+    creditPaymentCheck: { x: 36, y: 375 },
+    creditOwnContribution: { x: 151, y: 351, size: 9 },
+    creditDeposit: { x: 345, y: 351, size: 9 },
+    creditDepositDueDate: { x: 146, y: 328, size: 9 },
+    deposit: { x: 105, y: 491, size: 9 },
+    depositDueDate: { x: 302, y: 491, size: 9 },
+    finalPayment: { x: 140, y: 470, size: 9 },
+    totalGross: { x: 332, y: 780, size: 9, maxWidth: 85 },
+    totalGrossWords: { x: 42, y: 759, size: 8 },
   },
-  page7: {
-    contractNumber: { x: 165, y: 755, size: 13 },
-    visitWasScheduledStrike: { x1: 443, y1: 602, x2: 459, y2: 602 },
-    visitWasNotScheduledStrike: { x1: 461, y1: 602, x2: 490, y2: 602 },
-    variant1ACheck: { x: 42, y: 495 },
-    variant1BCheck: { x: 42, y: 428 },
+  page8: {
+    contractNumber: { x: 51, y: 762, size: 10 },
   },
   page9: {
-    contractNumber: { x: 180, y: 744, size: 13 },
+    clientName: { x: 182, y: 759, size: 8 },
+    clientAddress: { x: 182, y: 745, size: 8 },
+    contractNumberAndDate: { x: 182, y: 732, size: 8 },
+    variant1ACheck: { x: 40, y: 522 },
+    variant1BCheck: { x: 40, y: 501 },
   },
-  // --- Inserted new positions for page11 and page12 ---
-  page11: {
-    contractNumber: { x: 155, y: 757, size: 13 },
+  page10: {
+    contractNumber: { x: 51, y: 762, size: 10 },
   },
   page12: {
-    client1MarketingEmailYes: { x: 37, y: 735 },
-    client1MarketingEmailNo: { x: 75, y: 735 },
-    client1MarketingPhoneYes: { x: 37, y: 689 },
-    client1MarketingPhoneNo: { x: 75, y: 689 },
-    client1PhotoConsentYes: { x: 37, y: 642 },
-    client1PhotoConsentNo: { x: 75, y: 642 },
+    contractNumber: { x: 51, y: 762, size: 10 },
+    client1MarketingEmailYes: { x: 36, y: 462 },
+    client1MarketingEmailNo: { x: 62, y: 462 },
+    client1MarketingPhoneYes: { x: 36, y: 452 },
+    client1MarketingPhoneNo: { x: 62, y: 452 },
+    client1PhotoConsentYes: { x: 36, y: 433 },
+    client1PhotoConsentNo: { x: 62, y: 433 },
 
-    client2MarketingEmailYes: { x: 37, y: 579 },
-    client2MarketingEmailNo: { x: 75, y: 579 },
-    client2MarketingPhoneYes: { x: 37, y: 533 },
-    client2MarketingPhoneNo: { x: 75, y: 533 },
-    client2PhotoConsentYes: { x: 37, y: 486 },
-    client2PhotoConsentNo: { x: 75, y: 486 },
+    client2MarketingEmailYes: { x: 40, y: 295 },
+    client2MarketingEmailNo: { x: 67, y: 295 },
+    client2MarketingPhoneYes: { x: 40, y: 285 },
+    client2MarketingPhoneNo: { x: 67, y: 285 },
+    client2PhotoConsentYes: { x: 40, y: 265 },
+    client2PhotoConsentNo: { x: 67, y: 265 },
   },
 } as const;
 
@@ -134,6 +134,19 @@ function money(value: unknown) {
   })} zł`;
 }
 
+function moneyNumber(value: unknown) {
+  const numberValue = Number(value ?? 0);
+
+  if (!Number.isFinite(numberValue)) {
+    return "0,00";
+  }
+
+  return numberValue.toLocaleString("pl-PL", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function toNumber(value: unknown) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
@@ -146,6 +159,10 @@ function toNumber(value: unknown) {
   }
 
   return 0;
+}
+
+function beforeDiscountFromAfterDiscountGross(value: number) {
+  return Math.round(value * 1.1111 * 100) / 100;
 }
 
 const ones = [
@@ -346,6 +363,7 @@ function getFinancialData(
   breakdownFallback?: {
     pvGross?: unknown;
     storageGross?: unknown;
+    inverterGross?: unknown;
     emsGross?: unknown;
     backupGross?: unknown;
     additionalServicesGross?: unknown;
@@ -353,6 +371,8 @@ function getFinancialData(
     pvGrossAfterDiscount?: unknown;
     storageGrossBeforeDiscount?: unknown;
     storageGrossAfterDiscount?: unknown;
+    inverterGrossBeforeDiscount?: unknown;
+    inverterGrossAfterDiscount?: unknown;
     emsGrossBeforeDiscount?: unknown;
     emsGrossAfterDiscount?: unknown;
     backupGrossBeforeDiscount?: unknown;
@@ -428,6 +448,16 @@ function getFinancialData(
       "customerData.contract_storage_gross",
     ]);
 
+  const inverterGross =
+    toNumber(breakdownFallback?.inverterGross) ||
+    getFirstNumber(source, [
+      "contractInverterGross",
+      "contract_inverter_gross",
+      "inverterGross",
+      "inverter_gross",
+      "customerData.contract_inverter_gross",
+    ]);
+
   const emsGross =
     toNumber(breakdownFallback?.emsGross) ||
     getFirstNumber(source, [
@@ -480,6 +510,13 @@ function getFinancialData(
     toNumber(breakdownFallback?.storageGrossAfterDiscount) ||
     getFirstNumber(source, ["contract_storage_gross_after_discount", "customerData.contract_storage_gross_after_discount"]);
 
+  const inverterGrossBeforeDiscount =
+    toNumber(breakdownFallback?.inverterGrossBeforeDiscount) ||
+    getFirstNumber(source, ["contract_inverter_gross_before_discount", "customerData.contract_inverter_gross_before_discount"]);
+  const inverterGrossAfterDiscount =
+    toNumber(breakdownFallback?.inverterGrossAfterDiscount) ||
+    getFirstNumber(source, ["contract_inverter_gross_after_discount", "customerData.contract_inverter_gross_after_discount"]);
+
   const emsGrossBeforeDiscount =
     toNumber(breakdownFallback?.emsGrossBeforeDiscount) ||
     getFirstNumber(source, ["contract_ems_gross_before_discount", "customerData.contract_ems_gross_before_discount"]);
@@ -507,23 +544,57 @@ function getFinancialData(
       "customerData.contract_additional_services_gross_after_discount",
     ]);
 
-  const knownBreakdownGross = pvGross + storageGross + emsGross + backupGross + additionalServicesGross;
+  const knownBreakdownGross = pvGross + storageGross + inverterGross + emsGross + backupGross + additionalServicesGross;
   const shouldFallbackToSingleLine = knownBreakdownGross <= 0 && totalGross > 0;
 
+  const legacyFeaturesGrossAfterDiscount = emsGrossAfterDiscount + backupGrossAfterDiscount;
+  const legacyFeaturesGrossBeforeDiscount = emsGrossBeforeDiscount + backupGrossBeforeDiscount;
+  const basePvGrossAfterDiscount = pvGrossAfterDiscount || (shouldFallbackToSingleLine ? totalGross : pvGross);
+  const baseStorageGrossAfterDiscount = storageGrossAfterDiscount || storageGross;
+  const baseInverterGrossAfterDiscount = inverterGrossAfterDiscount || inverterGross;
+  const baseAdditionalServicesGrossAfterDiscount = additionalServicesGrossAfterDiscount || additionalServicesGross;
+  const hasPvPriceLine = basePvGrossAfterDiscount > 0;
+  const displayedGrossAfterDiscount =
+    basePvGrossAfterDiscount +
+    baseStorageGrossAfterDiscount +
+    baseInverterGrossAfterDiscount +
+    baseAdditionalServicesGrossAfterDiscount +
+    legacyFeaturesGrossAfterDiscount;
+  const missingGrossAfterDiscount = Math.max(totalGross - displayedGrossAfterDiscount, 0);
+
+  const effectivePvGrossAfterDiscount = hasPvPriceLine
+    ? basePvGrossAfterDiscount + legacyFeaturesGrossAfterDiscount + missingGrossAfterDiscount
+    : basePvGrossAfterDiscount;
+  const effectiveStorageGrossAfterDiscount = hasPvPriceLine
+    ? baseStorageGrossAfterDiscount
+    : baseStorageGrossAfterDiscount + legacyFeaturesGrossAfterDiscount + missingGrossAfterDiscount;
+
+  const effectivePvGrossBeforeDiscount =
+    pvGrossBeforeDiscount + (hasPvPriceLine ? legacyFeaturesGrossBeforeDiscount : 0) ||
+    (effectivePvGrossAfterDiscount > 0 ? beforeDiscountFromAfterDiscountGross(effectivePvGrossAfterDiscount) : 0);
+  const effectiveStorageGrossBeforeDiscount =
+    storageGrossBeforeDiscount + (!hasPvPriceLine ? legacyFeaturesGrossBeforeDiscount : 0) ||
+    (effectiveStorageGrossAfterDiscount > 0 ? beforeDiscountFromAfterDiscountGross(effectiveStorageGrossAfterDiscount) : 0);
+
   return {
-    pvGross: shouldFallbackToSingleLine ? totalGross : pvGross,
-    storageGross,
-    emsGross,
-    backupGross,
+    pvGross: effectivePvGrossAfterDiscount,
+    storageGross: effectiveStorageGrossAfterDiscount,
+    inverterGross: baseInverterGrossAfterDiscount,
+    emsGross: 0,
+    backupGross: 0,
     additionalServicesGross,
-    pvGrossBeforeDiscount,
-    pvGrossAfterDiscount: pvGrossAfterDiscount || (shouldFallbackToSingleLine ? totalGross : pvGross),
-    storageGrossBeforeDiscount,
-    storageGrossAfterDiscount: storageGrossAfterDiscount || storageGross,
-    emsGrossBeforeDiscount,
-    emsGrossAfterDiscount: emsGrossAfterDiscount || emsGross,
-    backupGrossBeforeDiscount,
-    backupGrossAfterDiscount: backupGrossAfterDiscount || backupGross,
+    pvGrossBeforeDiscount: effectivePvGrossBeforeDiscount,
+    pvGrossAfterDiscount: effectivePvGrossAfterDiscount,
+    storageGrossBeforeDiscount: effectiveStorageGrossBeforeDiscount,
+    storageGrossAfterDiscount: effectiveStorageGrossAfterDiscount,
+    inverterGrossBeforeDiscount:
+      inverterGrossBeforeDiscount ||
+      (baseInverterGrossAfterDiscount > 0 ? beforeDiscountFromAfterDiscountGross(baseInverterGrossAfterDiscount) : 0),
+    inverterGrossAfterDiscount: baseInverterGrossAfterDiscount,
+    emsGrossBeforeDiscount: 0,
+    emsGrossAfterDiscount: 0,
+    backupGrossBeforeDiscount: 0,
+    backupGrossAfterDiscount: 0,
     additionalServicesGrossBeforeDiscount,
     additionalServicesGrossAfterDiscount: additionalServicesGrossAfterDiscount || additionalServicesGross,
     totalGross,
@@ -680,7 +751,6 @@ function getTechnicalData(sale: Record<string, any>) {
     resultData,
   };
 
-  // Inserted logic for robust hasPv/hasStorage/hasEms/hasBackup detection
   const offerTypeText = String(
     offerData.offerType ||
       offerData.offer_type ||
@@ -698,7 +768,6 @@ function getTechnicalData(sale: Record<string, any>) {
     ...(Array.isArray(offerData.selectedProducts) ? offerData.selectedProducts : []),
   ];
 
-  const selectedProductsText = selectedProducts.join(" ").toLowerCase();
   const soldItemsTextForTechnicalData = getSoldItems(sale).join(" ").toLowerCase();
 
   const pvPowerCandidate = toNumber(
@@ -735,30 +804,56 @@ function getTechnicalData(sale: Record<string, any>) {
     !hasExplicitPvFalse &&
     (pvPowerCandidate > 0 || hasExplicitPvTrue || hasPvSelectedInProducts);
 
+  const storageNameCandidate = cleanText(
+    getNestedValue(source, [
+      "energyStorage",
+      "energy_storage",
+      "storage",
+      "storageName",
+      "storage_name",
+      "formData.energyStorage",
+      "resultData.energyStorage",
+    ])
+  );
+  const normalizedStorageName = normalizeEquipmentKey(storageNameCandidate);
+  const hasNamedStorage =
+    Boolean(normalizedStorageName) &&
+    !["brak", "none", "nie dotyczy", "bez magazynu"].includes(normalizedStorageName);
+  const storageCapacityCandidate = toNumber(
+    getNestedValue(source, [
+      "storageCapacityKwh",
+      "storage_capacity_kwh",
+      "formData.storageCapacityKwh",
+      "resultData.storageCapacityKwh",
+    ])
+  );
+  const hasStorageSelectedInProducts = selectedProductTokens.some((product) =>
+    product === "me" || product.includes("storage") || product.includes("magazyn")
+  );
+
   const hasStorage =
     formData.withStorage === true ||
     formData.hasStorage === true ||
     formData.includeStorage === true ||
-    Boolean(formData.energyStorage) ||
+    storageCapacityCandidate > 0 ||
+    hasNamedStorage ||
     offerTypeText.includes("storage") ||
     offerTypeText.includes("magazyn") ||
-    selectedProductsText.includes("storage") ||
-    selectedProductsText.includes("magazyn") ||
-    selectedProductsText.includes("me") ||
+    hasStorageSelectedInProducts ||
     soldItemsTextForTechnicalData.includes("magazyn") ||
     soldItemsTextForTechnicalData.includes("storage");
 
   const hasEms =
-    hasStorage ||
     formData.withEms === true ||
     formData.hasEms === true ||
-    formData.includeEms === true;
+    formData.includeEms === true ||
+    resultData.withEms === true ||
+    resultData.hasEms === true ||
+    offerData.withEms === true ||
+    customerData.with_ems === true;
 
-  const hasBackup =
-    formData.withBackup === true ||
-    formData.hasBackup === true ||
-    formData.includeBackup === true ||
-    formData.backup === true;
+  // Backup jest standardem każdej oferty zawierającej magazyn energii.
+  const hasBackup = hasStorage;
 
   const clientHasOwnHybridInverter = Boolean(
     formData.clientHasOwnHybridInverter === true ||
@@ -770,7 +865,7 @@ function getTechnicalData(sale: Record<string, any>) {
     formData.selected_inverter_name === "none"
   );
 
-  const hasInverter = !clientHasOwnHybridInverter && (hasPv || hasStorage);
+  const hasInverter = clientHasOwnHybridInverter || hasPv || hasStorage;
 
   return {
     hasPv,
@@ -1087,7 +1182,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     sellerProfile = profileData;
   }
 
-  const templatePath = path.join(process.cwd(), "public", "templates", "Umowa.pdf");
+  const templatePath = path.join(process.cwd(), "public", "templates", "contract.pdf");
   const templateBytes = await readFile(templatePath);
   const pdfDoc = await PDFDocument.load(templateBytes);
   pdfDoc.registerFontkit(fontkit);
@@ -1131,7 +1226,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
     realizationVariant: getQueryValue(request, "realizationVariant") || customerFromDb.realizationVariant,
   };
 
-  const soldItems = getSoldItems(sale);
   const additionalProductsData = getAdditionalProductsData(sale);
   const technicalData = getTechnicalData(sale);
   const saleNumber = customer.contractNumber || sale.contract_number || sale.public_id || sale.sale_id || sale.id;
@@ -1140,6 +1234,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const financialData = getFinancialData(sale, totalGross, depositGross, {
     pvGross: getQueryValue(request, "pvGross"),
     storageGross: getQueryValue(request, "storageGross"),
+    inverterGross: getQueryValue(request, "inverterGross"),
     emsGross: getQueryValue(request, "emsGross"),
     backupGross: getQueryValue(request, "backupGross"),
     additionalServicesGross: getQueryValue(request, "additionalServicesGross") || additionalProductsData.grossTotal,
@@ -1147,6 +1242,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     pvGrossAfterDiscount: getQueryValue(request, "pvGrossAfterDiscount"),
     storageGrossBeforeDiscount: getQueryValue(request, "storageGrossBeforeDiscount"),
     storageGrossAfterDiscount: getQueryValue(request, "storageGrossAfterDiscount"),
+    inverterGrossBeforeDiscount: getQueryValue(request, "inverterGrossBeforeDiscount"),
+    inverterGrossAfterDiscount: getQueryValue(request, "inverterGrossAfterDiscount"),
     emsGrossBeforeDiscount: getQueryValue(request, "emsGrossBeforeDiscount"),
     emsGrossAfterDiscount: getQueryValue(request, "emsGrossAfterDiscount"),
     backupGrossBeforeDiscount: getQueryValue(request, "backupGrossBeforeDiscount"),
@@ -1191,19 +1288,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
     drawOnPage(pageIndex, "X", x, y, { size: 10, bold: true, color: rgb(0.04, 0.45, 0.42) });
   }
 
-  function drawStrikeLine(pageIndex: number, x1: number, y1: number, x2: number, y2: number) {
-    const page = pages[pageIndex];
-
-    if (!page) return;
-
-    page.drawLine({
-      start: { x: x1, y: y1 },
-      end: { x: x2, y: y2 },
-      thickness: 2.5,
-      color: rgb(0.08, 0.1, 0.14),
-    });
-  }
-
   function drawRightAlignedOnPage(
     pageIndex: number,
     text: string,
@@ -1240,7 +1324,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     if (!page) return;
 
-    page.drawText(cleanText(money(value)), {
+    page.drawText(cleanText(moneyNumber(value)), {
       x,
       y,
       size: options?.size ?? 9,
@@ -1318,13 +1402,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
     drawCalibrationMarker(2, contractPdfPositions.page3.pvGrossAfterDiscount.x + contractPdfPositions.page3.pvGrossAfterDiscount.maxWidth, contractPdfPositions.page3.pvGrossAfterDiscount.y, "p3 PV po");
     drawCalibrationMarker(2, contractPdfPositions.page3.storageGrossBeforeDiscount.x + contractPdfPositions.page3.storageGrossBeforeDiscount.maxWidth, contractPdfPositions.page3.storageGrossBeforeDiscount.y, "p3 ME brutto");
     drawCalibrationMarker(2, contractPdfPositions.page3.storageGrossAfterDiscount.x + contractPdfPositions.page3.storageGrossAfterDiscount.maxWidth, contractPdfPositions.page3.storageGrossAfterDiscount.y, "p3 ME po");
-    drawCalibrationMarker(2, contractPdfPositions.page3.emsGrossBeforeDiscount.x + contractPdfPositions.page3.emsGrossBeforeDiscount.maxWidth, contractPdfPositions.page3.emsGrossBeforeDiscount.y, "p3 EMS brutto");
-    drawCalibrationMarker(2, contractPdfPositions.page3.emsGrossAfterDiscount.x + contractPdfPositions.page3.emsGrossAfterDiscount.maxWidth, contractPdfPositions.page3.emsGrossAfterDiscount.y, "p3 EMS po");
-
-    drawCalibrationMarker(3, contractPdfPositions.page4.backupGrossBeforeDiscount.x + contractPdfPositions.page4.backupGrossBeforeDiscount.maxWidth, contractPdfPositions.page4.backupGrossBeforeDiscount.y, "p4 Backup brutto");
-    drawCalibrationMarker(3, contractPdfPositions.page4.backupGrossAfterDiscount.x + contractPdfPositions.page4.backupGrossAfterDiscount.maxWidth, contractPdfPositions.page4.backupGrossAfterDiscount.y, "p4 Backup po");
-    drawCalibrationMarker(3, contractPdfPositions.page4.additionalServicesGrossBeforeDiscount.x + contractPdfPositions.page4.additionalServicesGrossBeforeDiscount.maxWidth, contractPdfPositions.page4.additionalServicesGrossBeforeDiscount.y, "p4 Usl brutto");
-    drawCalibrationMarker(3, contractPdfPositions.page4.additionalServicesGrossAfterDiscount.x + contractPdfPositions.page4.additionalServicesGrossAfterDiscount.maxWidth, contractPdfPositions.page4.additionalServicesGrossAfterDiscount.y, "p4 Usl po");
+    drawCalibrationMarker(2, contractPdfPositions.page3.inverterGrossBeforeDiscount.x + contractPdfPositions.page3.inverterGrossBeforeDiscount.maxWidth, contractPdfPositions.page3.inverterGrossBeforeDiscount.y, "p3 inv brutto");
+    drawCalibrationMarker(2, contractPdfPositions.page3.inverterGrossAfterDiscount.x + contractPdfPositions.page3.inverterGrossAfterDiscount.maxWidth, contractPdfPositions.page3.inverterGrossAfterDiscount.y, "p3 inv po");
+    drawCalibrationMarker(2, contractPdfPositions.page3.additionalServicesGrossBeforeDiscount.x + contractPdfPositions.page3.additionalServicesGrossBeforeDiscount.maxWidth, contractPdfPositions.page3.additionalServicesGrossBeforeDiscount.y, "p3 Usl brutto");
+    drawCalibrationMarker(2, contractPdfPositions.page3.additionalServicesGrossAfterDiscount.x + contractPdfPositions.page3.additionalServicesGrossAfterDiscount.maxWidth, contractPdfPositions.page3.additionalServicesGrossAfterDiscount.y, "p3 Usl po");
     drawCalibrationMarker(3, contractPdfPositions.page4.cashPaymentCheck.x, contractPdfPositions.page4.cashPaymentCheck.y, "p4 X cash");
     drawCalibrationMarker(3, contractPdfPositions.page4.creditPaymentCheck.x, contractPdfPositions.page4.creditPaymentCheck.y, "p4 X credit");
     drawCalibrationMarker(3, contractPdfPositions.page4.creditOwnContribution.x, contractPdfPositions.page4.creditOwnContribution.y, "p4 wklad");
@@ -1335,11 +1416,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     drawCalibrationMarker(3, contractPdfPositions.page4.deposit.x, contractPdfPositions.page4.deposit.y, "p4 zaliczka");
     drawCalibrationMarker(3, contractPdfPositions.page4.depositDueDate.x, contractPdfPositions.page4.depositDueDate.y, "p4 termin");
     drawCalibrationMarker(3, contractPdfPositions.page4.finalPayment.x, contractPdfPositions.page4.finalPayment.y, "p4 koncowa");
-    drawCalibrationMarker(6, contractPdfPositions.page7.contractNumber.x, contractPdfPositions.page7.contractNumber.y, "p7 nr");
-    drawCalibrationMarker(6, contractPdfPositions.page7.variant1ACheck.x, contractPdfPositions.page7.variant1ACheck.y, "p7 X 1A");
-    drawCalibrationMarker(6, contractPdfPositions.page7.variant1BCheck.x, contractPdfPositions.page7.variant1BCheck.y, "p7 X 1B");
-    drawCalibrationMarker(8, contractPdfPositions.page9.contractNumber.x, contractPdfPositions.page9.contractNumber.y, "p9 nr");
-    drawCalibrationMarker(10, contractPdfPositions.page11.contractNumber.x, contractPdfPositions.page11.contractNumber.y, "p11 nr");
+    drawCalibrationMarker(7, contractPdfPositions.page8.contractNumber.x, contractPdfPositions.page8.contractNumber.y, "p8 nr");
+    drawCalibrationMarker(8, contractPdfPositions.page9.variant1ACheck.x, contractPdfPositions.page9.variant1ACheck.y, "p9 X 1A");
+    drawCalibrationMarker(8, contractPdfPositions.page9.variant1BCheck.x, contractPdfPositions.page9.variant1BCheck.y, "p9 X 1B");
+    drawCalibrationMarker(9, contractPdfPositions.page10.contractNumber.x, contractPdfPositions.page10.contractNumber.y, "p10 nr");
+    drawCalibrationMarker(11, contractPdfPositions.page12.contractNumber.x, contractPdfPositions.page12.contractNumber.y, "p12 nr");
     drawCalibrationMarker(11, contractPdfPositions.page12.client1MarketingEmailYes.x, contractPdfPositions.page12.client1MarketingEmailYes.y, "p12 K1 email TAK");
     drawCalibrationMarker(11, contractPdfPositions.page12.client1MarketingEmailNo.x, contractPdfPositions.page12.client1MarketingEmailNo.y, "p12 K1 email NIE");
     drawCalibrationMarker(11, contractPdfPositions.page12.client1MarketingPhoneYes.x, contractPdfPositions.page12.client1MarketingPhoneYes.y, "p12 K1 tel TAK");
@@ -1441,6 +1522,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
     contractPdfPositions.page1.salesRepresentative.y,
     { size: contractPdfPositions.page1.salesRepresentative.size, bold: true }
   );
+
+  const visitPreviouslyScheduled = String(customer.visitPreviouslyScheduled) === "true";
+
+  if (customer.visitPreviouslyScheduled !== "" && customer.visitPreviouslyScheduled !== undefined) {
+    const visitPosition = visitPreviouslyScheduled
+      ? contractPdfPositions.page1.scheduledVisitCheck
+      : contractPdfPositions.page1.unscheduledVisitCheck;
+
+    drawCheck(0, visitPosition.x, visitPosition.y);
+  }
+
+  if (customer.contractDate) {
+    drawOnPage(
+      0,
+      formatDateFromInput(customer.contractDate),
+      contractPdfPositions.page1.meetingDate.x,
+      contractPdfPositions.page1.meetingDate.y,
+      { size: contractPdfPositions.page1.meetingDate.size }
+    );
+  }
 
   // Page 2 — technical data from offer snapshot
   if (technicalData.hasPv) {
@@ -1577,10 +1678,6 @@ if (hasOptimizers) {
   );
 }
   // Simple automatic checks based on sold item names
-  const soldItemsText = `${soldItems.join(" ")} ${JSON.stringify(technicalData)}`.toLowerCase();
-  const inverterTypeKey = normalizeEquipmentKey(
-    String(technicalData.inverterType || "")
-  );
   const inverterModelKey = normalizeEquipmentKey(technicalData.inverterModel);
   const mountingTypeKey = normalizeEquipmentKey(technicalData.mountingType);
 
@@ -1674,23 +1771,18 @@ if (hasOptimizers) {
     2
   );
   drawPricePair(
-    financialData.emsGrossBeforeDiscount,
-    financialData.emsGrossAfterDiscount,
-    contractPdfPositions.page3.emsGrossBeforeDiscount,
-    contractPdfPositions.page3.emsGrossAfterDiscount,
+    financialData.inverterGrossBeforeDiscount,
+    financialData.inverterGrossAfterDiscount,
+    contractPdfPositions.page3.inverterGrossBeforeDiscount,
+    contractPdfPositions.page3.inverterGrossAfterDiscount,
     2
-  );
-  drawPricePair(
-    financialData.backupGrossBeforeDiscount,
-    financialData.backupGrossAfterDiscount,
-    contractPdfPositions.page4.backupGrossBeforeDiscount,
-    contractPdfPositions.page4.backupGrossAfterDiscount
   );
   drawPricePair(
     financialData.additionalServicesGrossBeforeDiscount,
     financialData.additionalServicesGrossAfterDiscount,
-    contractPdfPositions.page4.additionalServicesGrossBeforeDiscount,
-    contractPdfPositions.page4.additionalServicesGrossAfterDiscount
+    contractPdfPositions.page3.additionalServicesGrossBeforeDiscount,
+    contractPdfPositions.page3.additionalServicesGrossAfterDiscount,
+    2
   );
 
   const paymentMethod = String(
@@ -1765,7 +1857,7 @@ if (hasOptimizers) {
   }
   drawRightAlignedOnPage(
     3,
-    money(financialData.totalGross),
+    moneyNumber(financialData.totalGross),
     contractPdfPositions.page4.totalGross.x + contractPdfPositions.page4.totalGross.maxWidth,
     contractPdfPositions.page4.totalGross.y,
     { size: contractPdfPositions.page4.totalGross.size, bold: true }
@@ -1778,64 +1870,56 @@ if (hasOptimizers) {
     { size: contractPdfPositions.page4.totalGrossWords.size }
   );
 
-  // Page 7 — attachment 1: withdrawal notice and realization variant
+  // Page 8 — attachment 1: withdrawal notice contract number
   drawOnPage(
-    6,
+    7,
     String(saleNumber),
-    contractPdfPositions.page7.contractNumber.x,
-    contractPdfPositions.page7.contractNumber.y,
-    { size: contractPdfPositions.page7.contractNumber.size, bold: true }
+    contractPdfPositions.page8.contractNumber.x,
+    contractPdfPositions.page8.contractNumber.y,
+    { size: contractPdfPositions.page8.contractNumber.size, bold: true }
   );
 
-  const visitPreviouslyScheduled = String(customer.visitPreviouslyScheduled) === "true";
-
-  if (customer.visitPreviouslyScheduled !== "" && customer.visitPreviouslyScheduled !== undefined) {
-    if (visitPreviouslyScheduled) {
-      drawStrikeLine(
-        6,
-        contractPdfPositions.page7.visitWasNotScheduledStrike.x1,
-        contractPdfPositions.page7.visitWasNotScheduledStrike.y1,
-        contractPdfPositions.page7.visitWasNotScheduledStrike.x2,
-        contractPdfPositions.page7.visitWasNotScheduledStrike.y2
-      );
-    } else {
-      drawStrikeLine(
-        6,
-        contractPdfPositions.page7.visitWasScheduledStrike.x1,
-        contractPdfPositions.page7.visitWasScheduledStrike.y1,
-        contractPdfPositions.page7.visitWasScheduledStrike.x2,
-        contractPdfPositions.page7.visitWasScheduledStrike.y2
-      );
-    }
-  }
+  // Page 9 — withdrawal form and request for early performance
+  drawOnPage(8, customer.name, contractPdfPositions.page9.clientName.x, contractPdfPositions.page9.clientName.y, {
+    size: contractPdfPositions.page9.clientName.size,
+  });
+  drawOnPage(8, customer.contractAddress, contractPdfPositions.page9.clientAddress.x, contractPdfPositions.page9.clientAddress.y, {
+    size: contractPdfPositions.page9.clientAddress.size,
+  });
+  drawOnPage(
+    8,
+    `${saleNumber}, ${today}`,
+    contractPdfPositions.page9.contractNumberAndDate.x,
+    contractPdfPositions.page9.contractNumberAndDate.y,
+    { size: contractPdfPositions.page9.contractNumberAndDate.size }
+  );
 
   if (visitPreviouslyScheduled && customer.realizationVariant === "1A") {
-    drawCheck(6, contractPdfPositions.page7.variant1ACheck.x, contractPdfPositions.page7.variant1ACheck.y);
+    drawCheck(8, contractPdfPositions.page9.variant1ACheck.x, contractPdfPositions.page9.variant1ACheck.y);
   }
 
   if (visitPreviouslyScheduled && customer.realizationVariant === "1B") {
-    drawCheck(6, contractPdfPositions.page7.variant1BCheck.x, contractPdfPositions.page7.variant1BCheck.y);
+    drawCheck(8, contractPdfPositions.page9.variant1BCheck.x, contractPdfPositions.page9.variant1BCheck.y);
   }
 
-  // Page 9 — attachment 2: warranty terms contract number
+  // Page 10 — attachment 2: warranty terms contract number
   drawOnPage(
-    8,
+    9,
     String(saleNumber),
-    contractPdfPositions.page9.contractNumber.x,
-    contractPdfPositions.page9.contractNumber.y,
-    { size: contractPdfPositions.page9.contractNumber.size, bold: true }
+    contractPdfPositions.page10.contractNumber.x,
+    contractPdfPositions.page10.contractNumber.y,
+    { size: contractPdfPositions.page10.contractNumber.size, bold: true }
   );
 
-  // Page 11 — attachment 3: GDPR and marketing consents contract number
+  // Page 12 — attachment 3: GDPR and marketing consents
   drawOnPage(
-    10,
+    11,
     String(saleNumber),
-    contractPdfPositions.page11.contractNumber.x,
-    contractPdfPositions.page11.contractNumber.y,
-    { size: contractPdfPositions.page11.contractNumber.size, bold: true }
+    contractPdfPositions.page12.contractNumber.x,
+    contractPdfPositions.page12.contractNumber.y,
+    { size: contractPdfPositions.page12.contractNumber.size, bold: true }
   );
 
-  // Page 12 — attachment 3: marketing consents
   const consentData = (sale.customer_data || {}) as Record<string, any>;
   const getConsentValue = (queryKey: string, dataKey: string) => {
     const queryValue = getQueryValue(request, queryKey);

@@ -30,6 +30,7 @@ type InverterItem = {
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   catalogCardUrl?: string | null;
   isEu?: boolean;
+  hasEms?: boolean;
 };
 
 type StorageItem = {
@@ -41,16 +42,6 @@ type StorageItem = {
   installationNet: number;
   catalogCardUrl?: string | null;
   isEu?: boolean;
-};
-
-type AdditionalServiceInput = {
-  id?: number;
-  name?: string;
-  price_net?: number;
-  priceNet?: number;
-  allows_quantity?: boolean;
-  allowsQuantity?: boolean;
-  quantity?: number;
 };
 
 const FALLBACK_PANELS: Record<string, PanelItem> = {
@@ -140,133 +131,6 @@ function clampPercent(value: number) {
   return Math.min(Math.max(value, 0), 90);
 }
 
-function roundMoney(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function grossFromNet(netValue: number, vatRate: number) {
-  return roundMoney(netValue * (1 + vatRate / 100));
-}
-
-function beforeDiscountFromAfterDiscountGross(grossAfterDiscount: number) {
-  return roundMoney(grossAfterDiscount * 1.1111);
-}
-
-function buildContractBreakdown(params: {
-  includeSubsidy: boolean;
-  hasPv: boolean;
-  hasStorageSelected: boolean;
-  shouldAddEms: boolean;
-  vatRate: number;
-  finalNet: number;
-  additionalServicesNet: number;
-  panelsCostNet: number;
-  inverterCostNet: number;
-  pvInstallationNet: number;
-  roofExtraNet: number;
-  storageCostNet: number;
-  storageInstallationNet: number;
-  protectionsNet: number;
-  transportNet: number;
-  documentationNet: number;
-  marketingNet: number;
-  managerFeeNet: number;
-  managerMarginsNet: number;
-  sellerCommissionNet: number;
-  subsidyAllocation: {
-    enabled: boolean;
-    pvNet: number;
-    storageNet: number;
-    emsNet: number;
-  };
-}) {
-  const backupAfterDiscountGross = 1;
-  const backupBeforeDiscountGross = 3000;
-  const backupAfterDiscountNet = roundMoney(backupAfterDiscountGross / (1 + params.vatRate / 100));
-
-  const emsContractNet = params.shouldAddEms ? 4000 : 0;
-
-  let pvAfterDiscountNet = 0;
-  let storageAfterDiscountNet = 0;
-  let emsAfterDiscountNet = emsContractNet;
-  let additionalServicesAfterDiscountNet = params.additionalServicesNet;
-
-  if (params.includeSubsidy && params.subsidyAllocation.enabled) {
-    pvAfterDiscountNet = params.hasPv ? Math.max(1 / (1 + params.vatRate / 100), params.subsidyAllocation.pvNet) : 0;
-    storageAfterDiscountNet = params.hasStorageSelected ? params.subsidyAllocation.storageNet : 0;
-    emsAfterDiscountNet = params.shouldAddEms ? Math.max(emsContractNet, params.subsidyAllocation.emsNet) : 0;
-  } else {
-    const sharedCostsNet =
-      params.protectionsNet +
-      params.transportNet +
-      params.documentationNet +
-      params.marketingNet +
-      params.managerFeeNet +
-      params.managerMarginsNet +
-      params.sellerCommissionNet;
-
-    const sharedPvPartNet = params.hasPv && params.hasStorageSelected ? sharedCostsNet / 2 : params.hasPv ? sharedCostsNet : 0;
-    const sharedStoragePartNet = params.hasPv && params.hasStorageSelected ? sharedCostsNet / 2 : params.hasStorageSelected ? sharedCostsNet : 0;
-
-    pvAfterDiscountNet = params.hasPv
-      ? params.panelsCostNet + params.inverterCostNet + params.pvInstallationNet + params.roofExtraNet + sharedPvPartNet
-      : 0;
-
-    storageAfterDiscountNet = params.hasStorageSelected
-      ? params.storageCostNet + params.storageInstallationNet + sharedStoragePartNet
-      : 0;
-
-    if (params.shouldAddEms) {
-      const emsDeltaNet = Math.max(emsContractNet - 1200, 0);
-      const correctionBaseNet = pvAfterDiscountNet + storageAfterDiscountNet;
-
-      if (correctionBaseNet > 0) {
-        const pvShare = pvAfterDiscountNet / correctionBaseNet;
-        const pvCorrection = roundMoney(emsDeltaNet * pvShare);
-        const storageCorrection = roundMoney(emsDeltaNet - pvCorrection);
-
-        pvAfterDiscountNet = Math.max(0, pvAfterDiscountNet - pvCorrection);
-        storageAfterDiscountNet = Math.max(0, storageAfterDiscountNet - storageCorrection);
-      }
-    }
-  }
-
-  const knownNet = pvAfterDiscountNet + storageAfterDiscountNet + emsAfterDiscountNet + backupAfterDiscountNet + additionalServicesAfterDiscountNet;
-  const netDifference = roundMoney(params.finalNet - knownNet);
-
-  if (params.hasPv) {
-    pvAfterDiscountNet = roundMoney(pvAfterDiscountNet + netDifference);
-  } else if (params.hasStorageSelected) {
-    storageAfterDiscountNet = roundMoney(storageAfterDiscountNet + netDifference);
-  } else {
-    additionalServicesAfterDiscountNet = roundMoney(additionalServicesAfterDiscountNet + netDifference);
-  }
-
-  const makeLine = (netAfterDiscount: number, fixedBeforeDiscountGross?: number) => {
-    const afterDiscountGross = grossFromNet(Math.max(0, netAfterDiscount), params.vatRate);
-    const beforeDiscountGross = fixedBeforeDiscountGross ?? beforeDiscountFromAfterDiscountGross(afterDiscountGross);
-
-    return {
-      netAfterDiscount: roundMoney(Math.max(0, netAfterDiscount)),
-      grossAfterDiscount: afterDiscountGross,
-      grossBeforeDiscount: beforeDiscountGross,
-    };
-  };
-
-  return {
-    pv: makeLine(pvAfterDiscountNet),
-    storage: makeLine(storageAfterDiscountNet),
-    ems: makeLine(emsAfterDiscountNet),
-    backup: makeLine(backupAfterDiscountNet, backupBeforeDiscountGross),
-    additionalServices: makeLine(additionalServicesAfterDiscountNet),
-    total: {
-      netAfterDiscount: roundMoney(params.finalNet),
-      grossAfterDiscount: grossFromNet(params.finalNet, params.vatRate),
-      grossBeforeDiscount: beforeDiscountFromAfterDiscountGross(grossFromNet(params.finalNet, params.vatRate)),
-    },
-  };
-}
-
 async function loadCatalogFromSupabase() {
   const [panelsResponse, invertersResponse, storagesResponse] = await Promise.all([
     supabase
@@ -275,7 +139,7 @@ async function loadCatalogFromSupabase() {
       .eq("active", true),
     supabase
       .from("inverters")
-      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, active")
+      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
     supabase
@@ -313,6 +177,7 @@ async function loadCatalogFromSupabase() {
       maxPvKw: Number(inverter.max_pv_kw),
       priceNet: Number(inverter.price_net),
       isEu: Boolean(inverter.is_eu),
+      hasEms: Boolean(inverter.has_ems),
     }))
     : FALLBACK_INVERTERS;
 
@@ -520,7 +385,7 @@ export async function GET() {
       supabase
         .from("pricing_settings")
         .select(
-          "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
+          "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
         )
         .eq("id", 1)
         .single(),
@@ -582,7 +447,7 @@ export async function POST(request: Request) {
     supabase
       .from("pricing_settings")
       .select(
-        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
+        "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
       )
       .eq("id", 1)
       .single(),

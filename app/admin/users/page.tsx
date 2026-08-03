@@ -36,11 +36,14 @@ const DEFAULT_PRICING_OVERRIDES = {
   },
   installation: {
     pvPerKwNet: 500,
+    storageWithPvNet: 1500,
+    storageWithoutPvNet: 2500,
   },
   placeholders: {
     protections: 1500,
     wiring: 800,
-    transport: 500,
+    transportElectronics: 250,
+    transportPanels: 350,
     documentation: 700,
     ems: 1200,
   },
@@ -175,7 +178,7 @@ export default function AdminUsersPage() {
     const { data, error } = await supabase
       .from("pricing_settings")
       .select(
-        "installation_pv_per_kw, protections_cost, wiring_cost, transport_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent, pme_qualify_vat"
+        "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent, pme_qualify_vat"
       )
       .eq("id", 1)
       .maybeSingle();
@@ -194,12 +197,15 @@ export default function AdminUsersPage() {
       installation: {
         ...current.installation,
         pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+        storageWithPvNet: Number(data.storage_installation_with_pv_net ?? current.installation.storageWithPvNet),
+        storageWithoutPvNet: Number(data.storage_installation_without_pv_net ?? current.installation.storageWithoutPvNet),
       },
       placeholders: {
         ...current.placeholders,
         protections: Number(data.protections_cost ?? current.placeholders.protections),
         wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
-        transport: Number(data.transport_cost ?? current.placeholders.transport),
+        transportElectronics: Number(data.transport_electronics_net ?? current.placeholders.transportElectronics),
+        transportPanels: Number(data.transport_panels_net ?? current.placeholders.transportPanels),
         documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
         ems: Number(data.ems_cost ?? current.placeholders.ems),
       },
@@ -256,9 +262,12 @@ export default function AdminUsersPage() {
       .from("pricing_settings")
       .update({
         installation_pv_per_kw: pricing.installation.pvPerKwNet,
+        storage_installation_with_pv_net: pricing.installation.storageWithPvNet,
+        storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
         protections_cost: pricing.placeholders.protections,
         wiring_cost: pricing.placeholders.wiring,
-        transport_cost: pricing.placeholders.transport,
+        transport_electronics_net: pricing.placeholders.transportElectronics,
+        transport_panels_net: pricing.placeholders.transportPanels,
         documentation_cost: pricing.placeholders.documentation,
         ems_cost: pricing.placeholders.ems,
         marketing_cost: pricing.margins.marketing,

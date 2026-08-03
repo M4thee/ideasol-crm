@@ -16,9 +16,12 @@ export type CalculatorCurrentUser = {
 
 export type CalculatorSettingsRow = {
   installation_pv_per_kw?: number | null;
+  storage_installation_with_pv_net?: number | null;
+  storage_installation_without_pv_net?: number | null;
+  transport_electronics_net?: number | null;
+  transport_panels_net?: number | null;
   protections_cost?: number | null;
   wiring_cost?: number | null;
-  transport_cost?: number | null;
   documentation_cost?: number | null;
   ems_cost?: number | null;
   warranty_percent?: number | null;
@@ -57,6 +60,7 @@ export type InverterItem = {
   priceNet: number;
   catalogCardUrl?: string | null;
   isEu?: boolean;
+  hasEms?: boolean;
 };
 
 export type StorageItem = {
@@ -153,7 +157,8 @@ const ROOF_PLACEHOLDERS = {
 const PLACEHOLDERS_NET = {
   protections: 1500,
   wiring: 800,
-  transport: 500,
+  transportElectronics: 250,
+  transportPanels: 350,
   documentation: 700,
   ems: 1200,
 };
@@ -230,7 +235,7 @@ function buildContractBreakdown(params: {
   includeSubsidy: boolean;
   hasPv: boolean;
   hasStorageSelected: boolean;
-  shouldAddEms: boolean;
+  hasInverterSelected: boolean;
   vatRate: number;
   finalNet: number;
   additionalServicesNet: number;
@@ -254,21 +259,22 @@ function buildContractBreakdown(params: {
     emsNet: number;
   };
 }) {
-  const backupAfterDiscountGross = 1;
-  const backupBeforeDiscountGross = 3000;
-  const backupAfterDiscountNet = roundMoney(backupAfterDiscountGross / (1 + params.vatRate / 100));
-
-  const emsContractNet = params.shouldAddEms ? 4000 : 0;
-
   let pvAfterDiscountNet = 0;
   let storageAfterDiscountNet = 0;
-  let emsAfterDiscountNet = emsContractNet;
+  const inverterAfterDiscountNet = params.hasInverterSelected ? params.inverterCostNet : 0;
   let additionalServicesAfterDiscountNet = params.additionalServicesNet;
 
   if (params.includeSubsidy && params.subsidyAllocation.enabled) {
     pvAfterDiscountNet = params.hasPv ? Math.max(1 / (1 + params.vatRate / 100), params.subsidyAllocation.pvNet) : 0;
     storageAfterDiscountNet = params.hasStorageSelected ? params.subsidyAllocation.storageNet : 0;
-    emsAfterDiscountNet = params.shouldAddEms ? Math.max(emsContractNet, params.subsidyAllocation.emsNet) : 0;
+
+    if (inverterAfterDiscountNet > 0) {
+      if (params.hasPv) {
+        pvAfterDiscountNet = Math.max(0, pvAfterDiscountNet - inverterAfterDiscountNet);
+      } else if (params.hasStorageSelected) {
+        storageAfterDiscountNet = Math.max(0, storageAfterDiscountNet - inverterAfterDiscountNet);
+      }
+    }
   } else {
     const sharedCostsNet =
       params.protectionsNet +
@@ -283,29 +289,16 @@ function buildContractBreakdown(params: {
     const sharedStoragePartNet = params.hasPv && params.hasStorageSelected ? sharedCostsNet / 2 : params.hasStorageSelected ? sharedCostsNet : 0;
 
     pvAfterDiscountNet = params.hasPv
-      ? params.panelsCostNet + params.inverterCostNet + params.pvInstallationNet + params.roofExtraNet + sharedPvPartNet
+      ? params.panelsCostNet + params.pvInstallationNet + params.roofExtraNet + sharedPvPartNet
       : 0;
 
     storageAfterDiscountNet = params.hasStorageSelected
       ? params.storageCostNet + params.storageInstallationNet + sharedStoragePartNet
       : 0;
 
-    if (params.shouldAddEms) {
-      const emsDeltaNet = Math.max(emsContractNet - 1200, 0);
-      const correctionBaseNet = pvAfterDiscountNet + storageAfterDiscountNet;
-
-      if (correctionBaseNet > 0) {
-        const pvShare = pvAfterDiscountNet / correctionBaseNet;
-        const pvCorrection = roundMoney(emsDeltaNet * pvShare);
-        const storageCorrection = roundMoney(emsDeltaNet - pvCorrection);
-
-        pvAfterDiscountNet = Math.max(0, pvAfterDiscountNet - pvCorrection);
-        storageAfterDiscountNet = Math.max(0, storageAfterDiscountNet - storageCorrection);
-      }
-    }
   }
 
-  const knownNet = pvAfterDiscountNet + storageAfterDiscountNet + emsAfterDiscountNet + backupAfterDiscountNet + additionalServicesAfterDiscountNet;
+  const knownNet = pvAfterDiscountNet + storageAfterDiscountNet + inverterAfterDiscountNet + additionalServicesAfterDiscountNet;
   const netDifference = roundMoney(params.finalNet - knownNet);
 
   if (params.hasPv) {
@@ -330,8 +323,10 @@ function buildContractBreakdown(params: {
   return {
     pv: makeLine(pvAfterDiscountNet),
     storage: makeLine(storageAfterDiscountNet),
-    ems: makeLine(emsAfterDiscountNet),
-    backup: makeLine(backupAfterDiscountNet, backupBeforeDiscountGross),
+    inverter: makeLine(inverterAfterDiscountNet),
+    // EMS i Backup są funkcjonalnościami, a nie osobnymi pozycjami cenowymi.
+    ems: makeLine(0),
+    backup: makeLine(0),
     additionalServices: makeLine(additionalServicesAfterDiscountNet),
     total: {
       netAfterDiscount: roundMoney(params.finalNet),
@@ -417,9 +412,13 @@ function buildPricing(
       PLACEHOLDERS_NET.protections
     ),
     wiring: getNumberOverride(overrides?.placeholders?.wiring, PLACEHOLDERS_NET.wiring),
-    transport: getNumberOverride(
-      overrides?.placeholders?.transport,
-      PLACEHOLDERS_NET.transport
+    transportElectronics: getNumberOverride(
+      overrides?.placeholders?.transportElectronics,
+      PLACEHOLDERS_NET.transportElectronics
+    ),
+    transportPanels: getNumberOverride(
+      overrides?.placeholders?.transportPanels,
+      PLACEHOLDERS_NET.transportPanels
     ),
     documentation: getNumberOverride(
       overrides?.placeholders?.documentation,
@@ -483,6 +482,14 @@ function buildPricing(
     pvInstallationPerKwNet: getNumberOverride(
       overrides?.installation?.pvPerKwNet,
       500
+    ),
+    storageInstallationWithPvNet: getNumberOverride(
+      overrides?.installation?.storageWithPvNet,
+      1500
+    ),
+    storageInstallationWithoutPvNet: getNumberOverride(
+      overrides?.installation?.storageWithoutPvNet,
+      2500
     ),
   };
 }
@@ -548,6 +555,16 @@ export function calculateOffer(input: CalculateOfferInput) {
           currentOverrides?.installation?.pvPerKwNet ??
           500
         ),
+        storageWithPvNet: Number(
+          settingsRow?.storage_installation_with_pv_net ??
+          currentOverrides?.installation?.storageWithPvNet ??
+          1500
+        ),
+        storageWithoutPvNet: Number(
+          settingsRow?.storage_installation_without_pv_net ??
+          currentOverrides?.installation?.storageWithoutPvNet ??
+          2500
+        ),
       },
       placeholders: {
         ...(currentOverrides.placeholders || {}),
@@ -559,10 +576,15 @@ export function calculateOffer(input: CalculateOfferInput) {
         wiring: Number(
           settingsRow?.wiring_cost ?? currentOverrides?.placeholders?.wiring ?? 800
         ),
-        transport: Number(
-          settingsRow?.transport_cost ??
-          currentOverrides?.placeholders?.transport ??
-          500
+        transportElectronics: Number(
+          settingsRow?.transport_electronics_net ??
+          currentOverrides?.placeholders?.transportElectronics ??
+          250
+        ),
+        transportPanels: Number(
+          settingsRow?.transport_panels_net ??
+          currentOverrides?.placeholders?.transportPanels ??
+          350
         ),
         documentation: Number(
           settingsRow?.documentation_cost ??
@@ -644,8 +666,6 @@ export function calculateOffer(input: CalculateOfferInput) {
       ? "net_metering"
       : "net_billing";
 
-  // Każdy sprzedawany falownik ma EMS; nie doliczamy go jako osobnej pozycji.
-  const shouldAddEms = false;
   const includeSubsidy = body.includeSubsidy === false ? false : true;
   const existingPvPowerKw = Math.max(0, Number(body.existingPvPowerKw || 0));
 
@@ -766,12 +786,30 @@ export function calculateOffer(input: CalculateOfferInput) {
     ? 0
     : pricing.roofPlaceholders[roofType] ?? 2000;
 
+  const storageInstallationNet = hasStorageSelected
+    ? isStorageOnly
+      ? pricing.storageInstallationWithoutPvNet
+      : pricing.storageInstallationWithPvNet
+    : 0;
+
+  const hasInverterSelected = inverter.name !== "Brak";
+  const inverterSupportsEms = Boolean(
+    hasInverterSelected && "hasEms" in inverter && inverter.hasEms
+  );
+  const electronicsTransportNet = hasInverterSelected || hasStorageSelected
+    ? pricing.placeholders.transportElectronics
+    : 0;
+  const panelsTransportNet = hasPv
+    ? pricing.placeholders.transportPanels
+    : 0;
+  const transportNet = electronicsTransportNet + panelsTransportNet;
+
   const emsNet = 0;
 
   const placeholdersTotalNet =
     pricing.placeholders.protections +
     pricing.placeholders.wiring +
-    pricing.placeholders.transport +
+    transportNet +
     pricing.placeholders.documentation +
     emsNet;
 
@@ -781,7 +819,7 @@ export function calculateOffer(input: CalculateOfferInput) {
     pvInstallationNet +
     roofExtraNet +
     storage.priceNet +
-    storage.installationNet +
+    storageInstallationNet +
     placeholdersTotalNet +
     additionalServicesNet;
 
@@ -948,7 +986,7 @@ export function calculateOffer(input: CalculateOfferInput) {
     includeSubsidy,
     hasPv,
     hasStorageSelected,
-    shouldAddEms,
+    hasInverterSelected,
     vatRate,
     finalNet,
     additionalServicesNet,
@@ -957,9 +995,9 @@ export function calculateOffer(input: CalculateOfferInput) {
     pvInstallationNet,
     roofExtraNet,
     storageCostNet: storage.priceNet,
-    storageInstallationNet: storage.installationNet,
+    storageInstallationNet,
     protectionsNet: pricing.placeholders.protections,
-    transportNet: pricing.placeholders.transport,
+    transportNet,
     documentationNet: pricing.placeholders.documentation,
     marketingNet,
     managerFeeNet,
@@ -989,7 +1027,8 @@ export function calculateOffer(input: CalculateOfferInput) {
     storageCapacityKwh: storage.capacityKwh,
     offerType,
     billingSystem,
-    withEms: hasStorageSelected && inverter.name !== "Brak",
+    withEms: inverterSupportsEms,
+    withBackup: hasStorageSelected,
     clientHasOwnHybridInverter,
     includeSubsidy,
     existingPvPowerKw,
@@ -1042,7 +1081,7 @@ export function calculateOffer(input: CalculateOfferInput) {
           },
         ]),
       { label: "Magazyn energii", value: Math.round(storage.priceNet) },
-      { label: "Montaż ME", value: Math.round(storage.installationNet) },
+      { label: "Montaż ME", value: Math.round(storageInstallationNet) },
       {
         label: "Zabezpieczenia",
         value: Math.round(pricing.placeholders.protections),
@@ -1053,20 +1092,12 @@ export function calculateOffer(input: CalculateOfferInput) {
       },
       {
         label: "Transport",
-        value: Math.round(pricing.placeholders.transport),
+        value: Math.round(transportNet),
       },
       {
         label: "Dokumentacja",
         value: Math.round(pricing.placeholders.documentation),
       },
-      ...(shouldAddEms
-        ? [
-          {
-            label: "System EMS",
-            value: Math.round(emsNet),
-          },
-        ]
-        : []),
       ...additionalServices.map((service) => ({
         label: service.quantity > 1 ? `${service.name} x ${service.quantity}` : service.name,
         value: Math.round(service.totalNet),

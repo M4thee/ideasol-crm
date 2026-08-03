@@ -29,6 +29,7 @@ type InverterItem = {
   price_net: number;
   catalog_card_url: string | null;
   is_eu: boolean;
+  has_ems: boolean;
   active: boolean;
 };
 
@@ -87,6 +88,7 @@ const EMPTY_INVERTER_FORM = {
   price_net: "0",
   catalog_card_url: "",
   is_eu: false,
+  has_ems: false,
 };
 
 const EMPTY_STORAGE_FORM = {
@@ -158,7 +160,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, active")
+      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
@@ -429,6 +431,7 @@ export default function AdminPanel({
           price_net: Number(inverter.price_net),
           catalog_card_url: inverter.catalog_card_url?.trim() || null,
           is_eu: Boolean(inverter.is_eu),
+          has_ems: Boolean(inverter.has_ems),
           active: Boolean(inverter.active),
         })
         .eq("id", inverter.id);
@@ -464,6 +467,7 @@ export default function AdminPanel({
       price_net: Number(inverterForm.price_net),
       catalog_card_url: inverterForm.catalog_card_url.trim() || null,
       is_eu: Boolean(inverterForm.is_eu),
+      has_ems: Boolean(inverterForm.has_ems),
       active: true,
     });
 
@@ -768,6 +772,32 @@ export default function AdminPanel({
           </label>
 
           <label className="block">
+            <span className="text-sm font-medium text-slate-700">Montaż ME z PV netto</span>
+            <input
+              type="number"
+              min="0"
+              value={pricingOverrides.installation.storageWithPvNet}
+              onChange={(e) =>
+                updatePricingValue(["installation", "storageWithPvNet"], e.target.value)
+              }
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Montaż ME bez PV netto</span>
+            <input
+              type="number"
+              min="0"
+              value={pricingOverrides.installation.storageWithoutPvNet}
+              onChange={(e) =>
+                updatePricingValue(["installation", "storageWithoutPvNet"], e.target.value)
+              }
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="block">
             <span className="text-sm font-medium text-slate-700">Zabezpieczenia</span>
             <input
               type="number"
@@ -792,12 +822,26 @@ export default function AdminPanel({
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Transport</span>
+            <span className="text-sm font-medium text-slate-700">Transport falownika / magazynu</span>
             <input
               type="number"
-              value={pricingOverrides.placeholders.transport}
+              min="0"
+              value={pricingOverrides.placeholders.transportElectronics}
               onChange={(e) =>
-                updatePricingValue(["placeholders", "transport"], e.target.value)
+                updatePricingValue(["placeholders", "transportElectronics"], e.target.value)
+              }
+              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Transport paneli</span>
+            <input
+              type="number"
+              min="0"
+              value={pricingOverrides.placeholders.transportPanels}
+              onChange={(e) =>
+                updatePricingValue(["placeholders", "transportPanels"], e.target.value)
               }
               className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
@@ -1224,6 +1268,18 @@ export default function AdminPanel({
                 />
                 EU? — wyprodukowano na terenie UE
               </label>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 md:col-span-7">
+                <input
+                  type="checkbox"
+                  checked={Boolean(inverterForm.has_ems)}
+                  onChange={(event) =>
+                    setInverterForm({ ...inverterForm, has_ems: event.target.checked })
+                  }
+                  className="h-5 w-5 accent-blue-600"
+                />
+                EMS — funkcjonalność dostępna w falowniku
+              </label>
             </div>
 
             <button
@@ -1348,6 +1404,18 @@ export default function AdminPanel({
                     EU?
                   </label>
 
+                  <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(inverter.has_ems)}
+                      onChange={(event) =>
+                        updateInverter(inverter.id, "has_ems", event.target.checked)
+                      }
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    EMS
+                  </label>
+
                   <button
                     type="button"
                     onClick={() =>
@@ -1446,18 +1514,6 @@ export default function AdminPanel({
                 value={storageForm.price_net}
                 onChange={(e) =>
                   setStorageForm({ ...storageForm, price_net: e.target.value })
-                }
-              />
-
-              <input
-                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="Montaż netto"
-                value={storageForm.installation_net}
-                onChange={(e) =>
-                  setStorageForm({ ...storageForm, installation_net: e.target.value })
                 }
               />
 
@@ -1576,21 +1632,6 @@ export default function AdminPanel({
                       updateStorage(
                         storage.id,
                         "price_net",
-                        parseDecimal(e.target.value)
-                      )
-                    }
-                  />
-
-                  <input
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={storage.installation_net}
-                    onChange={(e) =>
-                      updateStorage(
-                        storage.id,
-                        "installation_net",
                         parseDecimal(e.target.value)
                       )
                     }

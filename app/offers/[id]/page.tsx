@@ -548,6 +548,9 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
   const storageGrossAfterDiscount =
     getLineValue("storage", "grossAfterDiscount") ||
     getResultValue(["contract_storage_gross_after_discount", "contractStorageGrossAfterDiscount"]);
+  const inverterGrossAfterDiscount =
+    getLineValue("inverter", "grossAfterDiscount") ||
+    getResultValue(["contract_inverter_gross_after_discount", "contractInverterGrossAfterDiscount"]);
   const emsGrossAfterDiscount =
     getLineValue("ems", "grossAfterDiscount") ||
     getResultValue(["contract_ems_gross_after_discount", "contractEmsGrossAfterDiscount"]);
@@ -565,13 +568,15 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
   const storageGrossBeforeDiscount =
     getLineValue("storage", "grossBeforeDiscount") ||
     getResultValue(["contract_storage_gross_before_discount", "contractStorageGrossBeforeDiscount"]);
+  const inverterGrossBeforeDiscount =
+    getLineValue("inverter", "grossBeforeDiscount") ||
+    getResultValue(["contract_inverter_gross_before_discount", "contractInverterGrossBeforeDiscount"]);
   const emsGrossBeforeDiscount =
     getLineValue("ems", "grossBeforeDiscount") ||
     getResultValue(["contract_ems_gross_before_discount", "contractEmsGrossBeforeDiscount"]);
   const backupGrossBeforeDiscount =
     getLineValue("backup", "grossBeforeDiscount") ||
-    getResultValue(["contract_backup_gross_before_discount", "contractBackupGrossBeforeDiscount"]) ||
-    3000;
+    getResultValue(["contract_backup_gross_before_discount", "contractBackupGrossBeforeDiscount"]);
   const additionalServicesGrossBeforeDiscount =
     getLineValue("additionalServices", "grossBeforeDiscount") ||
     getLineValue("additional_services", "grossBeforeDiscount") ||
@@ -580,6 +585,7 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
   const knownGrossAfterDiscount =
     pvGrossAfterDiscount +
     storageGrossAfterDiscount +
+    inverterGrossAfterDiscount +
     emsGrossAfterDiscount +
     backupGrossAfterDiscount +
     additionalServicesGrossAfterDiscount;
@@ -589,6 +595,7 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
   const knownGrossBeforeDiscount =
     pvGrossBeforeDiscount +
     storageGrossBeforeDiscount +
+    inverterGrossBeforeDiscount +
     emsGrossBeforeDiscount +
     backupGrossBeforeDiscount +
     additionalServicesGrossBeforeDiscount;
@@ -600,27 +607,42 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
     offer.offer_type === "pv_storage" ||
     Number(offer.pv_power_kw || 0) > 0;
 
-  let finalPvGrossAfterDiscount = pvGrossAfterDiscount + missingGrossAfterDiscount;
+  const legacyFeaturesGrossAfterDiscount = emsGrossAfterDiscount + backupGrossAfterDiscount;
+  const legacyFeaturesGrossBeforeDiscount = emsGrossBeforeDiscount + backupGrossBeforeDiscount;
+
+  let finalPvGrossAfterDiscount =
+    pvGrossAfterDiscount + (offerHasPv ? missingGrossAfterDiscount : 0);
   let finalStorageGrossAfterDiscount = storageGrossAfterDiscount;
-  let finalEmsGrossAfterDiscount = emsGrossAfterDiscount;
+  let finalPvGrossBeforeDiscount =
+    pvGrossBeforeDiscount + (offerHasPv ? missingGrossBeforeDiscount : 0);
+  let finalStorageGrossBeforeDiscount = storageGrossBeforeDiscount;
+
+  if (offerHasPv) {
+    finalPvGrossAfterDiscount += legacyFeaturesGrossAfterDiscount;
+    finalPvGrossBeforeDiscount += legacyFeaturesGrossBeforeDiscount;
+  } else {
+    finalStorageGrossAfterDiscount += legacyFeaturesGrossAfterDiscount + missingGrossAfterDiscount;
+    finalStorageGrossBeforeDiscount += legacyFeaturesGrossBeforeDiscount + missingGrossBeforeDiscount;
+  }
 
   if (offerHasPv && finalPvGrossAfterDiscount <= 0) {
     finalPvGrossAfterDiscount = 1;
 
     if (finalStorageGrossAfterDiscount >= 1) {
       finalStorageGrossAfterDiscount -= 1;
-    } else if (finalEmsGrossAfterDiscount >= 1) {
-      finalEmsGrossAfterDiscount -= 1;
     }
   }
 
   const contractVatRate = Number(offer.vat_rate || resultData.vatRate || resultData.vat_rate || 8);
   const contractVatMultiplier = 1 + contractVatRate / 100;
 
-  const finalPvGrossBeforeDiscount =
-    finalPvGrossAfterDiscount > 0
-      ? Math.round(finalPvGrossAfterDiscount * 1.1111 * 100) / 100
-      : 0;
+  if (finalPvGrossAfterDiscount > 0 && finalPvGrossBeforeDiscount <= 0) {
+    finalPvGrossBeforeDiscount = Math.round(finalPvGrossAfterDiscount * 1.1111 * 100) / 100;
+  }
+
+  if (finalStorageGrossAfterDiscount > 0 && finalStorageGrossBeforeDiscount <= 0) {
+    finalStorageGrossBeforeDiscount = Math.round(finalStorageGrossAfterDiscount * 1.1111 * 100) / 100;
+  }
 
   const finalPvNetAfterDiscount =
     finalPvGrossAfterDiscount > 0
@@ -637,20 +659,22 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
     contract_pv_net_after_discount: finalPvNetAfterDiscount,
 
     contract_storage_gross_after_discount: finalStorageGrossAfterDiscount,
-    contract_storage_gross_before_discount: storageGrossBeforeDiscount,
+    contract_storage_gross_before_discount: finalStorageGrossBeforeDiscount,
     contract_storage_net_after_discount:
       getLineValue("storage", "netAfterDiscount") ||
       getResultValue(["contract_storage_net_after_discount", "contractStorageNetAfterDiscount"]),
 
-    contract_ems_gross_after_discount: finalEmsGrossAfterDiscount,
-    contract_ems_gross_before_discount: emsGrossBeforeDiscount,
-    contract_ems_net_after_discount:
-      getLineValue("ems", "netAfterDiscount") ||
-      getResultValue(["contract_ems_net_after_discount", "contractEmsNetAfterDiscount"]),
+    contract_inverter_gross_after_discount: inverterGrossAfterDiscount,
+    contract_inverter_gross_before_discount: inverterGrossBeforeDiscount,
+    contract_inverter_net_after_discount: getLineValue("inverter", "netAfterDiscount"),
 
-    contract_backup_gross_after_discount: backupGrossAfterDiscount,
-    contract_backup_gross_before_discount: backupGrossBeforeDiscount,
-    contract_backup_net_after_discount: getLineValue("backup", "netAfterDiscount"),
+    contract_ems_gross_after_discount: 0,
+    contract_ems_gross_before_discount: 0,
+    contract_ems_net_after_discount: 0,
+
+    contract_backup_gross_after_discount: 0,
+    contract_backup_gross_before_discount: 0,
+    contract_backup_net_after_discount: 0,
 
     contract_additional_services_gross_after_discount: additionalServicesGrossAfterDiscount,
     contract_additional_services_gross_before_discount: additionalServicesGrossBeforeDiscount,
@@ -659,8 +683,9 @@ function getOfferFinancialBreakdownForContract(offer: ClientOffer) {
     contract_total_gross: totalGrossAfterDiscount,
     contract_pv_gross: finalPvGrossAfterDiscount,
     contract_storage_gross: finalStorageGrossAfterDiscount,
-    contract_ems_gross: finalEmsGrossAfterDiscount,
-    contract_backup_gross: backupGrossAfterDiscount,
+    contract_inverter_gross: inverterGrossAfterDiscount,
+    contract_ems_gross: 0,
+    contract_backup_gross: 0,
     contract_additional_services_gross: additionalServicesGrossAfterDiscount,
   };
 }

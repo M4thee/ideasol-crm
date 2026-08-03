@@ -97,6 +97,12 @@ type CatalogCardEmailAttachment = {
   url: string;
 };
 
+export type OfferEmailOptions = {
+  sellerNote: string;
+  includeOfferPdf: boolean;
+  offerPdfPayload: Record<string, unknown>;
+};
+
 type OfferResultProps = {
   result: Result;
   panelCount: number;
@@ -115,7 +121,10 @@ type OfferResultProps = {
   clientEmail: string;
   clientName: string;
   setClientEmail: (value: string) => void;
-  sendOfferEmail: (mode?: "anonymous" | "public") => void;
+  sendOfferEmail: (
+    mode?: "anonymous" | "public",
+    options?: OfferEmailOptions
+  ) => void | Promise<void>;
   sendingEmail: boolean;
   emailStatus: string;
   saveOfferToCrm?: (clientIdOverride?: string) => Promise<string | null | void> | string | null | void;
@@ -228,6 +237,8 @@ export default function OfferResult({
   const [pdfStatus, setPdfStatus] = useState("");
 
   const [sendMode, setSendMode] = useState<"anonymous" | "public">("anonymous");
+  const [sellerNote, setSellerNote] = useState("");
+  const [includeOfferPdf, setIncludeOfferPdf] = useState(false);
   const [showSendConfirm, setShowSendConfirm] = useState(false);
   const [isMailPanelOpen, setIsMailPanelOpen] = useState(false);
   const [showSaveAnimation, setShowSaveAnimation] = useState(false);
@@ -387,6 +398,49 @@ export default function OfferResult({
     };
   }
 
+  function getOfferPdfPayload(): Record<string, unknown> {
+    const inverterPdfParts = getInverterPdfParts();
+
+    return {
+      clientName: clientName || clientEmail || "Klient",
+      offerType: result.offerType,
+      pdfQuantity,
+      pvPowerKw: result.pvPowerKw,
+      panelCount,
+      panelPowerWp,
+      panelName,
+      inverter: result.inverter,
+      inverterProducer: inverterPdfParts.inverterProducer,
+      inverterModel: inverterPdfParts.inverterModel,
+      inverterPowerKw: inverterPdfParts.inverterPowerKw,
+      inverterNet: inverterNetFromBreakdown,
+      inverterGross: inverterGrossFromBreakdown,
+      energyStorage: storageDisplayName,
+      pvNet: pvNetForPdf,
+      pvGross: pvGrossForPdf,
+      storageNet: storageNetForPdf,
+      storageGross: storageGrossForPdf,
+      // EMS jest funkcją falownika, więc nie trafia do PDF jako osobna pozycja cenowa.
+      withEms: false,
+      emsName: "",
+      emsNet: 0,
+      emsGross: 0,
+      withBackup: hasBackupForPdf,
+      backupName: hasBackupForPdf ? "Backup zasilania awaryjnego" : "",
+      backupNet: backupNetFromBreakdown,
+      backupGross: backupGrossFromBreakdown,
+      additionalServices,
+      subsidyTotal: result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0,
+      subsidyAllocation: result.subsidyAllocation?.enabled ? result.subsidyAllocation : undefined,
+      finalNet: result.finalNet,
+      finalGross: result.finalGross,
+      vatRate: result.vatRate,
+      advisorName,
+      advisorPhone,
+      advisorEmail,
+    };
+  }
+
   async function generatePdfAfterCrmSave(clientIdForSave: string) {
     setIsGeneratingPdf(true);
     setPdfStatus("");
@@ -400,51 +454,12 @@ export default function OfferResult({
         }
       }
 
-      const inverterPdfParts = getInverterPdfParts();
-
       const response = await fetch("/api/generate-offer-pdf", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          clientName: clientName || clientEmail || "Klient",
-          offerType: result.offerType,
-          pdfQuantity,
-          pvPowerKw: result.pvPowerKw,
-          panelCount,
-          panelPowerWp,
-          panelName,
-          inverter: result.inverter,
-          inverterProducer: inverterPdfParts.inverterProducer,
-          inverterModel: inverterPdfParts.inverterModel,
-          inverterPowerKw: inverterPdfParts.inverterPowerKw,
-          inverterNet: inverterNetFromBreakdown,
-          inverterGross: inverterGrossFromBreakdown,
-          energyStorage: storageDisplayName,
-          pvNet: pvNetForPdf,
-          pvGross: pvGrossForPdf,
-          storageNet: storageNetForPdf,
-          storageGross: storageGrossForPdf,
-          // EMS jest funkcją falownika, więc nie trafia do PDF jako osobna pozycja cenowa.
-          withEms: false,
-          emsName: "",
-          emsNet: 0,
-          emsGross: 0,
-          withBackup: hasBackupForPdf,
-          backupName: hasBackupForPdf ? "Backup zasilania awaryjnego" : "",
-          backupNet: backupNetFromBreakdown,
-          backupGross: backupGrossFromBreakdown,
-          additionalServices,
-          subsidyTotal: result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0,
-          subsidyAllocation: result.subsidyAllocation?.enabled ? result.subsidyAllocation : undefined,
-          finalNet: result.finalNet,
-          finalGross: result.finalGross,
-          vatRate: result.vatRate,
-          advisorName,
-          advisorPhone,
-          advisorEmail,
-        }),
+        body: JSON.stringify(getOfferPdfPayload()),
       });
 
       if (!response.ok) {
@@ -750,6 +765,41 @@ export default function OfferResult({
               />
             </label>
 
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Notatka od handlowca (opcjonalnie)
+              </span>
+              <textarea
+                className="mt-2 min-h-28 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:ring-blue-500/20 sm:text-base"
+                placeholder="Wpisz własną wiadomość, która pojawi się w treści maila."
+                value={sellerNote}
+                maxLength={2000}
+                onChange={(event) => setSellerNote(event.target.value)}
+              />
+              <span className="mt-1 block text-right text-xs text-slate-500 dark:text-slate-400">
+                {sellerNote.length}/2000
+              </span>
+            </label>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  checked={includeOfferPdf}
+                  onChange={(event) => setIncludeOfferPdf(event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Dołącz ofertę PDF
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                    Do maila zostanie dołączony ten sam dokument, który można pobrać przyciskiem „Pobierz PDF”.
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950">
               <label className="flex items-start gap-3">
                 <input
@@ -1011,7 +1061,11 @@ export default function OfferResult({
                   }
 
                   setShowSendConfirm(false);
-                  sendOfferEmail(sendMode);
+                  void sendOfferEmail(sendMode, {
+                    sellerNote: sellerNote.trim(),
+                    includeOfferPdf,
+                    offerPdfPayload: getOfferPdfPayload(),
+                  });
                 }}
                 className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-500"
               >

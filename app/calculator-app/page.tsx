@@ -2,8 +2,9 @@
 
 import { supabase } from "@/lib/supabase";
 import { useEffect, useRef, useState } from "react";
-import OfferResult from "@/components/calculator/OfferResult";
+import OfferResult, { type OfferEmailOptions } from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
+import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
 import {
@@ -26,6 +27,7 @@ type Result = {
 
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
+  withBackup?: boolean;
   clientHasOwnHybridInverter?: boolean;
   includeSubsidy?: boolean;
   existingPvPowerKw?: number;
@@ -66,6 +68,11 @@ type Result = {
       grossBeforeDiscount: number;
     };
     storage: {
+      netAfterDiscount: number;
+      grossAfterDiscount: number;
+      grossBeforeDiscount: number;
+    };
+    inverter: {
       netAfterDiscount: number;
       grossAfterDiscount: number;
       grossBeforeDiscount: number;
@@ -142,6 +149,8 @@ type CatalogInverter = {
   catalogCardUrl?: string | null;
   is_eu?: boolean;
   isEu?: boolean;
+  has_ems?: boolean;
+  hasEms?: boolean;
 };
 
 type SelectedAdditionalService = {
@@ -490,6 +499,8 @@ const DEFAULT_PRICING_OVERRIDES = {
   },
   installation: {
     pvPerKwNet: 500,
+    storageWithPvNet: 1500,
+    storageWithoutPvNet: 2500,
   },
   roof: {
     blacha: 1500,
@@ -500,7 +511,8 @@ const DEFAULT_PRICING_OVERRIDES = {
   placeholders: {
     protections: 1500,
     wiring: 800,
-    transport: 500,
+    transportElectronics: 250,
+    transportPanels: 350,
     documentation: 700,
     ems: 1200,
   },
@@ -1134,7 +1146,18 @@ export default function Home() {
       const cachedPricing = readCachedPricingOverrides();
 
       if (cachedPricing) {
-        setPricingOverrides(cachedPricing);
+        setPricingOverrides({
+          ...DEFAULT_PRICING_OVERRIDES,
+          ...cachedPricing,
+          installation: {
+            ...DEFAULT_PRICING_OVERRIDES.installation,
+            ...cachedPricing.installation,
+          },
+          placeholders: {
+            ...DEFAULT_PRICING_OVERRIDES.placeholders,
+            ...cachedPricing.placeholders,
+          },
+        });
       }
 
       if (!isCalculatorOnline()) {
@@ -1162,12 +1185,15 @@ export default function Home() {
           installation: {
             ...current.installation,
             pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+            storageWithPvNet: Number(data.storage_installation_with_pv_net ?? current.installation.storageWithPvNet),
+            storageWithoutPvNet: Number(data.storage_installation_without_pv_net ?? current.installation.storageWithoutPvNet),
           },
           placeholders: {
             ...current.placeholders,
             protections: Number(data.protections_cost ?? current.placeholders.protections),
             wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
-            transport: Number(data.transport_cost ?? current.placeholders.transport),
+            transportElectronics: Number(data.transport_electronics_net ?? current.placeholders.transportElectronics),
+            transportPanels: Number(data.transport_panels_net ?? current.placeholders.transportPanels),
             documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
             ems: Number(data.ems_cost ?? current.placeholders.ems),
           },
@@ -1351,6 +1377,8 @@ export default function Home() {
           price_net: inverter.priceNet,
           is_eu: Boolean(inverter.isEu),
           isEu: Boolean(inverter.isEu),
+          has_ems: Boolean(inverter.hasEms),
+          hasEms: Boolean(inverter.hasEms),
           catalog_card_url:
             (inverter as { catalogCardUrl?: string | null }).catalogCardUrl || null,
           catalogCardUrl:
@@ -1470,9 +1498,12 @@ export default function Home() {
       .from("pricing_settings")
       .update({
         installation_pv_per_kw: pricing.installation.pvPerKwNet,
+        storage_installation_with_pv_net: pricing.installation.storageWithPvNet,
+        storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
         protections_cost: pricing.placeholders.protections,
         wiring_cost: pricing.placeholders.wiring,
-        transport_cost: pricing.placeholders.transport,
+        transport_electronics_net: pricing.placeholders.transportElectronics,
+        transport_panels_net: pricing.placeholders.transportPanels,
         documentation_cost: pricing.placeholders.documentation,
         ems_cost: pricing.placeholders.ems,
         marketing_cost: pricing.margins.marketing,
@@ -1566,6 +1597,7 @@ export default function Home() {
       priceNet: Number(inverter.price_net || 0),
       catalogCardUrl: inverter.catalog_card_url || inverter.catalogCardUrl || null,
       isEu: Boolean(inverter.is_eu ?? inverter.isEu),
+      hasEms: Boolean(inverter.has_ems ?? inverter.hasEms),
     }));
 
     return {
@@ -1823,6 +1855,7 @@ export default function Home() {
           roofType,
           storage,
           withEms: Boolean(result.withEms),
+          withBackup: Boolean(result.withBackup),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw: isUpsell ? existingPvPowerKw : "0",
@@ -1965,7 +1998,10 @@ IdeaSol`;
     setCopied(true);
   }
 
-  async function sendOfferEmail(mode: "anonymous" | "public" = "anonymous") {
+  async function sendOfferEmail(
+    mode: "anonymous" | "public" = "anonymous",
+    emailOptions?: OfferEmailOptions
+  ) {
     if (!result) return;
 
     const selectedClient = crmClients.find(
@@ -2025,6 +2061,7 @@ IdeaSol`;
           roofType,
           storage,
           withEms: Boolean(result.withEms),
+          withBackup: Boolean(result.withBackup),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw,
@@ -2042,6 +2079,9 @@ IdeaSol`;
             email: advisorEmail,
             role: userProfile?.role || currentUserRole,
           },
+          sellerNote: emailOptions?.sellerNote || "",
+          includeOfferPdf: Boolean(emailOptions?.includeOfferPdf),
+          offerPdfPayload: emailOptions?.offerPdfPayload || null,
         },
       };
 
@@ -2091,6 +2131,10 @@ IdeaSol`;
         throw new Error("Nie udało się zapisać oferty w CRM");
       }
 
+      const offerPdfBase64 = emailOptions?.includeOfferPdf
+        ? await generateOfferPdfBase64(emailOptions.offerPdfPayload)
+        : undefined;
+
       const res = await fetch("/api/send-offer", {
         method: "POST",
         headers: {
@@ -2123,6 +2167,9 @@ IdeaSol`;
           vatRate: result.vatRate,
           subsidyAllocation: result.subsidyAllocation || null,
           subsidyTotal: result.subsidyAllocation?.total || 0,
+          sellerNote: emailOptions?.sellerNote || "",
+          includeOfferPdf: Boolean(emailOptions?.includeOfferPdf),
+          offerPdfBase64,
         }),
       });
 
@@ -2137,6 +2184,8 @@ IdeaSol`;
         !selectedClientEmail && typedClientEmail
           ? "E-mail został automatycznie zapisany na karcie klienta."
           : null,
+        emailOptions?.includeOfferPdf ? "Załączono ofertę PDF." : null,
+        emailOptions?.sellerNote ? `Notatka handlowca: ${emailOptions.sellerNote}` : null,
         "",
         buildOfferText(result),
       ]
@@ -2211,6 +2260,8 @@ IdeaSol`;
         const pricingOverridesSnapshot = snapshot.pricingOverrides || pricingOverrides;
         const advisorSnapshot =
           (snapshot.advisor as Record<string, unknown> | undefined) || {};
+        const includeOfferPdfSnapshot = Boolean(snapshot.includeOfferPdf);
+        const offerPdfPayloadSnapshot = snapshot.offerPdfPayload as Record<string, unknown> | null;
 
         if (!snapshot.selectedClientEmail && snapshot.typedClientEmail) {
           const { error: updateClientEmailError } = await supabase
@@ -2267,6 +2318,7 @@ IdeaSol`;
               roofType: snapshot.roofType || null,
               storage: snapshot.storage || null,
               withEms: Boolean(queuedResult.withEms ?? snapshot.withEms),
+              withBackup: Boolean(queuedResult.withBackup ?? snapshot.withBackup),
               includeSubsidy: Boolean(snapshot.includeSubsidy),
               isUpsell: Boolean(snapshot.isUpsell),
               existingPvPowerKw: snapshot.isUpsell ? snapshot.existingPvPowerKw || "0" : "0",
@@ -2304,6 +2356,10 @@ IdeaSol`;
           );
         }
 
+        const offerPdfBase64 = includeOfferPdfSnapshot && offerPdfPayloadSnapshot
+          ? await generateOfferPdfBase64(offerPdfPayloadSnapshot)
+          : undefined;
+
         const res = await fetch("/api/send-offer", {
           method: "POST",
           headers: {
@@ -2336,6 +2392,9 @@ IdeaSol`;
             vatRate: queuedResult.vatRate,
             subsidyAllocation: queuedResult.subsidyAllocation || null,
             subsidyTotal: queuedResult.subsidyAllocation?.total || 0,
+            sellerNote: String(snapshot.sellerNote || ""),
+            includeOfferPdf: includeOfferPdfSnapshot,
+            offerPdfBase64,
           }),
         });
 
@@ -2350,6 +2409,8 @@ IdeaSol`;
           !snapshot.selectedClientEmail && snapshot.typedClientEmail
             ? "E-mail został automatycznie zapisany na karcie klienta."
             : null,
+          includeOfferPdfSnapshot ? "Załączono ofertę PDF." : null,
+          snapshot.sellerNote ? `Notatka handlowca: ${String(snapshot.sellerNote)}` : null,
           "",
           item.offerText,
         ]
