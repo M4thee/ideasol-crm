@@ -2,9 +2,12 @@ import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createInstallationOrderCover,
+  DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS,
   DEFAULT_INSTALLATION_SUPPLY_SOURCES,
+  type InstallationOrderIncludedItems,
   type InstallationSupplySources,
 } from "@/lib/installationOrderPdf";
+import { getInstallationOrderScope } from "@/lib/installationOrderScope";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -207,7 +210,7 @@ function formatNumber(value: number, maximumFractionDigits = 2) {
   }).format(value);
 }
 
-function getPvDetails(sale: SaleRecord, panelModel: string) {
+function getPvDetails(sale: SaleRecord, panelModel: string, hasPv: boolean) {
   const snapshot = (sale.offer_snapshot || {}) as JsonRecord;
   const offerData = (snapshot.offer_data || {}) as JsonRecord;
   const form = (offerData.form || {}) as JsonRecord;
@@ -244,14 +247,12 @@ function getPvDetails(sale: SaleRecord, panelModel: string) {
     result.roofType,
     result.mountingType
   );
-  const hasPv = totalPowerKw > 0 || panelCount > 0 || panelPowerWp > 0 || panelModel !== "Brak / nie dotyczy";
-
   return {
     mountingType: hasPv ? formatMountingType(mountingType) : "Brak / nie dotyczy",
     panelModel: hasPv ? panelModel : "Brak / nie dotyczy",
-    panelPowerWp: panelPowerWp > 0 ? `${formatNumber(panelPowerWp, 0)} Wp` : "Brak / nie dotyczy",
-    panelCount: panelCount > 0 ? `${formatNumber(panelCount, 0)} szt.` : "Brak / nie dotyczy",
-    totalPowerKw: totalPowerKw > 0 ? `${formatNumber(totalPowerKw)} kWp` : "Brak / nie dotyczy",
+    panelPowerWp: hasPv && panelPowerWp > 0 ? `${formatNumber(panelPowerWp, 0)} Wp` : "Brak / nie dotyczy",
+    panelCount: hasPv && panelCount > 0 ? `${formatNumber(panelCount, 0)} szt.` : "Brak / nie dotyczy",
+    totalPowerKw: hasPv && totalPowerKw > 0 ? `${formatNumber(totalPowerKw)} kWp` : "Brak / nie dotyczy",
   };
 }
 
@@ -273,6 +274,30 @@ function parseSupplySources(value: unknown): InstallationSupplySources | null {
 
   for (const key of keys) {
     if (record[key] !== "ideasol" && record[key] !== "installer") return null;
+    parsed[key] = record[key];
+  }
+
+  return parsed;
+}
+
+function parseIncludedItems(value: unknown): InstallationOrderIncludedItems | null {
+  if (value === undefined || value === null) {
+    return { ...DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  const keys: Array<keyof InstallationOrderIncludedItems> = [
+    "panels",
+    "inverter",
+    "energy_storage",
+    "construction",
+    "materials",
+  ];
+  const parsed = { ...DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS };
+
+  for (const key of keys) {
+    if (typeof record[key] !== "boolean") return null;
     parsed[key] = record[key];
   }
 
@@ -502,6 +527,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const installerId = cleanText(body.installerId);
     const installationDate = cleanText(body.installationDate);
     const supplySources = parseSupplySources(body.supplySources);
+    const includedItems = parseIncludedItems(body.includedItems);
     const generationJobId = cleanText(body.generationJobId);
 
     if (!installerId) {
@@ -515,6 +541,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     if (!supplySources) {
       return NextResponse.json({ error: "Nieprawidłowe źródło dostawy." }, { status: 400 });
+    }
+    if (!includedItems) {
+      return NextResponse.json({ error: "Nieprawidłowy wybór elementów zlecenia." }, { status: 400 });
     }
     if (
       generationJobId &&
@@ -698,6 +727,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const clientPhone = cleanText(
       firstValue(sale.customer_phone, customerData.phone, customerData.customer_phone, client?.phone)
     ) || "Brak danych";
+    const scope = getInstallationOrderScope(sale);
     const equipment = getEquipment(sale);
     const installationAddress = getInstallationAddress(sale, client);
     const documents = (documentsResponse.data || []) as SaleDocument[];
@@ -707,7 +737,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const photoDocuments = documents.filter((document) =>
       PHOTO_TYPES.includes(document.document_type || "")
     );
-    const pv = getPvDetails(sale, equipment.panel);
+    const pv = getPvDetails(sale, equipment.panel, scope.hasPv);
     const { pdfDoc, regularFont, boldFont } = await createInstallationOrderCover({
       saleNumber,
       installationDate: formatPolishDate(installationDate),
@@ -725,11 +755,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         installationAddress,
       },
       pv,
+      scope,
       equipment: {
         inverter: equipment.inverter,
         energyStorage: equipment.storage,
       },
       supplySources,
+      includedItems,
       attachments: {
         audits: auditDocuments.length,
         photos: photoDocuments.length,

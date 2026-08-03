@@ -13,12 +13,28 @@ export type InstallationSupplySources = {
   materials: InstallationSupplySource;
 };
 
+export type InstallationOrderIncludedItems = {
+  panels: boolean;
+  inverter: boolean;
+  energy_storage: boolean;
+  construction: boolean;
+  materials: boolean;
+};
+
 export const DEFAULT_INSTALLATION_SUPPLY_SOURCES: InstallationSupplySources = {
   panels: "ideasol",
   inverter: "ideasol",
   energy_storage: "ideasol",
   construction: "ideasol",
   materials: "ideasol",
+};
+
+export const DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS: InstallationOrderIncludedItems = {
+  panels: true,
+  inverter: true,
+  energy_storage: true,
+  construction: true,
+  materials: true,
 };
 
 export type InstallationOrderCoverInput = {
@@ -44,11 +60,16 @@ export type InstallationOrderCoverInput = {
     panelCount: string;
     totalPowerKw: string;
   };
+  scope: {
+    hasPv: boolean;
+    hasStorage: boolean;
+  };
   equipment: {
     inverter: string;
     energyStorage: string;
   };
   supplySources: InstallationSupplySources;
+  includedItems: InstallationOrderIncludedItems;
   attachments: {
     audits: number;
     photos: number;
@@ -353,15 +374,22 @@ export async function createInstallationOrderCover(input: InstallationOrderCover
     3
   );
 
-  drawSectionTitle(page, "Parametry instalacji PV", 449, boldFont);
+  drawSectionTitle(
+    page,
+    input.scope.hasPv ? "Parametry instalacji PV" : "Zakres instalacji",
+    449,
+    boldFont
+  );
   drawCard(page, 433, 94, { background: "soft" });
-  const pvFields = [
-    ["Miejsce montażu", displayValue(input.pv.mountingType)],
-    ["Model panela", displayValue(input.pv.panelModel)],
-    ["Moc panela", displayValue(input.pv.panelPowerWp)],
-    ["Liczba paneli", displayValue(input.pv.panelCount)],
-    ["Łączna moc PV", displayValue(input.pv.totalPowerKw)],
-  ];
+  const pvFields = input.scope.hasPv
+    ? [
+        ["Miejsce montażu", displayValue(input.pv.mountingType)],
+        ["Model panela", displayValue(input.pv.panelModel)],
+        ["Moc panela", displayValue(input.pv.panelPowerWp)],
+        ["Liczba paneli", displayValue(input.pv.panelCount)],
+        ["Łączna moc PV", displayValue(input.pv.totalPowerKw)],
+      ]
+    : [["Zakres", "Montaż magazynu energii"]];
   const pvColumnWidth = 95;
   pvFields.forEach(([label, value], index) => {
     const x = 69 + index * pvColumnWidth;
@@ -391,13 +419,51 @@ export async function createInstallationOrderCover(input: InstallationOrderCover
   page.drawText("Model / zakres", { x: tableX + itemWidth + 10, y: tableTop - 15, font: regularFont, size: 7, color: MUTED });
   page.drawText("Dostawa", { x: tableX + itemWidth + descriptionWidth + 10, y: tableTop - 15, font: regularFont, size: 7, color: MUTED });
 
-  const rows = [
-    ["Panele fotowoltaiczne", displayValue(input.pv.panelModel), supplySourceLabel(input.supplySources.panels)],
-    ["Falownik", displayValue(input.equipment.inverter), supplySourceLabel(input.supplySources.inverter)],
-    ["Magazyn energii", displayValue(input.equipment.energyStorage), supplySourceLabel(input.supplySources.energy_storage)],
-    ["Konstrukcja", displayValue(input.pv.mountingType), supplySourceLabel(input.supplySources.construction)],
-    ["Materiały", "Materiały montażowe i instalacyjne", supplySourceLabel(input.supplySources.materials)],
-  ];
+  const rows: string[][] = [];
+  if (input.scope.hasPv && input.includedItems.panels) {
+    rows.push([
+      "Panele fotowoltaiczne",
+      displayValue(input.pv.panelModel),
+      supplySourceLabel(input.supplySources.panels),
+    ]);
+  }
+  if (
+    input.includedItems.inverter &&
+    input.equipment.inverter !== "Brak / nie dotyczy"
+  ) {
+    rows.push([
+      "Falownik",
+      displayValue(input.equipment.inverter),
+      supplySourceLabel(input.supplySources.inverter),
+    ]);
+  }
+  if (
+    input.includedItems.energy_storage &&
+    (input.scope.hasStorage || input.equipment.energyStorage !== "Brak / nie dotyczy")
+  ) {
+    rows.push([
+      "Magazyn energii",
+      displayValue(input.equipment.energyStorage),
+      supplySourceLabel(input.supplySources.energy_storage),
+    ]);
+  }
+  if (input.scope.hasPv && input.includedItems.construction) {
+    rows.push([
+      "Konstrukcja",
+      displayValue(input.pv.mountingType),
+      supplySourceLabel(input.supplySources.construction),
+    ]);
+  }
+  if (input.includedItems.materials) {
+    rows.push([
+      "Materiały",
+      "Materiały montażowe i instalacyjne",
+      supplySourceLabel(input.supplySources.materials),
+    ]);
+  }
+  if (rows.length === 0) {
+    rows.push(["Brak wybranych elementów", "-", "-"]);
+  }
 
   rows.forEach(([item, description, source], index) => {
     const rowTop = tableTop - headerHeight - index * rowHeight;

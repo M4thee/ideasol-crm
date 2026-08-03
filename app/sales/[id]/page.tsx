@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getInstallationOrderScope } from "@/lib/installationOrderScope";
 
 type Sale = {
   id: string;
@@ -97,12 +98,28 @@ type InstallationSupplySources = {
   materials: InstallationSupplySource;
 };
 
+type InstallationOrderIncludedItems = {
+  panels: boolean;
+  inverter: boolean;
+  energy_storage: boolean;
+  construction: boolean;
+  materials: boolean;
+};
+
 const DEFAULT_INSTALLATION_SUPPLY_SOURCES: InstallationSupplySources = {
   panels: "ideasol",
   inverter: "ideasol",
   energy_storage: "ideasol",
   construction: "ideasol",
   materials: "ideasol",
+};
+
+const DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS: InstallationOrderIncludedItems = {
+  panels: true,
+  inverter: true,
+  energy_storage: true,
+  construction: true,
+  materials: true,
 };
 
 function installationEquipmentLabel(value: unknown) {
@@ -181,14 +198,50 @@ function getInstallationOrderItems(sale: Sale) {
   const mountingType = installationMountingLabel(
     firstInstallationValue(snapshot.roof_type, snapshot.roofType, form.roofType, result.roofType)
   );
+  const scope = getInstallationOrderScope(sale);
+  const items: Array<{
+    key: keyof InstallationSupplySources;
+    label: string;
+    detail: string;
+  }> = [];
 
-  return [
-    { key: "panels" as const, label: "Panele fotowoltaiczne", detail: panel },
-    { key: "inverter" as const, label: "Falownik", detail: inverter },
-    { key: "energy_storage" as const, label: "Magazyn energii", detail: storage },
-    { key: "construction" as const, label: "Konstrukcja", detail: mountingType },
-    { key: "materials" as const, label: "Materiały", detail: "Materiały montażowe i instalacyjne" },
-  ];
+  if (scope.hasPv) {
+    items.push({ key: "panels", label: "Panele fotowoltaiczne", detail: panel });
+  }
+  if (inverter !== "Brak / nie dotyczy") {
+    items.push({ key: "inverter", label: "Falownik", detail: inverter });
+  }
+  if (scope.hasStorage || storage !== "Brak / nie dotyczy") {
+    items.push({ key: "energy_storage", label: "Magazyn energii", detail: storage });
+  }
+  if (scope.hasPv) {
+    items.push({ key: "construction", label: "Konstrukcja", detail: mountingType });
+  }
+  items.push({
+    key: "materials",
+    label: "Materiały",
+    detail: "Materiały montażowe i instalacyjne",
+  });
+
+  return items;
+}
+
+function getDefaultInstallationOrderIncludedItems(
+  sale: Sale
+): InstallationOrderIncludedItems {
+  const includedItems: InstallationOrderIncludedItems = {
+    panels: false,
+    inverter: false,
+    energy_storage: false,
+    construction: false,
+    materials: false,
+  };
+
+  getInstallationOrderItems(sale).forEach((item) => {
+    includedItems[item.key] = true;
+  });
+
+  return includedItems;
 }
 
 function normalizeInstallationSupplySources(
@@ -487,6 +540,8 @@ export default function SalePage() {
   const [installationDate, setInstallationDate] = useState("");
   const [installationSupplySources, setInstallationSupplySources] =
     useState<InstallationSupplySources>(DEFAULT_INSTALLATION_SUPPLY_SOURCES);
+  const [installationOrderIncludedItems, setInstallationOrderIncludedItems] =
+    useState<InstallationOrderIncludedItems>(DEFAULT_INSTALLATION_ORDER_INCLUDED_ITEMS);
   const [loadingInstallationOrder, setLoadingInstallationOrder] = useState(false);
   const [generatingInstallationOrder, setGeneratingInstallationOrder] = useState(false);
   const [installationOrderStatus, setInstallationOrderStatus] = useState("");
@@ -1435,6 +1490,7 @@ export default function SalePage() {
     setInstallationSupplySources(
       normalizeInstallationSupplySources(existingOrder?.supply_sources)
     );
+    setInstallationOrderIncludedItems(getDefaultInstallationOrderIncludedItems(sale));
 
     if (selectableInstallers.length === 0) {
       setInstallationOrderStatus(
@@ -1521,6 +1577,7 @@ export default function SalePage() {
           installerId: selectedInstallerId,
           installationDate,
           supplySources: installationSupplySources,
+          includedItems: installationOrderIncludedItems,
           generationJobId,
         }),
       });
@@ -2784,7 +2841,7 @@ export default function SalePage() {
                         Sprzęt, konstrukcja i materiały
                       </h3>
                       <p className="mt-1 text-xs text-slate-500">
-                        Dla każdej pozycji wybierz, kto odpowiada za dostawę.
+                        Zaznacz elementy zlecenia i wybierz, kto odpowiada za ich dostawę.
                       </p>
                     </div>
                     <div className="overflow-hidden rounded-2xl border border-slate-200">
@@ -2795,21 +2852,37 @@ export default function SalePage() {
                             index > 0 ? "border-t border-slate-200" : ""
                           }`}
                         >
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-800">{item.label}</p>
-                            <p className="mt-1 break-words text-xs text-slate-500">
-                              {item.detail}
-                            </p>
-                          </div>
+                          <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={installationOrderIncludedItems[item.key]}
+                              onChange={(event) =>
+                                setInstallationOrderIncludedItems((current) => ({
+                                  ...current,
+                                  [item.key]: event.target.checked,
+                                }))
+                              }
+                              className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-slate-800">
+                                {item.label}
+                              </span>
+                              <span className="mt-1 block break-words text-xs text-slate-500">
+                                {item.detail}
+                              </span>
+                            </span>
+                          </label>
                           <select
                             value={installationSupplySources[item.key]}
+                            disabled={!installationOrderIncludedItems[item.key]}
                             onChange={(event) =>
                               setInstallationSupplySources((current) => ({
                                 ...current,
                                 [item.key]: event.target.value as InstallationSupplySource,
                               }))
                             }
-                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                             aria-label={`Źródło dostawy: ${item.label}`}
                           >
                             <option value="ideasol">Dostawa własna IdeaSol</option>
