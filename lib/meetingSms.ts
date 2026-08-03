@@ -33,6 +33,8 @@ type AdvisorSmsData = {
   phone: string | null;
 };
 
+const IDEASOL_HOTLINE_PHONE = "41 202 02 38";
+
 export type SendMeetingSmsInput = {
   calendarEventId: string;
   triggeredByUserId?: string | null;
@@ -92,7 +94,7 @@ function getAdvisorName(advisor: AdvisorSmsData | null) {
 }
 
 function getAdvisorPhone(advisor: AdvisorSmsData | null) {
-  return advisor?.phone?.trim() || "brak numeru w CRM";
+  return advisor?.phone?.trim() || IDEASOL_HOTLINE_PHONE;
 }
 
 function buildMeetingCreatedMessage(params: {
