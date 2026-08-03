@@ -23,7 +23,10 @@ type SmsHistoryItem = {
 };
 
 type SmsModuleData = {
-  recipientPhone: string;
+  recipientPhones: {
+    sale: string;
+    client: string;
+  };
   contractNumber: string;
   contractValue: number | null;
   depositAmount: number | null;
@@ -34,8 +37,11 @@ type SmsModuleData = {
   installer: { company_name?: string | null } | null;
   payments: Payment[];
   templates: SaleSmsTemplate[];
+  templateSentCounts: Record<SaleSmsTemplateType, number>;
   history: SmsHistoryItem[];
 };
+
+type SmsRecipientSource = "sale" | "client";
 
 function formatMoney(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Brak danych";
@@ -59,7 +65,12 @@ function statusLabel(status: string) {
 
 export default function SaleSmsPanel({ saleId }: { saleId: string }) {
   const [data, setData] = useState<SmsModuleData | null>(null);
-  const [drafts, setDrafts] = useState<Partial<Record<SaleSmsTemplateType, string>>>({});
+  const [selectedTemplateType, setSelectedTemplateType] = useState<
+    SaleSmsTemplateType | ""
+  >("");
+  const [recipientSource, setRecipientSource] = useState<
+    SmsRecipientSource | ""
+  >("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [sendingType, setSendingType] = useState<SaleSmsTemplateType | null>(null);
@@ -94,9 +105,7 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
 
       const moduleData = result.data as SmsModuleData;
       setData(moduleData);
-      setDrafts(
-        Object.fromEntries(moduleData.templates.map((template) => [template.type, template.message]))
-      );
+      setRecipientSource("");
     } catch (error) {
       setData(null);
       setStatus(error instanceof Error ? error.message : "Nie udało się pobrać modułu SMS.");
@@ -149,13 +158,7 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
   }
 
   async function sendSms(template: SaleSmsTemplate) {
-    const message = String(drafts[template.type] || "").trim();
-    const warning =
-      template.tone === "danger"
-        ? "To jest ostateczne wezwanie z informacją o windykacji i KRD. Czy na pewno wysłać ten SMS?"
-        : `Czy wysłać SMS „${template.title}” na numer ${data?.recipientPhone || "klienta"}?`;
-
-    if (!window.confirm(warning)) return;
+    if (!window.confirm("Czy na pewno chcesz wysłać SMS?")) return;
 
     setSendingType(template.type);
     setStatus("");
@@ -170,7 +173,10 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ templateType: template.type, message }),
+        body: JSON.stringify({
+          templateType: template.type,
+          recipientSource,
+        }),
       });
       const result = await response.json();
 
@@ -201,14 +207,25 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
     );
   }
 
+  const selectedTemplate = data.templates.find(
+    (template) => template.type === selectedTemplateType
+  );
+  const selectedRecipientPhone = recipientSource
+    ? data.recipientPhones[recipientSource]
+    : "";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="text-lg font-black text-slate-950">SMS do klienta</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Umowa: <span className="font-bold">{data.contractNumber || "brak numeru"}</span> · numer docelowy:{" "}
-            <span className="font-bold">{data.recipientPhone || "brak numeru"}</span>
+            Umowa: <span className="font-bold">{data.contractNumber || "brak numeru"}</span>
+            {selectedRecipientPhone ? (
+              <>
+                {" "}· numer docelowy: <span className="font-bold">{selectedRecipientPhone}</span>
+              </>
+            ) : null}
           </p>
         </div>
         <button
@@ -288,43 +305,107 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
         </div>
       ) : null}
 
-      <div className="space-y-4">
-        {data.templates.map((template) => (
-          <section key={template.type} className={`rounded-2xl border p-5 ${templateCardClass(template.tone)}`}>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <label className="block text-sm font-black text-slate-900" htmlFor="sale-sms-recipient">
+              Numer odbiorcy
+            </label>
+            <p className="mt-1 text-sm text-slate-500">
+              Wybierz numer zapisany na sprzedaży albo aktualny numer z karty klienta.
+            </p>
+            <select
+              id="sale-sms-recipient"
+              value={recipientSource}
+              onChange={(event) =>
+                setRecipientSource(event.target.value as SmsRecipientSource | "")
+              }
+              disabled={sendingType !== null}
+              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+            >
+              <option value="">Wybierz numer odbiorcy...</option>
+              <option value="sale" disabled={!data.recipientPhones.sale}>
+                Ze sprzedaży — {data.recipientPhones.sale || "brak numeru"}
+              </option>
+              <option value="client" disabled={!data.recipientPhones.client}>
+                Z karty klienta — {data.recipientPhones.client || "brak numeru"}
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-black text-slate-900" htmlFor="sale-sms-template">
+              Wiadomość SMS
+            </label>
+            <p className="mt-1 text-sm text-slate-500">
+              Licznik obejmuje wiadomości tego szablonu wysłane do tego klienta.
+            </p>
+            <select
+              id="sale-sms-template"
+              value={selectedTemplateType}
+              onChange={(event) =>
+                setSelectedTemplateType(event.target.value as SaleSmsTemplateType | "")
+              }
+              disabled={sendingType !== null}
+              className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-100"
+            >
+              <option value="">Wybierz rodzaj wiadomości...</option>
+              {data.templates.map((template) => (
+                <option key={template.type} value={template.type}>
+                  {template.title} — wysłano: {data.templateSentCounts[template.type] || 0}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {selectedTemplate ? (
+          <section
+            className={`mt-5 rounded-2xl border p-5 ${templateCardClass(selectedTemplate.tone)}`}
+          >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h4 className="font-black text-slate-950">{template.title}</h4>
-                {!template.enabled ? (
-                  <p className="mt-1 text-sm font-semibold text-red-700">{template.reason}</p>
+                <h4 className="font-black text-slate-950">{selectedTemplate.title}</h4>
+                <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  Wysłano do klienta: {data.templateSentCounts[selectedTemplate.type] || 0}
+                </p>
+                {!selectedTemplate.enabled ? (
+                  <p className="mt-2 text-sm font-semibold text-red-700">
+                    {selectedTemplate.reason}
+                  </p>
                 ) : null}
               </div>
               <button
                 type="button"
-                onClick={() => void sendSms(template)}
-                disabled={!template.enabled || sendingType !== null || !data.recipientPhone}
-                className={`rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 ${
-                  template.tone === "danger" ? "bg-red-700 hover:bg-red-800" : "bg-slate-900 hover:bg-slate-700"
+                onClick={() => void sendSms(selectedTemplate)}
+                disabled={
+                  !selectedTemplate.enabled ||
+                  sendingType !== null ||
+                  !selectedRecipientPhone
+                }
+                className={`rounded-xl px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 ${
+                  selectedTemplate.tone === "danger"
+                    ? "bg-red-700 hover:bg-red-800"
+                    : "bg-slate-900 hover:bg-slate-700"
                 }`}
               >
-                {sendingType === template.type ? "Wysyłanie..." : "Wyślij SMS"}
+                {sendingType === selectedTemplate.type ? "Wysyłanie..." : "Wyślij SMS"}
               </button>
             </div>
-            <textarea
-              value={drafts[template.type] ?? template.message}
-              onChange={(event) =>
-                setDrafts((current) => ({ ...current, [template.type]: event.target.value }))
-              }
-              disabled={!template.enabled || sendingType !== null}
-              rows={5}
-              maxLength={1200}
-              className="mt-4 w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-slate-900 outline-none focus:border-blue-400 disabled:bg-slate-100 disabled:text-slate-500"
-              aria-label={`Treść wiadomości: ${template.title}`}
-            />
-            <p className="mt-1 text-right text-xs text-slate-400">
-              {(drafts[template.type] ?? template.message).length}/1200 znaków
-            </p>
+
+            <div className="mt-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Treść wiadomości — tylko do odczytu
+              </p>
+              <div className="mt-2 whitespace-pre-wrap rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm leading-relaxed text-slate-800">
+                {selectedTemplate.message}
+              </div>
+              <p className="mt-2 text-right text-xs text-slate-400">
+                {selectedTemplate.message.length} znaków
+              </p>
+            </div>
           </section>
-        ))}
+        ) : null}
       </div>
 
       <div>

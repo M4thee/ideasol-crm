@@ -3,6 +3,7 @@ import { buildInstallationReminderMessage } from "@/lib/saleSms";
 import {
   canSendAutomaticSmsToRecipient,
   normalizePolishPhoneNumber,
+  removePolishDiacritics,
   sendSmsApiMessage,
 } from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -116,12 +117,14 @@ async function processInstallationReminders(request: NextRequest) {
         continue;
       }
 
-      const message = buildInstallationReminderMessage({
-        contractNumber,
-        installerCompanyName: installer.company_name,
-        installerContactName: installer.contact_name,
-        installerPhone: installer.phone,
-      });
+      const message = removePolishDiacritics(
+        buildInstallationReminderMessage({
+          contractNumber,
+          installerCompanyName: installer.company_name,
+          installerContactName: installer.contact_name,
+          installerPhone: installer.phone,
+        })
+      );
       const sender = process.env.SMSAPI_SENDER?.trim() || "";
       const { data: smsLog, error: smsLogError } = await supabaseAdmin
         .from("sms_messages")
@@ -180,6 +183,27 @@ async function processInstallationReminders(request: NextRequest) {
           })
           .eq("id", sale.id),
       ]);
+
+      if (sale.client_id) {
+        const { error: activityError } = await supabaseAdmin
+          .from("client_activities")
+          .insert({
+            client_id: sale.client_id,
+            created_by: null,
+            activity_type: "sms",
+            contact_type: "sms",
+            status: "sent",
+            description: `Automatyczne przypomnienie o montażu: ${message}`,
+          });
+
+        if (activityError) {
+          console.error(
+            `Nie udało się zapisać aktywności SMS dla sprzedaży ${sale.id}`,
+            activityError
+          );
+        }
+      }
+
       sent += 1;
     } catch (error) {
       failed += 1;

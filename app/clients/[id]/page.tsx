@@ -232,7 +232,7 @@ const tabs: { id: ActiveTab; label: string }[] = [
   { id: "sales", label: "Sprzedaże" },
   { id: "offers", label: "Oferty" },
   { id: "meetings", label: "Spotkania" },
-  { id: "sms", label: "SMS i wpłaty" },
+  { id: "sms", label: "Moduł SMS" },
 ];
 
 export default function ClientPage() {

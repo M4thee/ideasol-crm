@@ -2,7 +2,11 @@
 
 import { NextResponse } from "next/server";
 import { requireSmsRequest } from "@/lib/auth/requireSmsRequest";
-import { normalizePolishPhoneNumber, sendSmsApiMessage } from "@/lib/smsapi";
+import {
+  normalizePolishPhoneNumber,
+  removePolishDiacritics,
+  sendSmsApiMessage,
+} from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 type SendSmsRequest = {
@@ -48,7 +52,7 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as SendSmsRequest;
     const recipientPhone = normalizePolishPhoneNumber(String(body.phone || ""));
-    const message = String(body.message || "").trim();
+    const message = removePolishDiacritics(body.message).trim();
     const sender = process.env.SMSAPI_SENDER?.trim() || "";
     const senderLabel = sender || "SMSAPI_DEFAULT";
     const messageType = String(body.messageType || "manual").trim() || "manual";
@@ -118,6 +122,26 @@ export async function POST(request: Request) {
 
       if (updateError) {
         console.error("Błąd aktualizacji logu SMS po wysyłce:", updateError);
+      }
+
+      if (
+        body.clientId &&
+        result.intendedRecipientPhone === result.actualRecipientPhone
+      ) {
+        const { error: activityError } = await supabaseAdmin
+          .from("client_activities")
+          .insert({
+            client_id: body.clientId,
+            created_by: profile.id,
+            activity_type: "sms",
+            contact_type: "sms",
+            status: "sent",
+            description: message,
+          });
+
+        if (activityError) {
+          console.error("Nie udało się zapisać aktywności SMS klienta:", activityError);
+        }
       }
 
       return NextResponse.json({

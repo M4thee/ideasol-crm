@@ -1882,7 +1882,7 @@ export default function SalePage() {
                     : "bg-fuchsia-50 text-fuchsia-800"
                     }`}
                 >
-                  SMS i wpłaty
+                  Moduł SMS
                 </button>
               ) : null}
             </div>

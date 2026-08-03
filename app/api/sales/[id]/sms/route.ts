@@ -4,7 +4,11 @@ import {
   buildSaleSmsTemplates,
   type SaleSmsTemplateType,
 } from "@/lib/saleSms";
-import { normalizePolishPhoneNumber, sendSmsApiMessage } from "@/lib/smsapi";
+import {
+  normalizePolishPhoneNumber,
+  removePolishDiacritics,
+  sendSmsApiMessage,
+} from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -12,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 type JsonRecord = Record<string, unknown>;
+type SmsRecipientSource = "sale" | "client";
 
 const TEMPLATE_TYPES = new Set<SaleSmsTemplateType>([
   "deposit_reminder",
@@ -20,6 +25,16 @@ const TEMPLATE_TYPES = new Set<SaleSmsTemplateType>([
   "payment_demand",
   "installation_confirmation",
 ]);
+
+function emptyTemplateSentCounts(): Record<SaleSmsTemplateType, number> {
+  return {
+    deposit_reminder: 0,
+    payment_reminder_1: 0,
+    payment_reminder_2: 0,
+    payment_demand: 0,
+    installation_confirmation: 0,
+  };
+}
 
 function numberValue(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -39,6 +54,20 @@ function serializeError(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Nieznany błąd");
 }
 
+function wasDeliveredToIntendedRecipient(providerResponse: unknown) {
+  if (typeof providerResponse !== "object" || providerResponse === null) return true;
+
+  const response = providerResponse as JsonRecord;
+  const intendedRecipientPhone = firstText(response.intendedRecipientPhone);
+  const actualRecipientPhone = firstText(response.actualRecipientPhone);
+
+  return (
+    !intendedRecipientPhone ||
+    !actualRecipientPhone ||
+    intendedRecipientPhone === actualRecipientPhone
+  );
+}
+
 async function loadSaleSmsData(saleId: string) {
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
@@ -54,7 +83,13 @@ async function loadSaleSmsData(saleId: string) {
   const customerData = (sale.customer_data || {}) as JsonRecord;
   const offerSnapshot = (sale.offer_snapshot || {}) as JsonRecord;
 
-  const [clientResponse, paymentsResponse, installerResponse, historyResponse] =
+  const [
+    clientResponse,
+    paymentsResponse,
+    installerResponse,
+    historyResponse,
+    clientTemplateHistoryResponse,
+  ] =
     await Promise.all([
       sale.client_id
         ? supabaseAdmin
@@ -82,6 +117,17 @@ async function loadSaleSmsData(saleId: string) {
         .eq("sale_id", saleId)
         .order("created_at", { ascending: false })
         .limit(30),
+      sale.client_id
+        ? supabaseAdmin
+            .from("sms_messages")
+            .select("message_type, provider_response")
+            .eq("client_id", sale.client_id)
+            .eq("status", "sent")
+            .in(
+              "message_type",
+              [...TEMPLATE_TYPES].map((type) => `sale_${type}`)
+            )
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
   if (clientResponse.error) {
@@ -95,6 +141,11 @@ async function loadSaleSmsData(saleId: string) {
   }
   if (historyResponse.error) {
     throw new Error(`Nie udało się pobrać historii SMS: ${historyResponse.error.message}`);
+  }
+  if (clientTemplateHistoryResponse.error) {
+    throw new Error(
+      `Nie udało się pobrać liczników SMS klienta: ${clientTemplateHistoryResponse.error.message}`
+    );
   }
 
   const payments = paymentsResponse.data || [];
@@ -114,10 +165,12 @@ async function loadSaleSmsData(saleId: string) {
     customerData.contract_number
   );
   const client = clientResponse.data;
-  const recipientPhone = firstText(
+  const saleRecipientPhone = firstText(
     sale.customer_phone,
     customerData.customer_phone,
-    customerData.phone,
+    customerData.phone
+  );
+  const clientRecipientPhone = firstText(
     client?.phone,
     client?.contact_phone
   );
@@ -129,13 +182,36 @@ async function loadSaleSmsData(saleId: string) {
     installationDate: sale.installation_date,
     installationTime: sale.installation_time,
     installerCompanyName: installer?.company_name || null,
-  });
+  }).map((template) => ({
+    ...template,
+    message: removePolishDiacritics(template.message),
+  }));
+  const templateSentCounts = (clientTemplateHistoryResponse.data || []).reduce(
+    (counts, item) => {
+      if (!wasDeliveredToIntendedRecipient(item.provider_response)) return counts;
+
+      const templateType = String(item.message_type || "").replace(
+        /^sale_/,
+        ""
+      ) as SaleSmsTemplateType;
+
+      if (TEMPLATE_TYPES.has(templateType)) {
+        counts[templateType] += 1;
+      }
+
+      return counts;
+    },
+    emptyTemplateSentCounts()
+  );
 
   return {
     sale,
     client,
     installer,
-    recipientPhone,
+    recipientPhones: {
+      sale: saleRecipientPhone,
+      client: clientRecipientPhone,
+    },
     contractNumber,
     contractValue,
     depositAmount: numberValue(sale.deposit_amount),
@@ -143,6 +219,7 @@ async function loadSaleSmsData(saleId: string) {
     outstandingAmount,
     payments,
     templates,
+    templateSentCounts,
     history: historyResponse.data || [],
   };
 }
@@ -184,7 +261,7 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({
       ok: true,
       data: {
-        recipientPhone: data.recipientPhone,
+        recipientPhones: data.recipientPhones,
         contractNumber: data.contractNumber,
         contractValue: data.contractValue,
         depositAmount: data.depositAmount,
@@ -195,6 +272,7 @@ export async function GET(request: Request, context: RouteContext) {
         installer: data.installer,
         payments: data.payments,
         templates: data.templates,
+        templateSentCounts: data.templateSentCounts,
         history: data.history,
       },
     });
@@ -220,12 +298,20 @@ export async function POST(request: Request, context: RouteContext) {
 
     const body = (await request.json()) as {
       templateType?: SaleSmsTemplateType;
-      message?: string;
+      recipientSource?: SmsRecipientSource;
     };
     const templateType = String(body.templateType || "") as SaleSmsTemplateType;
+    const recipientSource = String(body.recipientSource || "") as SmsRecipientSource;
 
     if (!TEMPLATE_TYPES.has(templateType)) {
       return NextResponse.json({ ok: false, error: "Nieprawidłowy szablon SMS." }, { status: 400 });
+    }
+
+    if (!(["sale", "client"] as SmsRecipientSource[]).includes(recipientSource)) {
+      return NextResponse.json(
+        { ok: false, error: "Wybierz numer ze sprzedaży albo z karty klienta." },
+        { status: 400 }
+      );
     }
 
     const data = await loadSaleSmsData(saleId);
@@ -238,15 +324,23 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const recipientPhone = normalizePolishPhoneNumber(data.recipientPhone);
+    const recipientPhone = normalizePolishPhoneNumber(
+      data.recipientPhones[recipientSource]
+    );
     if (!recipientPhone) {
       return NextResponse.json(
-        { ok: false, error: "Klient nie ma poprawnego polskiego numeru telefonu." },
+        {
+          ok: false,
+          error:
+            recipientSource === "sale"
+              ? "Sprzedaż nie ma poprawnego polskiego numeru telefonu."
+              : "Karta klienta nie ma poprawnego polskiego numeru telefonu.",
+        },
         { status: 400 }
       );
     }
 
-    const message = String(body.message || template.message).trim();
+    const message = removePolishDiacritics(template.message).trim();
     if (!message || message.length > 1200) {
       return NextResponse.json(
         { ok: false, error: "Treść SMS musi mieć od 1 do 1200 znaków." },
@@ -294,7 +388,10 @@ export async function POST(request: Request, context: RouteContext) {
         })
         .eq("id", smsMessageId);
 
-      if (data.sale.client_id) {
+      if (
+        data.sale.client_id &&
+        result.intendedRecipientPhone === result.actualRecipientPhone
+      ) {
         const { error: activityError } = await supabaseAdmin.from("client_activities").insert({
           client_id: data.sale.client_id,
           created_by: authorization.profile.id,

@@ -21,6 +21,36 @@ type SmsEnvironment = {
   [key: string]: string | undefined;
 };
 
+const POLISH_DIACRITICS: Record<string, string> = {
+  ą: "a",
+  ć: "c",
+  ę: "e",
+  ł: "l",
+  ń: "n",
+  ó: "o",
+  ś: "s",
+  ź: "z",
+  ż: "z",
+  Ą: "A",
+  Ć: "C",
+  Ę: "E",
+  Ł: "L",
+  Ń: "N",
+  Ó: "O",
+  Ś: "S",
+  Ź: "Z",
+  Ż: "Z",
+};
+
+export function removePolishDiacritics(value: unknown) {
+  return String(value ?? "")
+    .replace(
+      /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g,
+      (character) => POLISH_DIACRITICS[character] || character
+    )
+    .replace(/[\u00a0\u202f]/g, " ");
+}
+
 function getSmsApiConfig() {
   const token = process.env.SMSAPI_TOKEN;
   const sender = process.env.SMSAPI_SENDER?.trim() || "";
@@ -104,7 +134,7 @@ export function canSendAutomaticSmsToRecipient(
 export async function sendSmsApiMessage(input: SmsApiSendMessageInput): Promise<SmsApiSendMessageResult> {
   const config = getSmsApiConfig();
   const delivery = resolveSmsDelivery(input.to);
-  const message = String(input.message || "").trim();
+  const message = removePolishDiacritics(input.message).trim();
   const sender = String(input.sender || config.sender || "").trim();
 
   if (!message) {

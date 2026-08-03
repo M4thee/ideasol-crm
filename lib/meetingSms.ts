@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   canSendAutomaticSmsToRecipient,
   normalizePolishPhoneNumber,
+  removePolishDiacritics,
   sendSmsApiMessage,
 } from "@/lib/smsapi";
 
@@ -263,10 +264,12 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
 
   const sender = process.env.SMSAPI_SENDER?.trim() || "";
   const senderLabel = sender || "SMSAPI_DEFAULT";
-  const message = params.buildMessage({
-    eventAt: event.event_at as string,
-    advisor,
-  });
+  const message = removePolishDiacritics(
+    params.buildMessage({
+      eventAt: event.event_at as string,
+      advisor,
+    })
+  );
 
   const { data: smsLog, error: smsLogError } = await supabaseAdmin
     .from("sms_messages")
@@ -314,6 +317,21 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
 
     if (updateError) {
       console.error("Nie udało się zaktualizować logu SMS spotkania po wysyłce:", updateError);
+    }
+
+    const { error: activityError } = await supabaseAdmin
+      .from("client_activities")
+      .insert({
+        client_id: client.id,
+        created_by: params.triggeredByUserId || null,
+        activity_type: "sms",
+        contact_type: "sms",
+        status: "sent",
+        description: message,
+      });
+
+    if (activityError) {
+      console.error("Nie udało się zapisać aktywności SMS spotkania:", activityError);
     }
 
     return {

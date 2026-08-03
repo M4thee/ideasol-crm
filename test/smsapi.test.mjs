@@ -4,8 +4,20 @@ import test from "node:test";
 import {
   canSendAutomaticSmsToRecipient,
   normalizePolishPhoneNumber,
+  removePolishDiacritics,
   resolveSmsDelivery,
 } from "../lib/smsapi.ts";
+
+test("usuwa polskie znaki z treści SMS", () => {
+  assert.equal(
+    removePolishDiacritics("ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż"),
+    "ACELNOSZZ acelnoszz"
+  );
+  assert.equal(
+    removePolishDiacritics("Montaże u klienta Łukasz Żółć. 12\u00a0500 PLN"),
+    "Montaze u klienta Lukasz Zolc. 12 500 PLN"
+  );
+});
 
 test("normalizuje wyłącznie poprawne polskie numery", () => {
   assert.equal(normalizePolishPhoneNumber("500 600 700"), "48500600700");
