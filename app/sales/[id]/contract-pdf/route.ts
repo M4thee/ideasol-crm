@@ -26,8 +26,10 @@ const contractPdfPositions = {
     email: { x: 40, y: 459, size: 9 },
     phone: { x: 400, y: 459, size: 9 },
     salesRepresentative: { x: 140, y: 308, size: 9 },
+    businessPremisesCheck: { x: 39.5, y: 253.7 },
     scheduledVisitCheck: { x: 301, y: 253 },
     unscheduledVisitCheck: { x: 39, y: 239 },
+    distanceCheck: { x: 301, y: 239 },
     meetingDate: { x: 146, y: 225, size: 8 },
   },
   page2: {
@@ -116,6 +118,49 @@ const contractPdfPositions = {
     client2MarketingPhoneNo: { x: 67, y: 285 },
     client2PhotoConsentYes: { x: 40, y: 265 },
     client2PhotoConsentNo: { x: 67, y: 265 },
+  },
+  zm: {
+    prosument1: {
+      name: { x: 76, y: 605, size: 8 },
+      pesel: { x: 76, y: 577, size: 8 },
+      address: { x: 76, y: 548, size: 7 },
+      email: { x: 76, y: 491, size: 7.5 },
+      phone: { x: 76, y: 463, size: 7.5 },
+    },
+    prosument2: {
+      name: { x: 317, y: 605, size: 8 },
+      pesel: { x: 317, y: 577, size: 8 },
+      address: { x: 317, y: 548, size: 7 },
+      email: { x: 317, y: 491, size: 7.5 },
+      phone: { x: 317, y: 463, size: 7.5 },
+    },
+    installationAddress: { x: 76, y: 430, size: 7.5 },
+    meterAndPpe: { x: 76, y: 402, size: 7 },
+    osdChecks: {
+      enea: { x: 70.8, y: 377.8 },
+      tauron: { x: 70.8, y: 367.8 },
+      pge: { x: 70.8, y: 357.8 },
+      energa: { x: 70.8, y: 347.8 },
+      eon: { x: 70.8, y: 337.8 },
+    },
+  },
+  ppoz: {
+    placeAndDate: { x: 352, y: 724, size: 8 },
+    prosument1: {
+      name: { x: 41, y: 591, size: 8 },
+      pesel: { x: 41, y: 566, size: 8 },
+      address: { x: 41, y: 540, size: 7 },
+      email: { x: 41, y: 489, size: 7.5 },
+      phone: { x: 41, y: 464, size: 7.5 },
+    },
+    prosument2: {
+      name: { x: 325, y: 591, size: 8 },
+      pesel: { x: 325, y: 566, size: 8 },
+      address: { x: 325, y: 540, size: 7 },
+      email: { x: 325, y: 489, size: 7.5 },
+      phone: { x: 325, y: 464, size: 7.5 },
+    },
+    installationAddress: { x: 36, y: 421, size: 7.5 },
   },
 } as const;
 
@@ -318,9 +363,22 @@ function getCustomerData(sale: Record<string, any>, client: Record<string, any> 
       customerData.usable_area_m2 || customerData.usable_area || customerData.property_area_m2 || "",
     secondClientName: customerData.second_client_name || "",
     secondClientPesel: customerData.second_client_pesel || "",
+    client1MeterOwner: customerData.client1_meter_owner === true,
+    client2MeterOwner: customerData.client2_meter_owner === true,
+    osdOperator: customerData.osd_operator || "",
+    meterNumber: customerData.meter_number || "",
+    ppeNumber: customerData.ppe_number || "",
     contractNumber: sale.contract_number || customerData.contract_number || "",
     contractPlace: customerData.contract_place || "",
     contractDate: customerData.contract_date || "",
+    contractSigningLocation:
+      customerData.contract_signing_location ||
+      (customerData.visit_previously_scheduled === true
+        ? "scheduled_home_visit"
+        : customerData.visit_previously_scheduled === false
+          ? "unscheduled_home_visit"
+          : ""),
+    meetingAgreedDate: customerData.meeting_agreed_date || "",
     depositDueDate: customerData.deposit_due_date || "",
     paymentMethod: customerData.payment_method || sale.payment_method || "gotówka",
     ownContributionAmount: customerData.own_contribution_amount || sale.own_contribution_amount || 0,
@@ -1194,6 +1252,23 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const pdfDoc = await PDFDocument.load(templateBytes);
   pdfDoc.registerFontkit(fontkit);
 
+  const zmTemplateBytes = await readFile(
+    path.join(process.cwd(), "public", "templates", "ZM.pdf")
+  );
+  const zmTemplate = await PDFDocument.load(zmTemplateBytes);
+  const [zmPage] = await pdfDoc.copyPages(zmTemplate, [0]);
+  pdfDoc.addPage(zmPage);
+
+  const ppozTemplateBytes = await readFile(
+    path.join(process.cwd(), "public", "templates", "PPOZ.pdf")
+  );
+  const ppozTemplate = await PDFDocument.load(ppozTemplateBytes);
+  const ppozPages = await pdfDoc.copyPages(
+    ppozTemplate,
+    ppozTemplate.getPageIndices()
+  );
+  ppozPages.forEach((page) => pdfDoc.addPage(page));
+
   const regularFontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "NotoSans-Regular.ttf"));
   let boldFontBytes = regularFontBytes;
 
@@ -1221,9 +1296,23 @@ export async function GET(request: NextRequest, context: RouteContext) {
     usableAreaM2: getQueryValue(request, "usableAreaM2") || customerFromDb.usableAreaM2,
     secondClientName: getQueryValue(request, "secondClientName") || customerFromDb.secondClientName,
     secondClientPesel: getQueryValue(request, "secondClientPesel") || customerFromDb.secondClientPesel,
+    client1MeterOwner:
+      readBooleanLike(getQueryValue(request, "client1MeterOwner")) ??
+      customerFromDb.client1MeterOwner,
+    client2MeterOwner:
+      readBooleanLike(getQueryValue(request, "client2MeterOwner")) ??
+      customerFromDb.client2MeterOwner,
+    osdOperator: getQueryValue(request, "osdOperator") || customerFromDb.osdOperator,
+    meterNumber: getQueryValue(request, "meterNumber") || customerFromDb.meterNumber,
+    ppeNumber: getQueryValue(request, "ppeNumber") || customerFromDb.ppeNumber,
     contractNumber: getQueryValue(request, "contractNumber") || customerFromDb.contractNumber,
     contractPlace: getQueryValue(request, "contractPlace") || customerFromDb.contractPlace,
     contractDate: getQueryValue(request, "contractDate") || customerFromDb.contractDate,
+    contractSigningLocation:
+      getQueryValue(request, "contractSigningLocation") ||
+      customerFromDb.contractSigningLocation,
+    meetingAgreedDate:
+      getQueryValue(request, "meetingAgreedDate") || customerFromDb.meetingAgreedDate,
     depositDueDate: getQueryValue(request, "depositDueDate") || customerFromDb.depositDueDate,
     visitPreviouslyScheduled:
       getQueryValue(request, "visitPreviouslyScheduled") ||
@@ -1293,11 +1382,79 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
   }
 
-  function drawCheck(pageIndex: number, x: number, y: number) {
-    drawOnPage(pageIndex, "X", x + 0.9, y + 1.5, {
-      size: 8.5,
-      bold: true,
-      color: rgb(0.04, 0.45, 0.42),
+  function drawFittedOnPage(
+    pageIndex: number,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    options?: { size?: number; bold?: boolean }
+  ) {
+    const page = pages[pageIndex];
+
+    if (!page || !cleanText(text)) return;
+
+    const font = options?.bold ? boldFont : regularFont;
+    const normalizedText = preserveTechnicalAbbreviations(cleanText(text).toUpperCase());
+    let size = options?.size ?? 8;
+
+    while (size > 5 && font.widthOfTextAtSize(normalizedText, size) > maxWidth) {
+      size -= 0.25;
+    }
+
+    page.drawText(normalizedText, {
+      x,
+      y,
+      size,
+      font,
+      color: rgb(0.08, 0.1, 0.14),
+    });
+  }
+
+  function drawCheck(
+    pageIndex: number,
+    x: number,
+    y: number,
+    metrics?: { width: number; height: number }
+  ) {
+    const page = pages[pageIndex];
+
+    if (!page) return;
+
+    const defaultMetrics =
+      pageIndex === 0
+        ? { width: 5.6, height: 8.4 }
+        : pageIndex === 1
+          ? y < 300
+            ? { width: 12.05, height: 18.05 }
+            : { width: 9.47, height: 14.18 }
+          : pageIndex === 3
+            ? y < 600
+              ? { width: 12.05, height: 18.05 }
+              : { width: 6.89, height: 10.31 }
+            : pageIndex === 17
+              ? { width: 6.46, height: 9.67 }
+              : { width: 6.03, height: 9.02 };
+    const box = metrics || defaultMetrics;
+    const inset = Math.max(0.75, box.width * 0.14);
+    const side = box.width - inset * 2;
+    const left = x + inset;
+    const bottom = y + (box.height - side) / 2;
+    const right = left + side;
+    const top = bottom + side;
+    const color = rgb(0.04, 0.45, 0.42);
+
+    page.drawLine({
+      start: { x: left, y: bottom },
+      end: { x: right, y: top },
+      thickness: 0.9,
+      color,
+    });
+    page.drawLine({
+      start: { x: left, y: top },
+      end: { x: right, y: bottom },
+      thickness: 0.9,
+      color,
     });
   }
 
@@ -1536,20 +1693,31 @@ export async function GET(request: NextRequest, context: RouteContext) {
     { size: contractPdfPositions.page1.salesRepresentative.size, bold: true }
   );
 
-  const visitPreviouslyScheduled = String(customer.visitPreviouslyScheduled) === "true";
+  const signingPosition =
+    customer.contractSigningLocation === "business_premises"
+      ? contractPdfPositions.page1.businessPremisesCheck
+      : customer.contractSigningLocation === "scheduled_home_visit"
+        ? contractPdfPositions.page1.scheduledVisitCheck
+        : customer.contractSigningLocation === "unscheduled_home_visit"
+          ? contractPdfPositions.page1.unscheduledVisitCheck
+          : customer.contractSigningLocation === "distance"
+            ? contractPdfPositions.page1.distanceCheck
+          : null;
 
-  if (customer.visitPreviouslyScheduled !== "" && customer.visitPreviouslyScheduled !== undefined) {
-    const visitPosition = visitPreviouslyScheduled
-      ? contractPdfPositions.page1.scheduledVisitCheck
-      : contractPdfPositions.page1.unscheduledVisitCheck;
-
-    drawCheck(0, visitPosition.x, visitPosition.y);
+  if (signingPosition) {
+    drawCheck(0, signingPosition.x, signingPosition.y);
   }
 
-  if (customer.contractDate) {
+  const meetingDate = customer.meetingAgreedDate || customer.contractDate;
+
+  if (
+    meetingDate &&
+    customer.contractSigningLocation !== "unscheduled_home_visit" &&
+    customer.contractSigningLocation !== "distance"
+  ) {
     drawOnPage(
       0,
-      formatDateFromInput(customer.contractDate),
+      formatDateFromInput(meetingDate),
       contractPdfPositions.page1.meetingDate.x,
       contractPdfPositions.page1.meetingDate.y,
       { size: contractPdfPositions.page1.meetingDate.size }
@@ -2019,6 +2187,108 @@ if (hasOptimizers) {
     getConsentValue("client2PhotoConsent", "client2_photo_consent"),
     contractPdfPositions.page12.client2PhotoConsentYes,
     contractPdfPositions.page12.client2PhotoConsentNo
+  );
+
+  const allProsuments = [
+    {
+      selected: customer.client1MeterOwner,
+      name: customer.name,
+      pesel: customer.pesel,
+      address: customer.contractAddress,
+      email: customer.email,
+      phone: customer.phone,
+    },
+    {
+      selected: customer.client2MeterOwner,
+      name: customer.secondClientName,
+      pesel: customer.secondClientPesel,
+      address: customer.contractAddress,
+      email: customer.email,
+      phone: customer.phone,
+    },
+  ].filter((prosument) => prosument.name || prosument.pesel);
+  const selectedProsuments = allProsuments.filter((prosument) => prosument.selected);
+  const prosuments = selectedProsuments.length > 0 ? selectedProsuments : allProsuments;
+
+  const drawProsument = (
+    pageIndex: number,
+    prosument: (typeof prosuments)[number] | undefined,
+    positions: {
+      name: { x: number; y: number; size: number };
+      pesel: { x: number; y: number; size: number };
+      address: { x: number; y: number; size: number };
+      email: { x: number; y: number; size: number };
+      phone: { x: number; y: number; size: number };
+    },
+    maxWidth: number
+  ) => {
+    if (!prosument) return;
+
+    drawFittedOnPage(pageIndex, prosument.name, positions.name.x, positions.name.y, maxWidth, {
+      size: positions.name.size,
+      bold: true,
+    });
+    drawFittedOnPage(pageIndex, prosument.pesel, positions.pesel.x, positions.pesel.y, maxWidth, {
+      size: positions.pesel.size,
+    });
+    drawFittedOnPage(pageIndex, prosument.address, positions.address.x, positions.address.y, maxWidth, {
+      size: positions.address.size,
+    });
+    drawFittedOnPage(pageIndex, prosument.email, positions.email.x, positions.email.y, maxWidth, {
+      size: positions.email.size,
+    });
+    drawFittedOnPage(pageIndex, prosument.phone, positions.phone.x, positions.phone.y, maxWidth, {
+      size: positions.phone.size,
+    });
+  };
+
+  // Page 18 — ZM power of attorney, appended after the contract.
+  drawProsument(17, prosuments[0], contractPdfPositions.zm.prosument1, 215);
+  drawProsument(17, prosuments[1], contractPdfPositions.zm.prosument2, 220);
+  drawFittedOnPage(
+    17,
+    customer.installationAddress,
+    contractPdfPositions.zm.installationAddress.x,
+    contractPdfPositions.zm.installationAddress.y,
+    485,
+    { size: contractPdfPositions.zm.installationAddress.size }
+  );
+  drawFittedOnPage(
+    17,
+    `NR LICZNIKA: ${customer.meterNumber || "—"}    NUMER PPE: ${customer.ppeNumber || "—"}`,
+    contractPdfPositions.zm.meterAndPpe.x,
+    contractPdfPositions.zm.meterAndPpe.y,
+    470,
+    { size: contractPdfPositions.zm.meterAndPpe.size, bold: true }
+  );
+
+  const osdPosition =
+    contractPdfPositions.zm.osdChecks[
+      customer.osdOperator as keyof typeof contractPdfPositions.zm.osdChecks
+    ];
+
+  if (osdPosition) {
+    drawCheck(17, osdPosition.x, osdPosition.y);
+  }
+
+  // Pages 19–20 — full PPOZ file; CRM data is placed on its first page.
+  drawFittedOnPage(
+    18,
+    `${customer.contractPlace}, ${formatDateFromInput(customer.contractDate)}`,
+    contractPdfPositions.ppoz.placeAndDate.x,
+    contractPdfPositions.ppoz.placeAndDate.y,
+    205,
+    { size: contractPdfPositions.ppoz.placeAndDate.size }
+  );
+  drawProsument(18, prosuments[0], contractPdfPositions.ppoz.prosument1, 250);
+  drawProsument(18, prosuments[1], contractPdfPositions.ppoz.prosument2, 240);
+  drawFittedOnPage(
+    18,
+    customer.installationAddress,
+    contractPdfPositions.ppoz.installationAddress.x,
+    contractPdfPositions.ppoz.installationAddress.y,
+    520,
+    { size: contractPdfPositions.ppoz.installationAddress.size }
   );
 
   drawCalibrationMarkers();

@@ -7,11 +7,17 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
+import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 type SaleCustomerType = "b2c" | "b2b";
+type ContractSigningLocation =
+  | "business_premises"
+  | "scheduled_home_visit"
+  | "unscheduled_home_visit"
+  | "distance";
 
 type SaleFromOfferForm = {
   customerType: SaleCustomerType;
@@ -38,11 +44,17 @@ type SaleFromOfferForm = {
   depositAmount: string;
   secondClientName: string;
   secondClientPesel: string;
+  client1MeterOwner: boolean;
+  client2MeterOwner: boolean;
+  osdOperator: OsdOperator | "";
+  meterNumber: string;
+  ppeNumber: string;
   contractSequence: string;
   contractPlace: string;
   contractDate: string;
+  contractSigningLocation: ContractSigningLocation | "";
+  meetingAgreedDate: string;
   depositDueDate: string;
-  visitPreviouslyScheduled: boolean | null;
   realizationVariant: "1A" | "1B" | "";
   client1MarketingEmail: boolean;
   client1MarketingPhone: boolean;
@@ -799,11 +811,17 @@ function emptySaleForm(): SaleFromOfferForm {
     depositAmount: "",
     secondClientName: "",
     secondClientPesel: "",
+    client1MeterOwner: false,
+    client2MeterOwner: false,
+    osdOperator: "",
+    meterNumber: "",
+    ppeNumber: "",
     contractSequence: "01",
     contractPlace: "",
     contractDate,
+    contractSigningLocation: "",
+    meetingAgreedDate: "",
     depositDueDate: addDaysLocalDate(contractDate, 14),
-    visitPreviouslyScheduled: null,
     realizationVariant: "",
     client1MarketingEmail: false,
     client1MarketingPhone: false,
@@ -1227,11 +1245,17 @@ export default function OfferDetailsPage() {
       depositAmount: defaultDepositAmount,
       secondClientName: "",
       secondClientPesel: "",
+      client1MeterOwner: false,
+      client2MeterOwner: false,
+      osdOperator: "",
+      meterNumber: "",
+      ppeNumber: "",
       contractSequence: nextContractSequence,
       contractPlace: defaultContractPlace,
       contractDate,
+      contractSigningLocation: "",
+      meetingAgreedDate: "",
       depositDueDate: addDaysLocalDate(contractDate, 14),
-      visitPreviouslyScheduled: null,
       realizationVariant: "",
       client1MarketingEmail: false,
       client1MarketingPhone: false,
@@ -1349,16 +1373,56 @@ export default function OfferDetailsPage() {
       return "Uzupełnij datę podpisania umowy.";
     }
 
-    if (saleForm.visitPreviouslyScheduled === null) {
-      errors.push("visitPreviouslyScheduled");
+    if (!saleForm.contractSigningLocation) {
+      errors.push("contractSigningLocation");
       setInvalidFields(errors);
-      return "Wybierz, czy wizyta była wcześniej umówiona.";
+      return "Wybierz, gdzie i w jakich okolicznościach podpisano umowę.";
     }
 
-    if (!saleForm.realizationVariant) {
+    if (
+      saleForm.contractSigningLocation === "scheduled_home_visit" &&
+      !saleForm.meetingAgreedDate
+    ) {
+      errors.push("meetingAgreedDate");
+      setInvalidFields(errors);
+      return "Uzupełnij datę, kiedy zostało umówione spotkanie.";
+    }
+
+    if (
+      saleForm.contractSigningLocation !== "business_premises" &&
+      !saleForm.realizationVariant
+    ) {
       errors.push("realizationVariant");
       setInvalidFields(errors);
       return "Wybierz, kiedy mają rozpocząć się odpłatne usługi.";
+    }
+
+    if (saleForm.customerType === "b2c") {
+      if (!saleForm.client1MeterOwner && !saleForm.client2MeterOwner) {
+        errors.push("client1MeterOwner");
+        setInvalidFields(errors);
+        return "Zaznacz co najmniej jednego właściciela licznika.";
+      }
+
+      if (saleForm.client2MeterOwner && (!hasSecondClientName || !hasSecondClientPesel)) {
+        errors.push("client2MeterOwner");
+        setInvalidFields(errors);
+        return "Uzupełnij dane klienta 2, jeżeli jest właścicielem licznika.";
+      }
+
+      if (!saleForm.osdOperator) {
+        errors.push("osdOperator");
+        setInvalidFields(errors);
+        return "Wybierz operatora OSD.";
+      }
+
+      const ppeError = validatePpe(saleForm.ppeNumber, saleForm.osdOperator);
+
+      if (ppeError) {
+        errors.push("ppeNumber");
+        setInvalidFields(errors);
+        return ppeError;
+      }
     }
 
     if (saleForm.customerType === "b2c" && !saleForm.propertyType) {
@@ -1767,12 +1831,24 @@ export default function OfferDetailsPage() {
         usable_area_m2: Number(String(saleForm.usableAreaM2).replace(",", ".")) || null,
         second_client_name: saleForm.secondClientName,
         second_client_pesel: saleForm.secondClientPesel,
+        client1_meter_owner: saleForm.client1MeterOwner,
+        client2_meter_owner: saleForm.client2MeterOwner,
+        osd_operator: saleForm.osdOperator,
+        meter_number: saleForm.meterNumber.trim(),
+        ppe_number: normalizePpe(saleForm.ppeNumber),
         contract_place: saleForm.contractPlace,
         contract_date: saleForm.contractDate,
+        contract_signing_location: saleForm.contractSigningLocation,
+        meeting_agreed_date: saleForm.meetingAgreedDate,
         contract_number: contractNumber,
         contract_sequence: saleForm.contractSequence,
         deposit_due_date: saleForm.depositDueDate,
-        visit_previously_scheduled: saleForm.visitPreviouslyScheduled,
+        visit_previously_scheduled:
+          saleForm.contractSigningLocation === "scheduled_home_visit"
+            ? true
+            : saleForm.contractSigningLocation === "unscheduled_home_visit"
+              ? false
+              : null,
         realization_variant: saleForm.realizationVariant,
         deposit_amount: depositAmount,
         own_contribution_amount: ownContributionAmount,
@@ -2140,6 +2216,17 @@ if (updateClientStatusError) {
               </label>
 
               {saleForm.customerType === "b2c" && (
+                <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={saleForm.client1MeterOwner}
+                    onChange={(event) => updateSaleForm("client1MeterOwner", event.target.checked)}
+                  />
+                  Klient 1 — właściciel licznika
+                </label>
+              )}
+
+              {saleForm.customerType === "b2c" && (
                 <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm font-black text-slate-900">Drugi klient na umowie</p>
                   <p className="mt-1 text-xs text-slate-500">
@@ -2163,6 +2250,70 @@ if (updateClientStatusError) {
                         onChange={(event) => updateSaleForm("secondClientPesel", event.target.value)}
                         className={inputClass("secondClientPesel")}
                       />
+                    </label>
+                  </div>
+
+                  <label className="mt-4 flex items-center gap-3 rounded-xl bg-white p-3 text-sm font-semibold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={saleForm.client2MeterOwner}
+                      onChange={(event) => updateSaleForm("client2MeterOwner", event.target.checked)}
+                    />
+                    Klient 2 — właściciel licznika
+                  </label>
+                </div>
+              )}
+
+              {saleForm.customerType === "b2c" && (
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-black text-slate-900">Dane do pełnomocnictwa ZM</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Pełnomocnictwa ZM i PPOZ zostaną dołączone do PDF umowy.
+                  </p>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Operator OSD</span>
+                      <select
+                        value={saleForm.osdOperator}
+                        onChange={(event) =>
+                          updateSaleForm("osdOperator", event.target.value as OsdOperator | "")
+                        }
+                        className={inputClass("osdOperator")}
+                      >
+                        <option value="">Wybierz operatora</option>
+                        {OSD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Numer licznika</span>
+                      <input
+                        value={saleForm.meterNumber}
+                        onChange={(event) => updateSaleForm("meterNumber", event.target.value.trimStart())}
+                        className={inputClass("meterNumber")}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Numer PPE</span>
+                      <input
+                        inputMode="numeric"
+                        maxLength={18}
+                        value={saleForm.ppeNumber}
+                        onChange={(event) =>
+                          updateSaleForm("ppeNumber", event.target.value.replace(/\D/g, "").slice(0, 18))
+                        }
+                        placeholder="18 cyfr"
+                        className={inputClass("ppeNumber")}
+                      />
+                      <span className="mt-1 block text-xs text-slate-500">
+                        Sprawdzamy operatora, prefiks, długość i cyfrę kontrolną GS1.
+                      </span>
                     </label>
                   </div>
                 </div>
@@ -2323,7 +2474,7 @@ if (updateClientStatusError) {
                         "depositDueDate",
                         addDaysLocalDate(
                           saleForm.contractDate,
-                          saleForm.visitPreviouslyScheduled === false ? 30 : 14
+                          saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14
                         )
                       );
                     }
@@ -2431,7 +2582,7 @@ if (updateClientStatusError) {
                             "depositDueDate",
                             addDaysLocalDate(
                               contractDate,
-                              saleForm.visitPreviouslyScheduled === false ? 30 : 14
+                              saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14
                             )
                           );
                         }
@@ -2441,46 +2592,94 @@ if (updateClientStatusError) {
                   </label>
                 </div>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="mt-4 grid gap-2">
                   <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                     <input
                       type="radio"
-                      checked={saleForm.visitPreviouslyScheduled === true}
+                      checked={saleForm.contractSigningLocation === "business_premises"}
                       onChange={() => {
-                        updateSaleForm("visitPreviouslyScheduled", true);
+                        updateSaleForm("contractSigningLocation", "business_premises");
+                        updateSaleForm("realizationVariant", "");
                         if (saleForm.paymentMethod === "gotówka") {
                           updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
                         }
                       }}
                     />
-                    Wizyta wcześniej umówiona
+                    w lokalu przedsiębiorstwa Wykonawcy
                   </label>
 
                   <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                     <input
                       type="radio"
-                      checked={saleForm.visitPreviouslyScheduled === false}
+                      checked={saleForm.contractSigningLocation === "scheduled_home_visit"}
                       onChange={() => {
-                        updateSaleForm("visitPreviouslyScheduled", false);
+                        updateSaleForm("contractSigningLocation", "scheduled_home_visit");
+                        if (saleForm.paymentMethod === "gotówka") {
+                          updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
+                        }
+                      }}
+                    />
+                    poza lokalem podczas wcześniej umówionej wizyty u Klienta
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={saleForm.contractSigningLocation === "unscheduled_home_visit"}
+                      onChange={() => {
+                        updateSaleForm("contractSigningLocation", "unscheduled_home_visit");
+                        updateSaleForm("meetingAgreedDate", "");
                         if (saleForm.paymentMethod === "gotówka") {
                           updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 30));
                         }
                       }}
                     />
-                    Wizyta nieumówiona
+                    poza lokalem podczas nie umówionej wcześniej wizyty u Klienta
+                  </label>
+
+                  <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={saleForm.contractSigningLocation === "distance"}
+                      onChange={() => {
+                        updateSaleForm("contractSigningLocation", "distance");
+                        updateSaleForm("meetingAgreedDate", "");
+                        if (saleForm.paymentMethod === "gotówka") {
+                          updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
+                        }
+                      }}
+                    />
+                    na odległość, poza lokalem przedsiębiorcy
                   </label>
                 </div>
 
-                {saleForm.visitPreviouslyScheduled !== null && (
+                <label className="mt-4 block max-w-sm">
+                  <span className="text-sm font-semibold text-slate-700">
+                    Kiedy zostało umówione spotkanie
+                  </span>
+                  <input
+                    type="date"
+                    value={saleForm.meetingAgreedDate}
+                    onChange={(event) => updateSaleForm("meetingAgreedDate", event.target.value)}
+                    disabled={
+                      saleForm.contractSigningLocation === "unscheduled_home_visit" ||
+                      saleForm.contractSigningLocation === "distance"
+                    }
+                    className={inputClass("meetingAgreedDate")}
+                  />
+                </label>
+
+                {saleForm.contractSigningLocation &&
+                  saleForm.contractSigningLocation !== "business_premises" && (
                   <div className="mt-4 space-y-3">
                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
                       <p className="font-black">
-                        Termin odstąpienia: {saleForm.visitPreviouslyScheduled ? 14 : 30} dni
+                        Termin odstąpienia: {saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14} dni
                       </p>
                       <p className="mt-1 text-xs font-medium">
                         Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki.
                       </p>
-                      {!saleForm.visitPreviouslyScheduled && (
+                      {saleForm.contractSigningLocation === "unscheduled_home_visit" && (
                         <p className="mt-1 text-xs font-bold text-amber-800">
                           Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia.
                         </p>
@@ -2495,7 +2694,7 @@ if (updateClientStatusError) {
                         checked={saleForm.realizationVariant === "1A"}
                         onChange={() => updateSaleForm("realizationVariant", "1A")}
                       />
-                      Żądam rozpoczęcia przed upływem {saleForm.visitPreviouslyScheduled ? 14 : 30} dni
+                      Żądam rozpoczęcia przed upływem {saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14} dni
                     </label>
 
                     <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
@@ -2504,7 +2703,7 @@ if (updateClientStatusError) {
                         checked={saleForm.realizationVariant === "1B"}
                         onChange={() => updateSaleForm("realizationVariant", "1B")}
                       />
-                      Nie żądam wcześniejszego rozpoczęcia — usługi po {saleForm.visitPreviouslyScheduled ? 14 : 30} dniach
+                      Nie żądam wcześniejszego rozpoczęcia — usługi po {saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14} dniach
                     </label>
                     </div>
                   </div>
