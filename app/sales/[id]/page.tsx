@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type Sale = {
@@ -68,6 +68,22 @@ type SellerProfile = {
   display_name: string | null;
   email: string | null;
   role: string | null;
+};
+
+type Installer = {
+  id: string;
+  company_name: string;
+  address: string | null;
+  nip: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  active: boolean;
+};
+
+type InstallationOrder = {
+  installer_id: string;
+  installation_date: string | null;
 };
 
 
@@ -312,7 +328,9 @@ function formatYesNo(value: unknown) {
 
 export default function SalePage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const saleId = params.id;
+  const openedInstallationOrderFromQuery = useRef(false);
 
   const [sale, setSale] = useState<Sale | null>(null);
   const [client, setClient] = useState<Client | null>(null);
@@ -326,6 +344,15 @@ export default function SalePage() {
   const [soldItemsInput, setSoldItemsInput] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("sale");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
+  const [hasRealizationAccess, setHasRealizationAccess] = useState(false);
+
+  const [showInstallationOrderModal, setShowInstallationOrderModal] = useState(false);
+  const [installers, setInstallers] = useState<Installer[]>([]);
+  const [selectedInstallerId, setSelectedInstallerId] = useState("");
+  const [installationDate, setInstallationDate] = useState("");
+  const [loadingInstallationOrder, setLoadingInstallationOrder] = useState(false);
+  const [generatingInstallationOrder, setGeneratingInstallationOrder] = useState(false);
+  const [installationOrderStatus, setInstallationOrderStatus] = useState("");
 
   const [accessDenied, setAccessDenied] = useState(false);
 
@@ -354,6 +381,21 @@ export default function SalePage() {
   useEffect(() => {
     loadSale();
   }, [saleId]);
+
+  useEffect(() => {
+    const canGenerateInstallationOrder =
+      hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
+
+    if (
+      sale &&
+      canGenerateInstallationOrder &&
+      searchParams.get("installationOrder") === "1" &&
+      !openedInstallationOrderFromQuery.current
+    ) {
+      openedInstallationOrderFromQuery.current = true;
+      openInstallationOrderModal();
+    }
+  }, [sale, hasRealizationAccess, currentUserRole, searchParams]);
 
   useEffect(() => {
     async function loadPhotoPreviews() {
@@ -395,6 +437,7 @@ export default function SalePage() {
     } = await supabase.auth.getUser();
 
     let resolvedRole: UserRole = null;
+    let resolvedRealizationAccess = false;
 
     if (user) {
       setCurrentUserId(user.id);
@@ -426,6 +469,21 @@ export default function SalePage() {
       }
 
       setCurrentUserRole(resolvedRole);
+
+      const { data: permissionData, error: permissionError } = await supabase
+        .from("user_permissions")
+        .select("realization")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (permissionError) {
+        console.error("Błąd ładowania uprawnienia Realizacja:", permissionError);
+      }
+
+      resolvedRealizationAccess = Boolean(permissionData?.realization);
+      setHasRealizationAccess(resolvedRealizationAccess);
+    } else {
+      setHasRealizationAccess(false);
     }
 
     const normalizedRole = String(resolvedRole || "seller").toLowerCase();
@@ -1186,6 +1244,127 @@ export default function SalePage() {
       setSavingSaleNote(false);
     }
   }
+
+  async function openInstallationOrderModal() {
+    const canGenerateInstallationOrder =
+      hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
+
+    if (!sale || !canGenerateInstallationOrder) return;
+
+    setShowInstallationOrderModal(true);
+    setLoadingInstallationOrder(true);
+    setInstallationOrderStatus("");
+
+    const [installersResponse, orderResponse] = await Promise.all([
+      supabase
+        .from("installers")
+        .select("id, company_name, address, nip, contact_name, phone, email, active")
+        .order("active", { ascending: false })
+        .order("company_name", { ascending: true }),
+      supabase
+        .from("installation_orders")
+        .select("installer_id, installation_date")
+        .eq("sale_id", sale.id)
+        .maybeSingle(),
+    ]);
+
+    if (installersResponse.error) {
+      console.error("Błąd pobierania instalatorów", installersResponse.error);
+      setInstallationOrderStatus("Nie udało się pobrać listy instalatorów.");
+      setLoadingInstallationOrder(false);
+      return;
+    }
+
+    if (orderResponse.error) {
+      console.error("Błąd pobierania zlecenia montażu", orderResponse.error);
+    }
+
+    const existingOrder = (orderResponse.data as InstallationOrder | null) || null;
+    const loadedInstallers = (installersResponse.data || []) as Installer[];
+    const selectableInstallers = loadedInstallers.filter(
+      (installer) => installer.active || installer.id === existingOrder?.installer_id
+    );
+
+    setInstallers(selectableInstallers);
+    setSelectedInstallerId(
+      existingOrder?.installer_id ||
+        selectableInstallers.find((installer) => installer.active)?.id ||
+        ""
+    );
+    setInstallationDate(existingOrder?.installation_date || "");
+
+    if (selectableInstallers.length === 0) {
+      setInstallationOrderStatus(
+        "Brak aktywnych instalatorów. Dodaj instalatora w panelu administratora."
+      );
+    }
+
+    setLoadingInstallationOrder(false);
+  }
+
+  async function generateInstallationOrder() {
+    if (!sale || !selectedInstallerId || !installationDate) {
+      setInstallationOrderStatus("Wybierz instalatora i datę montażu.");
+      return;
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setInstallationOrderStatus("Sesja wygasła. Zaloguj się ponownie.");
+      return;
+    }
+
+    setGeneratingInstallationOrder(true);
+    setInstallationOrderStatus("Tworzenie PDF i dołączanie dokumentów...");
+
+    try {
+      const response = await fetch(`/api/sales/${sale.id}/installation-order-pdf`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          installerId: selectedInstallerId,
+          installationDate,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        setInstallationOrderStatus(
+          errorData?.error || "Nie udało się wygenerować zlecenia montażu."
+        );
+        return;
+      }
+
+      const pdfBlob = await response.blob();
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      const saleNumber = sale.sale_public_id
+        ? sale.sale_public_id
+        : sale.public_id
+          ? `SID${String(sale.public_id).padStart(6, "0")}`
+          : sale.id.slice(0, 8).toUpperCase();
+
+      link.href = pdfUrl;
+      link.download = `zlecenie-montazu-${saleNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 30_000);
+      setInstallationOrderStatus("Zlecenie montażu zostało wygenerowane.");
+    } catch (error) {
+      console.error("Błąd generowania zlecenia montażu", error);
+      setInstallationOrderStatus("Wystąpił błąd podczas generowania PDF.");
+    } finally {
+      setGeneratingInstallationOrder(false);
+    }
+  }
+
   async function deleteSale() {
     if (!sale || !canDeleteSale) return;
 
@@ -1390,6 +1569,8 @@ export default function SalePage() {
 
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
+  const canGenerateInstallationOrder =
+    hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
   const canUploadDocuments =
     currentUserRole === "admin" || Boolean(sale.seller_id && sale.seller_id === currentUserId);
   const canDeleteDocuments =
@@ -1418,6 +1599,16 @@ export default function SalePage() {
             >
               Generuj umowę
             </button>
+
+            {canGenerateInstallationOrder && (
+              <button
+                type="button"
+                onClick={openInstallationOrderModal}
+                className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-100"
+              >
+                Zlecenie montażu
+              </button>
+            )}
 
             {sale.client_id && (
               <button
@@ -2304,6 +2495,135 @@ export default function SalePage() {
           </section>
         </div>
       </div>
+
+      {showInstallationOrderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-sm font-semibold text-blue-600">Realizacja</p>
+                <h2 className="mt-1 text-2xl font-bold text-slate-900">
+                  Zlecenie montażu
+                </h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  PDF połączy kartę zlecenia, audyt techniczny oraz wszystkie zdjęcia sprzedaży.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallationOrderModal(false)}
+                disabled={generatingInstallationOrder}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="space-y-5 px-6 py-6">
+              {loadingInstallationOrder ? (
+                <div className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">
+                  Ładowanie instalatorów i danych zlecenia...
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-slate-700">
+                      Data montażu *
+                    </label>
+                    <input
+                      type="date"
+                      value={installationDate}
+                      onChange={(event) => setInstallationDate(event.target.value)}
+                      required
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      Data zostanie zapisana w CRM i umieszczona w wygenerowanym PDF.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-slate-700">
+                      Instalator
+                    </label>
+                    <select
+                      value={selectedInstallerId}
+                      onChange={(event) => setSelectedInstallerId(event.target.value)}
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                    >
+                      <option value="">Wybierz instalatora</option>
+                      {installers.map((installer) => (
+                        <option
+                          key={installer.id}
+                          value={installer.id}
+                          disabled={!installer.active && installer.id !== selectedInstallerId}
+                        >
+                          {installer.company_name}{installer.active ? "" : " (nieaktywny)"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedInstallerId ? (
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">
+                      {(() => {
+                        const installer = installers.find(
+                          (item) => item.id === selectedInstallerId
+                        );
+
+                        if (!installer) return null;
+
+                        return (
+                          <div className="space-y-1">
+                            <p className="font-bold">{installer.company_name}</p>
+                            <p>{installer.address || "Brak adresu"}</p>
+                            <p>NIP: {installer.nip || "Brak"}</p>
+                            <p>
+                              Kontakt: {installer.contact_name || "Brak"}
+                              {installer.phone ? `, ${installer.phone}` : ""}
+                              {installer.email ? `, ${installer.email}` : ""}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+                </>
+              )}
+
+              {installationOrderStatus ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                  {installationOrderStatus}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowInstallationOrderModal(false)}
+                  disabled={generatingInstallationOrder}
+                  className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="button"
+                  onClick={generateInstallationOrder}
+                  disabled={
+                    loadingInstallationOrder ||
+                    generatingInstallationOrder ||
+                    !selectedInstallerId ||
+                    !installationDate
+                  }
+                  className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {generatingInstallationOrder ? "Generowanie..." : "Generuj PDF"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import AdminPanel from "@/components/calculator/AdminPanel";
 import GrantAdminPanel from "@/components/calculator/GrantAdminPanel";
+import InstallersAdmin from "@/components/admin/InstallersAdmin";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
 
@@ -19,6 +20,7 @@ type Profile = {
   manager_id: string | null;
   is_active?: boolean;
   hidden_from_assignment?: boolean | null;
+  realization_access: boolean;
 };
 
 type ClientTag = {
@@ -80,7 +82,7 @@ export default function AdminUsersPage() {
   });
 
   const [activeSection, setActiveSection] = useState<
-    "users" | "tags" | "pricing" | "grant"
+    "users" | "installers" | "tags" | "pricing" | "grant"
   >("users");
   const [adminStatus, setAdminStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
@@ -422,7 +424,27 @@ export default function AdminUsersPage() {
       return;
     }
 
-    setProfiles((data ?? []) as Profile[]);
+    const { data: permissionsData, error: permissionsError } = await supabase
+      .from("user_permissions")
+      .select("user_id, realization");
+
+    if (permissionsError) {
+      console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
+    }
+
+    const realizationByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.realization),
+      ])
+    );
+
+    setProfiles(
+      (data ?? []).map((profile) => ({
+        ...profile,
+        realization_access: realizationByUserId.get(profile.id) || false,
+      })) as Profile[]
+    );
     setLoading(false);
   }
 
@@ -432,38 +454,70 @@ export default function AdminUsersPage() {
   ) {
     setSavingUserId(userId);
 
-    const payload: Partial<Profile> = {
-      ...values,
-    };
+    const { realization_access: realizationAccess, ...profileValues } = values;
+    const payload: Partial<Profile> = profileValues;
 
     console.log("UPDATE USER ID", userId);
     console.log("UPDATE PROFILE PAYLOAD", payload);
 
-    const response = await fetch("/api/admin/users/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        current_user_role: "admin",
-        user_id: userId,
-        values: payload,
-      }),
-    });
-    
-    const result = await response.json();
+    if (Object.keys(payload).length > 0) {
+      const response = await fetch("/api/admin/users/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          current_user_role: "admin",
+          user_id: userId,
+          values: payload,
+        }),
+      });
 
-    console.log("UPDATE API RESULT", result);
+      const result = await response.json();
 
-    if (!response.ok) {
-      console.error(
-        "Błąd aktualizacji użytkownika",
-        JSON.stringify(result, null, 2)
-      );
+      console.log("UPDATE API RESULT", result);
 
-      alert(result.error || "Nie udało się zapisać zmian.");
-      setSavingUserId(null);
-      return;
+      if (!response.ok) {
+        console.error(
+          "Błąd aktualizacji użytkownika",
+          JSON.stringify(result, null, 2)
+        );
+
+        alert(result.error || "Nie udało się zapisać zmian.");
+        setSavingUserId(null);
+        return;
+      }
+    }
+
+    if (realizationAccess !== undefined) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert("Sesja wygasła. Zaloguj się ponownie.");
+        setSavingUserId(null);
+        return;
+      }
+
+      const { error: permissionError } = await supabase
+        .from("user_permissions")
+        .upsert(
+          {
+            user_id: userId,
+            realization: realizationAccess,
+            updated_by: user.id,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+
+      if (permissionError) {
+        console.error("Błąd zapisu uprawnienia Realizacja", permissionError);
+        alert("Nie udało się zapisać uprawnienia Realizacja.");
+        setSavingUserId(null);
+        return;
+      }
     }
 
     await loadProfiles();
@@ -975,6 +1029,16 @@ export default function AdminUsersPage() {
         }`
       );
     }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "realization_access") &&
+      changes.realization_access !== profile.realization_access
+    ) {
+      changeLines.push(
+        `Uprawnienie Realizacja: ${profile.realization_access ? "Tak" : "Nie"} → ${
+          changes.realization_access ? "Tak" : "Nie"
+        }`
+      );
+    }
     const confirmed = window.confirm(
       `Czy na pewno chcesz zapisać zmiany?\n\n${changeLines.join("\n")}`
     );
@@ -1301,6 +1365,18 @@ export default function AdminUsersPage() {
 
               <button
                 type="button"
+                onClick={() => setActiveSection("installers")}
+                className={
+                  activeSection === "installers"
+                    ? "rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm"
+                    : "rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+                }
+              >
+                Instalatorzy
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveSection("pricing")}
                 className={
                   activeSection === "pricing"
@@ -1614,6 +1690,8 @@ export default function AdminUsersPage() {
               </>
             )}
 
+            {activeSection === "installers" && <InstallersAdmin />}
+
             {activeSection === "pricing" && (
               <AdminPanel
                 adminStatus={adminStatus}
@@ -1763,6 +1841,7 @@ export default function AdminUsersPage() {
                         </span>
                       </button>
                     </th>
+                    <th className="px-4 py-3 text-center">Realizacja</th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -1857,6 +1936,30 @@ export default function AdminUsersPage() {
                               </option>
                             ))}
                           </select>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={
+                                editedProfile.realization_access ??
+                                profile.realization_access
+                              }
+                              onChange={(event) => {
+                                updateEditedProfile(profile.id, {
+                                  realization_access: event.target.checked,
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 accent-emerald-600"
+                            />
+                            {(
+                              editedProfile.realization_access ??
+                              profile.realization_access
+                            )
+                              ? "Tak"
+                              : "Nie"}
+                          </label>
                         </td>
 
                         <td className="px-4 py-4">

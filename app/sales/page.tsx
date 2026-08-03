@@ -111,6 +111,7 @@ export default function SalesPage() {
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [visibilityScopeReady, setVisibilityScopeReady] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "owner" | "manager" | "seller" | "cc">("seller");
+  const [hasRealizationAccess, setHasRealizationAccess] = useState(false);
   const [salesOwners, setSalesOwners] = useState<SalesOwner[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [isSellerFilterOpen, setIsSellerFilterOpen] = useState(false);
@@ -128,7 +129,7 @@ export default function SalesPage() {
     if (!currentUserId || !visibilityScopeReady) return;
 
     loadSales();
-  }, [currentUserId, currentUserRole, selectedSellerIds, visibleUserIds, visibilityScopeReady]);
+  }, [currentUserId, currentUserRole, selectedSellerIds, visibleUserIds, visibilityScopeReady, hasRealizationAccess]);
 
   async function loadVisibleUserIds(
     userId: string,
@@ -201,7 +202,20 @@ export default function SalesPage() {
 
     const role = (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc";
 
+    const { data: permissionData, error: permissionError } = await supabase
+      .from("user_permissions")
+      .select("realization")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (permissionError) {
+      console.error("Błąd ładowania uprawnienia Realizacja", permissionError);
+    }
+
+    const realizationAccess = Boolean(permissionData?.realization);
+
     setCurrentUserRole(role);
+    setHasRealizationAccess(realizationAccess);
     const ids = await loadVisibleUserIds(user.id, role);
     setVisibilityScopeReady(true);
 
@@ -663,12 +677,22 @@ export default function SalesPage() {
                         </td>
 
                         <td className="px-4 py-4 sm:px-6 text-right">
-                          <a
-                            href={`/sales/${sale.id}`}
-                            className="inline-flex rounded-xl bg-emerald-500 px-4 py-2 font-bold text-white hover:bg-emerald-400"
-                          >
-                            Otwórz
-                          </a>
+                          <div className="flex justify-end gap-2">
+                            {(hasRealizationAccess || ["admin", "owner"].includes(currentUserRole)) && (
+                              <Link
+                                href={`/sales/${sale.id}?installationOrder=1`}
+                                className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 font-bold text-blue-700 hover:bg-blue-100"
+                              >
+                                Zlecenie montażu
+                              </Link>
+                            )}
+                            <Link
+                              href={`/sales/${sale.id}`}
+                              className="inline-flex rounded-xl bg-emerald-500 px-4 py-2 font-bold text-white hover:bg-emerald-400"
+                            >
+                              Otwórz
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     );
