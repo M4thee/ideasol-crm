@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import OpenOcrSourceImageButton from "@/components/clients/OpenOcrSourceImageButton";
 
 type ClientNote = {
   id: string;
@@ -9,6 +10,7 @@ type ClientNote = {
   created_at: string;
   created_by: string;
   author_name?: string | null;
+  source_image_path: string | null;
 };
 
 type ClientNotesProps = {
@@ -36,7 +38,7 @@ export default function ClientNotes({
 
     const { data: notesData, error: notesError } = await supabase
       .from("client_notes")
-      .select("id, content, created_at, created_by")
+      .select("id, content, created_at, created_by, source_image_path")
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
 
@@ -166,6 +168,9 @@ export default function ClientNotes({
               <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                 {note.content}
               </p>
+              {note.source_image_path ? (
+                <OpenOcrSourceImageButton noteId={note.id} />
+              ) : null}
             </div>
           ))}
         </div>

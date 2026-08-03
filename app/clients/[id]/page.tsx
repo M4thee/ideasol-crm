@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
+import OpenOcrSourceImageButton from "@/components/clients/OpenOcrSourceImageButton";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
   ContactFormPayload,
@@ -114,6 +115,7 @@ type ClientNote = {
   content: string;
   created_by: string | null;
   created_at: string;
+  source_image_path: string | null;
   author_name?: string | null;
   author_email?: string | null;
 };
@@ -481,7 +483,7 @@ export default function ClientPage() {
 
     const { data: notesData, error: notesError } = await supabase
       .from("client_notes")
-      .select("id, client_id, content, created_by, created_at")
+      .select("id, client_id, content, created_by, created_at, source_image_path")
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
 
@@ -2161,6 +2163,11 @@ export default function ClientPage() {
 
                             <div className="whitespace-pre-line bg-slate-100 p-3 text-[13px] leading-6 text-slate-800 transition-colors duration-200 group-hover:bg-slate-200 dark:bg-slate-950 dark:text-slate-100 dark:group-hover:bg-slate-900">
                               {renderNoteContentWithMentions(note.content)}
+                              {note.source_image_path ? (
+                                <div>
+                                  <OpenOcrSourceImageButton noteId={note.id} />
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         ))

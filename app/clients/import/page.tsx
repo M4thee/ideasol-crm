@@ -232,6 +232,7 @@ export default function ImportClientsPage() {
 
   const [advisors, setAdvisors] = useState<AdvisorOption[]>([]);
   const [imageRows, setImageRows] = useState<ImageImportDraftRow[]>([]);
+  const [imageFilesByRowId, setImageFilesByRowId] = useState<Record<string, File>>({});
   const [imageFileNames, setImageFileNames] = useState<string[]>([]);
   const [imageProcessing, setImageProcessing] = useState(false);
   const [imageImporting, setImageImporting] = useState(false);
@@ -364,6 +365,11 @@ export default function ImportClientsPage() {
 
     setImageRows((currentRows) =>
       currentRows.filter((row) => !selectedImageRowIds.includes(row.id))
+    );
+    setImageFilesByRowId((currentFiles) =>
+      Object.fromEntries(
+        Object.entries(currentFiles).filter(([rowId]) => !selectedImageRowIds.includes(rowId))
+      )
     );
     setSelectedImageRowIds([]);
   }
@@ -556,9 +562,9 @@ export default function ImportClientsPage() {
     };
   }
 
-  function createEmptyImageDraftRow(file: File, index: number): ImageImportDraftRow {
+  function createEmptyImageDraftRow(file: File): ImageImportDraftRow {
     return {
-      id: `${Date.now()}-${index}-${file.name}`,
+      id: crypto.randomUUID(),
       source_file_name: file.name,
       full_name: "",
       phone: "",
@@ -578,6 +584,7 @@ export default function ImportClientsPage() {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
     setImageRows([]);
+    setImageFilesByRowId({});
     setImageFileNames([]);
     setSelectedImageRowIds([]);
     setBulkAdvisorId("");
@@ -621,13 +628,12 @@ export default function ImportClientsPage() {
         }>;
       };
 
-      const mappedRows = imageFiles.map((file, index) => {
-        const resultRow = result.rows?.find(
-          (row) => row.source_file_name === file.name
-        );
+      const draftRows = imageFiles.map(createEmptyImageDraftRow);
+      const mappedRows = draftRows.map((draftRow, index) => {
+        const resultRow = result.rows?.[index];
 
         return {
-          ...createEmptyImageDraftRow(file, index),
+          ...draftRow,
           full_name: resultRow?.full_name || "",
           phone: normalizePhone(resultRow?.phone) || "",
           email: resultRow?.email || "",
@@ -644,12 +650,19 @@ export default function ImportClientsPage() {
       });
 
       setImageRows(mappedRows);
+      setImageFilesByRowId(
+        Object.fromEntries(draftRows.map((row, index) => [row.id, imageFiles[index]]))
+      );
     } catch (error) {
       console.error("Błąd OCR/importu zdjęć:", error);
       setImageErrorMessage(
         "Nie udało się automatycznie odczytać zdjęć. Tabela została przygotowana do ręcznego uzupełnienia."
       );
-      setImageRows(imageFiles.map(createEmptyImageDraftRow));
+      const draftRows = imageFiles.map(createEmptyImageDraftRow);
+      setImageRows(draftRows);
+      setImageFilesByRowId(
+        Object.fromEntries(draftRows.map((row, index) => [row.id, imageFiles[index]]))
+      );
     } finally {
       setImageProcessing(false);
     }
@@ -713,8 +726,15 @@ export default function ImportClientsPage() {
       setImageImportResult(null);
       setImageErrorMessage(null);
 
-      const { data: currentUserData } = await supabase.auth.getUser();
-      const currentUserId = currentUserData.user?.id || null;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const currentUserId = session?.user.id || null;
+
+      if (!session?.access_token || !currentUserId) {
+        setImageErrorMessage("Sesja wygasła. Zaloguj się ponownie.");
+        return;
+      }
 
       const rowsToInsert = validImageRows.map((row) => ({
         full_name: row.full_name || null,
@@ -767,8 +787,7 @@ export default function ImportClientsPage() {
         ])
       );
 
-      const notesToInsert = validImageRows
-        .map((row, index) => {
+      const notesToInsert = validImageRows.map((row, index) => {
           const clientId =
             insertedClientsByPhone.get(normalizeDuplicatePhone(row.phone)) ||
             insertedClientsByEmail.get(normalizeDuplicateText(row.email)) ||
@@ -777,50 +796,84 @@ export default function ImportClientsPage() {
 
           const noteContent = row.import_note?.trim();
 
-          if (!clientId || !noteContent) {
-            return null;
+          if (!clientId) {
+            throw new Error(`Nie udało się powiązać zdjęcia ${row.source_file_name} z klientem.`);
           }
 
           return {
             client_id: clientId,
-            content: `[IMPORT OCR]\n${noteContent}`,
+            content: `[IMPORT OCR]\n${noteContent || "Brak treści notatki rozpoznanej przez OCR."}`,
             created_by: currentUserId,
+            source_image_original_name: row.source_file_name,
+            source_image_import_key: row.id,
           };
-        })
-        .filter(Boolean) as {
-          client_id: string;
-          content: string;
-          created_by: string | null;
-        }[];
+        });
 
-      if (notesToInsert.length > 0) {
-        const { error: notesError } = await supabase
-          .from("client_notes")
-          .insert(notesToInsert);
+      const { data: insertedNotes, error: notesError } = await supabase
+        .from("client_notes")
+        .insert(notesToInsert)
+        .select("id, client_id, source_image_import_key");
 
-        if (notesError) {
-          console.error(
-            "Leady ze zdjęć zaimportowane, ale nie udało się zapisać notatek:",
-            notesError
-          );
+      if (notesError) {
+        console.error(
+          "Leady ze zdjęć zaimportowane, ale nie udało się zapisać notatek:",
+          notesError
+        );
 
-          setImageErrorMessage(
-            `Zaimportowano ${validImageRows.length} leadów ze zdjęć, ale nie udało się zapisać notatek OCR: ${notesError.message}`
-          );
-
-          return;
-        }
-
-        console.log("OCR notes inserted:", notesToInsert.length, notesToInsert);
+        setImageErrorMessage(
+          `Zaimportowano ${validImageRows.length} leadów ze zdjęć, ale nie udało się zapisać notatek OCR: ${notesError.message}`
+        );
+        return;
       }
 
-      if (validImageRows.some((row) => row.import_note?.trim()) && notesToInsert.length === 0) {
-        console.warn("OCR rozpoznał notatki, ale nie przygotowano żadnej notatki do zapisu.", {
-          validImageRows,
-          insertedClients,
+      const notesByImportKey = new Map(
+        (insertedNotes || []).map((note) => [note.source_image_import_key, note])
+      );
+      const sourceImageFormData = new FormData();
+      const sourceImageMetadata: Array<{
+        noteId: string;
+        clientId: string;
+        importKey: string;
+        fileField: string;
+      }> = [];
+
+      validImageRows.forEach((row, index) => {
+        const note = notesByImportKey.get(row.id);
+        const sourceFile = imageFilesByRowId[row.id];
+        if (!note || !sourceFile) return;
+
+        const fileField = `image_${index}`;
+        sourceImageFormData.append(fileField, sourceFile, sourceFile.name);
+        sourceImageMetadata.push({
+          noteId: note.id,
+          clientId: note.client_id,
+          importKey: row.id,
+          fileField,
         });
+      });
+
+      let uploadedSourceImages = 0;
+      if (sourceImageMetadata.length > 0) {
+        sourceImageFormData.append("metadata", JSON.stringify(sourceImageMetadata));
+        const sourceImagesResponse = await fetch("/api/clients/import-source-images", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: sourceImageFormData,
+        });
+        const sourceImagesResult = await sourceImagesResponse.json().catch(() => null);
+
+        uploadedSourceImages = Number(sourceImagesResult?.uploaded || 0);
+        if (!sourceImagesResponse.ok || uploadedSourceImages !== sourceImageMetadata.length) {
+          console.error("Nie wszystkie zdjęcia źródłowe OCR zostały zapisane", sourceImagesResult);
+          setImageErrorMessage(
+            `Leady i notatki zapisano, ale zdjęcia źródłowe: ${uploadedSourceImages}/${sourceImageMetadata.length}. ${
+              sourceImagesResult?.error || "Nie wszystkie pliki udało się zapisać."
+            }`
+          );
+        }
+      } else {
         setImageErrorMessage(
-          "Leady zostały zaimportowane, ale notatki OCR nie zostały zapisane, bo nie udało się powiązać ich z nowymi klientami."
+          "Leady i notatki zapisano, ale nie udało się zachować plików źródłowych OCR."
         );
       }
 
@@ -890,9 +943,10 @@ export default function ImportClientsPage() {
       }
 
       setImageImportResult(
-        `Zaimportowano ${validImageRows.length} leadów ze zdjęć do CRM. Notatki OCR: ${notesToInsert.length}. Tag: OCR.`
+        `Zaimportowano ${validImageRows.length} leadów ze zdjęć do CRM. Notatki OCR: ${notesToInsert.length}. Zdjęcia źródłowe: ${uploadedSourceImages}/${sourceImageMetadata.length}. Tag: OCR.`
       );
       setImageRows([]);
+      setImageFilesByRowId({});
       setImageFileNames([]);
       setSelectedImageRowIds([]);
       setBulkAdvisorId("");
