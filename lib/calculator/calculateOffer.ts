@@ -77,6 +77,8 @@ export type StorageItem = {
 type AdditionalServiceInput = {
   id?: number;
   name?: string;
+  unit_label?: string;
+  unitLabel?: string;
   price_net?: number;
   priceNet?: number;
   allows_quantity?: boolean;
@@ -686,6 +688,7 @@ export function calculateOffer(input: CalculateOfferInput) {
       return {
         id: service.id ?? null,
         name: String(service.name || "Usługa dodatkowa"),
+        unitLabel: String(service.unit_label || service.unitLabel || "szt.").trim() || "szt.",
         priceNet,
         quantity,
         totalNet: roundMoney(priceNet * quantity),
@@ -1099,7 +1102,9 @@ export function calculateOffer(input: CalculateOfferInput) {
         value: Math.round(pricing.placeholders.documentation),
       },
       ...additionalServices.map((service) => ({
-        label: service.quantity > 1 ? `${service.name} x ${service.quantity}` : service.name,
+        label: service.quantity > 1
+          ? `${service.name} x ${service.quantity} ${service.unitLabel}`
+          : service.name,
         value: Math.round(service.totalNet),
       })),
       {

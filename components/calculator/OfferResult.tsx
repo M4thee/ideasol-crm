@@ -53,6 +53,8 @@ type Result = {
   additionalServices?: {
     id: number | null;
     name: string;
+    unitLabel?: string;
+    unit_label?: string;
     priceNet: number;
     quantity: number;
     totalNet: number;
@@ -616,11 +618,13 @@ export default function OfferResult({
                       <div>
                         <p className="font-semibold text-slate-900">
                           {service.name}
-                          {service.quantity > 1 ? ` x ${service.quantity}` : ""}
+                          {service.quantity > 1
+                            ? ` x ${service.quantity} ${service.unitLabel || service.unit_label || "szt."}`
+                            : ""}
                         </p>
                         {service.quantity > 1 && (
                           <p className="mt-0.5 text-xs text-slate-500">
-                            {Math.round(service.priceNet).toLocaleString("pl-PL")} zł netto / szt.
+                            {Math.round(service.priceNet).toLocaleString("pl-PL")} zł netto / {service.unitLabel || service.unit_label || "szt."}
                           </p>
                         )}
                       </div>

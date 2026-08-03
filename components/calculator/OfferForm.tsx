@@ -486,6 +486,7 @@ export default function OfferForm({
       {
         id: service.id,
         name: service.name,
+        unit_label: service.unit_label?.trim() || "szt.",
         price_net: Number(service.price_net || 0),
         allows_quantity: Boolean(service.allows_quantity),
         quantity: 1,
@@ -1212,14 +1213,16 @@ export default function OfferForm({
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })} zł netto
-                            {service.allows_quantity ? " / szt." : ""}
+                            {service.allows_quantity ? ` / ${service.unit_label?.trim() || "szt."}` : ""}
                           </div>
                         </div>
                       </label>
 
                       {selectedService && service.allows_quantity && (
                         <label className="block sm:w-32">
-                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Ilość szt.</span>
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            Ilość {service.unit_label?.trim() || "szt."}
+                          </span>
                           <input
                             className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/20"
                             type="number"

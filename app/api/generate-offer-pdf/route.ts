@@ -146,7 +146,7 @@ function getSubsidyTotal(data: OfferPdfData) {
 
 function normalizeAdditionalServices(value: unknown) {
   if (!Array.isArray(value)) {
-    return [] as Array<{ name: string; quantity: number; unitNet: number }>;
+    return [] as Array<{ name: string; quantity: number; unitLabel: string; unitNet: number }>;
   }
 
   return value
@@ -155,6 +155,7 @@ function normalizeAdditionalServices(value: unknown) {
         return {
           name: item.trim(),
           quantity: 1,
+          unitLabel: "szt.",
           unitNet: 0,
         };
       }
@@ -164,6 +165,9 @@ function normalizeAdditionalServices(value: unknown) {
       const service = item as Record<string, unknown>;
       const name = String(service.name || service.label || service.displayName || "").trim();
       const quantity = Number(service.quantity || service.qty || 1);
+      const unitLabel = String(
+        service.unit_label || service.unitLabel || service.unit || "szt."
+      ).trim().slice(0, 12) || "szt.";
       const unitNet = Number(service.priceNet || service.unitNet || service.netPrice || service.net_price || 0);
       const totalNet = Number(service.totalNet || service.total_net || 0);
 
@@ -172,10 +176,11 @@ function normalizeAdditionalServices(value: unknown) {
       return {
         name,
         quantity: Math.max(quantity, 1),
+        unitLabel,
         unitNet: unitNet || (totalNet && quantity ? totalNet / quantity : 0),
       };
     })
-    .filter(Boolean) as Array<{ name: string; quantity: number; unitNet: number }>;
+    .filter(Boolean) as Array<{ name: string; quantity: number; unitLabel: string; unitNet: number }>;
 }
 
 function getHeadline(offerType?: string) {
@@ -285,10 +290,16 @@ function getOfferRows(data: OfferPdfData) {
 
   let lp = 1;
   const rows: Array<
-    [number, string, number, number, number, number, number, number, boolean]
+    [number, string, number, number, number, number, number, number, boolean, string]
   > = [];
 
-  function pushRow(name: string, quantity: number, unitNet: number, isAdditional = false) {
+  function pushRow(
+    name: string,
+    quantity: number,
+    unitNet: number,
+    isAdditional = false,
+    unitLabel = "szt."
+  ) {
     const safeQuantity = Math.max(Number(quantity || 1), 1);
     const safeUnitNet = Number(unitNet || 0);
     const valueNet = safeUnitNet * safeQuantity;
@@ -305,6 +316,7 @@ function getOfferRows(data: OfferPdfData) {
       vatValue,
       valueGross,
       isAdditional,
+      unitLabel,
     ]);
   }
 
@@ -333,7 +345,8 @@ function getOfferRows(data: OfferPdfData) {
       service.name,
       Number(service.quantity || 1) * pdfQuantity,
       Number(service.unitNet || 0),
-      true
+      true,
+      service.unitLabel
     );
   });
 
@@ -375,6 +388,7 @@ function getOfferRows(data: OfferPdfData) {
         correctedVatValue,
         correctedValueGross,
         targetRow[8],
+        targetRow[9],
       ];
     }
   }
@@ -595,7 +609,7 @@ async function createOfferPdf(data: OfferPdfData) {
     });
     y -= 86;
   } else {
-    rows.forEach(([lp, name, quantity, unitNet, valueNet, vatPercent, vatValue, valueGross, isAdditional], index) => {
+    rows.forEach(([lp, name, quantity, unitNet, valueNet, vatPercent, vatValue, valueGross, isAdditional, unitLabel], index) => {
       const rowHeight = rowHeights[index];
 
       if (rowY - rowHeight < 110) {
@@ -637,7 +651,7 @@ async function createOfferPdf(data: OfferPdfData) {
         });
       });
 
-      page.drawText(`${quantity} szt.`, {
+      page.drawText(`${quantity} ${unitLabel || "szt."}`, {
         x: marginX + 220,
         y: amountY,
         size: 6.9,
