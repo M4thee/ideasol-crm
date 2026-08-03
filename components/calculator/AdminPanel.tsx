@@ -14,6 +14,8 @@ type PanelItem = {
   power_wp: number;
   price_net: number;
   catalog_card_url: string | null;
+  warranty_guarantor: string | null;
+  warranty_period: string | null;
   active: boolean;
 };
 
@@ -28,6 +30,8 @@ type InverterItem = {
   max_pv_kw: number;
   price_net: number;
   catalog_card_url: string | null;
+  warranty_guarantor: string | null;
+  warranty_period: string | null;
   is_eu: boolean;
   has_ems: boolean;
   active: boolean;
@@ -45,6 +49,8 @@ type StorageItem = {
   price_net: number;
   installation_net: number;
   catalog_card_url: string | null;
+  warranty_guarantor: string | null;
+  warranty_period: string | null;
   is_eu: boolean;
   active: boolean;
 };
@@ -75,6 +81,8 @@ const EMPTY_PANEL_FORM = {
   power_wp: "450",
   price_net: "0",
   catalog_card_url: "",
+  warranty_guarantor: "",
+  warranty_period: "",
 };
 
 const EMPTY_INVERTER_FORM = {
@@ -87,6 +95,8 @@ const EMPTY_INVERTER_FORM = {
   max_pv_kw: "10",
   price_net: "0",
   catalog_card_url: "",
+  warranty_guarantor: "",
+  warranty_period: "",
   is_eu: false,
   has_ems: false,
 };
@@ -102,6 +112,8 @@ const EMPTY_STORAGE_FORM = {
   price_net: "0",
   installation_net: "1500",
   catalog_card_url: "",
+  warranty_guarantor: "",
+  warranty_period: "",
   is_eu: false,
 };
 
@@ -145,7 +157,7 @@ export default function AdminPanel({
   async function loadPanels() {
     const { data, error } = await supabase
       .from("panels")
-      .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, catalog_card_url, active")
+      .select("id, code, manufacturer, model, display_name, name, power_wp, price_net, catalog_card_url, warranty_guarantor, warranty_period, active")
       .eq("active", true)
       .order("power_wp", { ascending: false });
 
@@ -160,7 +172,7 @@ export default function AdminPanel({
   async function loadInverters() {
     const { data, error } = await supabase
       .from("inverters")
-      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
+      .select("id, manufacturer, model, display_name, name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, warranty_guarantor, warranty_period, is_eu, has_ems, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true });
 
@@ -176,7 +188,7 @@ export default function AdminPanel({
   async function loadStorages() {
     const { data, error } = await supabase
       .from("storages")
-      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
+      .select("id, code, manufacturer, model, display_name, name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, warranty_guarantor, warranty_period, is_eu, active")
       .eq("active", true)
       .order("voltage_type", { ascending: true })
       .order("capacity_kwh", { ascending: true });
@@ -331,6 +343,8 @@ export default function AdminPanel({
           power_wp: Number(panel.power_wp),
           price_net: Number(panel.price_net),
           catalog_card_url: panel.catalog_card_url?.trim() || null,
+          warranty_guarantor: panel.warranty_guarantor?.trim() || null,
+          warranty_period: panel.warranty_period?.trim() || null,
           active: Boolean(panel.active),
         })
         .eq("id", panel.id);
@@ -363,6 +377,8 @@ export default function AdminPanel({
       power_wp: Number(panelForm.power_wp),
       price_net: Number(panelForm.price_net),
       catalog_card_url: panelForm.catalog_card_url.trim() || null,
+      warranty_guarantor: panelForm.warranty_guarantor.trim() || null,
+      warranty_period: panelForm.warranty_period.trim() || null,
       active: true,
     });
 
@@ -430,6 +446,8 @@ export default function AdminPanel({
           max_pv_kw: Number(inverter.max_pv_kw),
           price_net: Number(inverter.price_net),
           catalog_card_url: inverter.catalog_card_url?.trim() || null,
+          warranty_guarantor: inverter.warranty_guarantor?.trim() || null,
+          warranty_period: inverter.warranty_period?.trim() || null,
           is_eu: Boolean(inverter.is_eu),
           has_ems: Boolean(inverter.has_ems),
           active: Boolean(inverter.active),
@@ -466,6 +484,8 @@ export default function AdminPanel({
       max_pv_kw: Number(inverterForm.max_pv_kw),
       price_net: Number(inverterForm.price_net),
       catalog_card_url: inverterForm.catalog_card_url.trim() || null,
+      warranty_guarantor: inverterForm.warranty_guarantor.trim() || null,
+      warranty_period: inverterForm.warranty_period.trim() || null,
       is_eu: Boolean(inverterForm.is_eu),
       has_ems: Boolean(inverterForm.has_ems),
       active: true,
@@ -535,6 +555,8 @@ export default function AdminPanel({
           price_net: parseDecimal(storage.price_net),
           installation_net: parseDecimal(storage.installation_net),
           catalog_card_url: storage.catalog_card_url?.trim() || null,
+          warranty_guarantor: storage.warranty_guarantor?.trim() || null,
+          warranty_period: storage.warranty_period?.trim() || null,
           is_eu: Boolean(storage.is_eu),
           active: Boolean(storage.active),
         })
@@ -570,6 +592,8 @@ export default function AdminPanel({
       price_net: parseDecimal(storageForm.price_net),
       installation_net: parseDecimal(storageForm.installation_net),
       catalog_card_url: storageForm.catalog_card_url.trim() || null,
+      warranty_guarantor: storageForm.warranty_guarantor.trim() || null,
+      warranty_period: storageForm.warranty_period.trim() || null,
       is_eu: Boolean(storageForm.is_eu),
       active: true,
     });
@@ -1080,6 +1104,20 @@ export default function AdminPanel({
                 value={panelForm.catalog_card_url}
                 onChange={(e) => setPanelForm({ ...panelForm, catalog_card_url: e.target.value })}
               />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-4"
+                placeholder="Gwarant, np. producent lub dystrybutor"
+                value={panelForm.warranty_guarantor}
+                onChange={(e) => setPanelForm({ ...panelForm, warranty_guarantor: e.target.value })}
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-3"
+                placeholder="Okres gwarancji, np. 25 lat"
+                value={panelForm.warranty_period}
+                onChange={(e) => setPanelForm({ ...panelForm, warranty_period: e.target.value })}
+              />
             </div>
 
             <button
@@ -1148,6 +1186,20 @@ export default function AdminPanel({
                     placeholder="Link do karty katalogowej"
                     value={panel.catalog_card_url || ""}
                     onChange={(e) => updatePanel(panel.id, "catalog_card_url", e.target.value)}
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Gwarant"
+                    value={panel.warranty_guarantor || ""}
+                    onChange={(e) => updatePanel(panel.id, "warranty_guarantor", e.target.value)}
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Okres gwarancji"
+                    value={panel.warranty_period || ""}
+                    onChange={(e) => updatePanel(panel.id, "warranty_period", e.target.value)}
                   />
 
                   <button
@@ -1254,6 +1306,24 @@ export default function AdminPanel({
                 value={inverterForm.catalog_card_url}
                 onChange={(e) =>
                   setInverterForm({ ...inverterForm, catalog_card_url: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-4"
+                placeholder="Gwarant, np. producent lub dystrybutor"
+                value={inverterForm.warranty_guarantor}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, warranty_guarantor: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-3"
+                placeholder="Okres gwarancji, np. 12 lat"
+                value={inverterForm.warranty_period}
+                onChange={(e) =>
+                  setInverterForm({ ...inverterForm, warranty_period: e.target.value })
                 }
               />
 
@@ -1392,6 +1462,24 @@ export default function AdminPanel({
                     }
                   />
 
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Gwarant"
+                    value={inverter.warranty_guarantor || ""}
+                    onChange={(e) =>
+                      updateInverter(inverter.id, "warranty_guarantor", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Okres gwarancji"
+                    value={inverter.warranty_period || ""}
+                    onChange={(e) =>
+                      updateInverter(inverter.id, "warranty_period", e.target.value)
+                    }
+                  />
+
                   <label className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
                     <input
                       type="checkbox"
@@ -1526,6 +1614,24 @@ export default function AdminPanel({
                 }
               />
 
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-2"
+                placeholder="Gwarant, np. producent lub dystrybutor"
+                value={storageForm.warranty_guarantor}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, warranty_guarantor: e.target.value })
+                }
+              />
+
+              <input
+                className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 md:col-span-2"
+                placeholder="Okres gwarancji, np. 10 lat"
+                value={storageForm.warranty_period}
+                onChange={(e) =>
+                  setStorageForm({ ...storageForm, warranty_period: e.target.value })
+                }
+              />
+
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-800 md:col-span-4">
                 <input
                   type="checkbox"
@@ -1643,6 +1749,24 @@ export default function AdminPanel({
                     value={storage.catalog_card_url || ""}
                     onChange={(e) =>
                       updateStorage(storage.id, "catalog_card_url", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Gwarant"
+                    value={storage.warranty_guarantor || ""}
+                    onChange={(e) =>
+                      updateStorage(storage.id, "warranty_guarantor", e.target.value)
+                    }
+                  />
+
+                  <input
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 lg:col-span-2"
+                    placeholder="Okres gwarancji"
+                    value={storage.warranty_period || ""}
+                    onChange={(e) =>
+                      updateStorage(storage.id, "warranty_period", e.target.value)
                     }
                   />
 

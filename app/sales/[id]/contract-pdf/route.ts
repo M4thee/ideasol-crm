@@ -4,6 +4,7 @@ import fontkit from "@pdf-lib/fontkit";
 import { createClient } from "@supabase/supabase-js";
 import { readFile } from "fs/promises";
 import path from "path";
+import { makeContractWarrantyRow } from "@/lib/contractWarranty";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +90,23 @@ const contractPdfPositions = {
     finalPayment: { x: 140, y: 470, size: 9 },
     totalGross: { x: 332, y: 780, size: 9, maxWidth: 85 },
     totalGrossWords: { x: 42, y: 759, size: 8 },
+  },
+  page6: {
+    panel: {
+      producerAndModel: { x: 169, y: 695, size: 7, maxWidth: 126 },
+      guarantor: { x: 300, y: 695, size: 7, maxWidth: 126 },
+      period: { x: 431, y: 695, size: 7, maxWidth: 126 },
+    },
+    inverter: {
+      producerAndModel: { x: 169, y: 675, size: 7, maxWidth: 126 },
+      guarantor: { x: 300, y: 675, size: 7, maxWidth: 126 },
+      period: { x: 431, y: 675, size: 7, maxWidth: 126 },
+    },
+    storage: {
+      producerAndModel: { x: 169, y: 655, size: 7, maxWidth: 126 },
+      guarantor: { x: 300, y: 655, size: 7, maxWidth: 126 },
+      period: { x: 431, y: 655, size: 7, maxWidth: 126 },
+    },
   },
   page8: {
     contractNumber: { x: 51, y: 762, size: 10 },
@@ -1339,6 +1357,51 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const additionalProductsData = getAdditionalProductsData(sale);
   const technicalData = getTechnicalData(sale);
+  const storageDetails = parseStorageDetails(technicalData);
+  const [panelsResult, invertersResult, storagesResult] = await Promise.all([
+    supabase
+      .from("panels")
+      .select("code, manufacturer, model, display_name, name, warranty_guarantor, warranty_period"),
+    supabase
+      .from("inverters")
+      .select("manufacturer, model, display_name, name, warranty_guarantor, warranty_period"),
+    supabase
+      .from("storages")
+      .select("code, manufacturer, model, display_name, name, warranty_guarantor, warranty_period"),
+  ]);
+
+  if (panelsResult.error || invertersResult.error || storagesResult.error) {
+    console.error("Nie udało się pobrać danych gwarancyjnych urządzeń", {
+      panels: panelsResult.error?.message,
+      inverters: invertersResult.error?.message,
+      storages: storagesResult.error?.message,
+    });
+  }
+
+  const warrantyRows = {
+    panel: technicalData.hasPv
+      ? makeContractWarrantyRow(
+          panelsResult.data || [],
+          technicalData.panelModel,
+          humanizeEquipmentName(technicalData.panelModel)
+        )
+      : null,
+    inverter:
+      technicalData.hasInverter && !technicalData.clientHasOwnHybridInverter
+        ? makeContractWarrantyRow(
+            invertersResult.data || [],
+            technicalData.inverterModel,
+            humanizeEquipmentName(technicalData.inverterModel)
+          )
+        : null,
+    storage: technicalData.hasStorage
+      ? makeContractWarrantyRow(
+          storagesResult.data || [],
+          technicalData.storageModel,
+          [storageDetails.brand, storageDetails.model].filter(Boolean).join(" ")
+        )
+      : null,
+  };
   const saleNumber = customer.contractNumber || sale.contract_number || sale.public_id || sale.sale_id || sale.id;
   const totalGross = getQueryValue(request, "totalGross") || sale.contract_value || sale.total_gross || sale.final_gross || 0;
   const depositGross = getQueryValue(request, "depositAmount") || sale.deposit_amount || sale.deposit_gross || 0;
@@ -1804,7 +1867,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const storageDetails = parseStorageDetails(technicalData);
   if (storageDetails.brand) {
     drawOnPage(
       1,
@@ -1926,6 +1988,40 @@ if (hasOptimizers) {
   if (mountingTypeKey.includes("plaski") || mountingTypeKey.includes("papa") || mountingTypeKey.includes("membrana")) {
     drawCheck(1, contractPdfPositions.page2.mountingFlatRoofCheck.x, contractPdfPositions.page2.mountingFlatRoofCheck.y);
   }
+
+  // Page 6 — warranty details from the admin equipment catalog.
+  Object.entries(warrantyRows).forEach(([equipmentType, row]) => {
+    if (!row) return;
+
+    const positions = contractPdfPositions.page6[
+      equipmentType as keyof typeof contractPdfPositions.page6
+    ];
+
+    drawFittedOnPage(
+      5,
+      row.producerAndModel,
+      positions.producerAndModel.x,
+      positions.producerAndModel.y,
+      positions.producerAndModel.maxWidth,
+      { size: positions.producerAndModel.size }
+    );
+    drawFittedOnPage(
+      5,
+      row.guarantor,
+      positions.guarantor.x,
+      positions.guarantor.y,
+      positions.guarantor.maxWidth,
+      { size: positions.guarantor.size }
+    );
+    drawFittedOnPage(
+      5,
+      row.period,
+      positions.period.x,
+      positions.period.y,
+      positions.period.maxWidth,
+      { size: positions.period.size }
+    );
+  });
 
   // Page 4 — payment section
   if (customer.propertyType === "single_family") {
