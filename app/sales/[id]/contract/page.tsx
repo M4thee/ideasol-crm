@@ -12,6 +12,8 @@ type ContractForm = {
   contractAddress: string;
   correspondenceAddress: string;
   installationAddress: string;
+  propertyType: string;
+  usableAreaM2: string;
   contractNumber: string;
   secondClientName: string;
   secondClientPesel: string;
@@ -45,6 +47,17 @@ type ContractForm = {
 
 function todayLocalDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysLocalDate(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function asText(value: unknown) {
@@ -94,6 +107,8 @@ export default function SaleContractPage() {
     contractAddress: "",
     correspondenceAddress: "",
     installationAddress: "",
+    propertyType: "",
+    usableAreaM2: "",
     contractNumber: "",
     secondClientName: "",
     secondClientPesel: "",
@@ -208,6 +223,10 @@ export default function SaleContractPage() {
       contractAddress,
       correspondenceAddress: customerData.correspondence_address || contractAddress,
       installationAddress,
+      propertyType: customerData.property_type || customerData.building_type || "",
+      usableAreaM2: asText(
+        customerData.usable_area_m2 || customerData.usable_area || customerData.property_area_m2
+      ),
       contractNumber,
       secondClientName: customerData.second_client_name || "",
       secondClientPesel: customerData.second_client_pesel || "",
@@ -274,6 +293,23 @@ export default function SaleContractPage() {
       return;
     }
 
+    if (!form.propertyType) {
+      setError("Wybierz rodzaj nieruchomości przed wygenerowaniem PDF.");
+      return;
+    }
+
+    const usableArea = Number(form.usableAreaM2.replace(",", "."));
+
+    if (!Number.isFinite(usableArea) || usableArea <= 0) {
+      setError("Uzupełnij prawidłową powierzchnię użytkową nieruchomości.");
+      return;
+    }
+
+    if (!form.visitPreviouslyScheduled || !form.realizationVariant) {
+      setError("Uzupełnij sposób zawarcia umowy i moment rozpoczęcia odpłatnych usług.");
+      return;
+    }
+
     const { data: existingContract, error: duplicateCheckError } = await supabase
       .from("sales")
       .select("id, contract_number")
@@ -299,6 +335,8 @@ export default function SaleContractPage() {
       contractAddress: form.contractAddress,
       correspondenceAddress: form.correspondenceAddress,
       installationAddress: form.installationAddress,
+      propertyType: form.propertyType,
+      usableAreaM2: form.usableAreaM2,
       contractNumber: normalizedContractNumber,
       secondClientName: form.secondClientName,
       secondClientPesel: form.secondClientPesel,
@@ -485,6 +523,37 @@ export default function SaleContractPage() {
             </label>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-bold text-slate-700">Rodzaj nieruchomości</span>
+                <select
+                  value={form.propertyType}
+                  onChange={(event) => updateField("propertyType", event.target.value)}
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                >
+                  <option value="">Wybierz</option>
+                  <option value="single_family">Budynek mieszkalny jednorodzinny</option>
+                  <option value="apartment">Lokal mieszkalny w budynku wielorodzinnym</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-bold text-slate-700">Powierzchnia użytkowa</span>
+                <div className="relative mt-2">
+                  <input
+                    inputMode="decimal"
+                    value={form.usableAreaM2}
+                    onChange={(event) => updateField("usableAreaM2", event.target.value)}
+                    placeholder="np. 145,5"
+                    className="h-11 w-full rounded-xl border border-slate-300 px-4 pr-12 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm font-bold text-slate-500">
+                    m²
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="block md:col-span-2">
                 <span className="text-sm font-bold text-slate-700">Numer umowy</span>
                 <input
@@ -508,7 +577,20 @@ export default function SaleContractPage() {
                 <input
                   type="date"
                   value={form.contractDate}
-                  onChange={(event) => updateField("contractDate", event.target.value)}
+                  onChange={(event) => {
+                    const contractDate = event.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      contractDate,
+                      depositDueDate:
+                        current.paymentMethod === "gotówka" || current.paymentMethod === "cash"
+                          ? addDaysLocalDate(
+                              contractDate,
+                              current.visitPreviouslyScheduled === "false" ? 30 : 14
+                            )
+                          : current.depositDueDate,
+                    }));
+                  }}
                   className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                 />
               </label>
@@ -527,7 +609,20 @@ export default function SaleContractPage() {
                 <span className="text-sm font-bold text-slate-700">Wizyta wcześniej umówiona</span>
                 <select
                   value={form.visitPreviouslyScheduled}
-                  onChange={(event) => updateField("visitPreviouslyScheduled", event.target.value)}
+                  onChange={(event) => {
+                    const visitPreviouslyScheduled = event.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      visitPreviouslyScheduled,
+                      depositDueDate:
+                        current.paymentMethod === "gotówka" || current.paymentMethod === "cash"
+                          ? addDaysLocalDate(
+                              current.contractDate,
+                              visitPreviouslyScheduled === "false" ? 30 : 14
+                            )
+                          : current.depositDueDate,
+                    }));
+                  }}
                   className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                 >
                   <option value="">Wybierz</option>
@@ -536,19 +631,39 @@ export default function SaleContractPage() {
                 </select>
               </label>
 
-              {form.visitPreviouslyScheduled === "true" && (
+              {form.visitPreviouslyScheduled && (
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-700">Wariant realizacji</span>
+                  <span className="text-sm font-bold text-slate-700">Rozpoczęcie odpłatnych usług</span>
                   <select
                     value={form.realizationVariant}
                     onChange={(event) => updateField("realizationVariant", event.target.value)}
                     className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                   >
                     <option value="">Wybierz</option>
-                    <option value="1A">Wariant 1A — start przed upływem 14 dni</option>
-                    <option value="1B">Wariant 1B — start po upływie 14 dni</option>
+                    <option value="1A">
+                      Żądam rozpoczęcia przed upływem {form.visitPreviouslyScheduled === "true" ? 14 : 30} dni
+                    </option>
+                    <option value="1B">
+                      Nie żądam wcześniejszego rozpoczęcia — po {form.visitPreviouslyScheduled === "true" ? 14 : 30} dniach
+                    </option>
                   </select>
                 </label>
+              )}
+
+              {form.visitPreviouslyScheduled && (
+                <div className="md:col-span-2 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+                  <p className="font-black">
+                    Termin odstąpienia: {form.visitPreviouslyScheduled === "true" ? 14 : 30} dni
+                  </p>
+                  <p className="mt-1 text-xs font-medium">
+                    Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki.
+                  </p>
+                  {form.visitPreviouslyScheduled === "false" && (
+                    <p className="mt-1 text-xs font-bold text-amber-800">
+                      Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia.
+                    </p>
+                  )}
+                </div>
               )}
 
               <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">

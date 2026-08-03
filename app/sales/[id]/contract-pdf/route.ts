@@ -73,6 +73,10 @@ const contractPdfPositions = {
     additionalServicesGrossAfterDiscount: { x: 452, y: 123, size: 9, maxWidth: 90 },
   },
   page4: {
+    singleFamilyCheck: { x: 72, y: 654 },
+    singleFamilyArea: { x: 297, y: 654, size: 8 },
+    apartmentCheck: { x: 72, y: 629 },
+    apartmentArea: { x: 231, y: 629, size: 8 },
     cashPaymentCheck: { x: 36, y: 514 },
     creditPaymentCheck: { x: 36, y: 375 },
     creditOwnContribution: { x: 151, y: 351, size: 9 },
@@ -309,6 +313,9 @@ function getCustomerData(sale: Record<string, any>, client: Record<string, any> 
     contractAddress,
     correspondenceAddress: customerData.correspondence_address || contractAddress,
     installationAddress,
+    propertyType: customerData.property_type || customerData.building_type || "",
+    usableAreaM2:
+      customerData.usable_area_m2 || customerData.usable_area || customerData.property_area_m2 || "",
     secondClientName: customerData.second_client_name || "",
     secondClientPesel: customerData.second_client_pesel || "",
     contractNumber: sale.contract_number || customerData.contract_number || "",
@@ -1210,6 +1217,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       getQueryValue(request, "correspondenceAddress") || customerFromDb.correspondenceAddress,
     installationAddress:
       getQueryValue(request, "installationAddress") || customerFromDb.installationAddress,
+    propertyType: getQueryValue(request, "propertyType") || customerFromDb.propertyType,
+    usableAreaM2: getQueryValue(request, "usableAreaM2") || customerFromDb.usableAreaM2,
     secondClientName: getQueryValue(request, "secondClientName") || customerFromDb.secondClientName,
     secondClientPesel: getQueryValue(request, "secondClientPesel") || customerFromDb.secondClientPesel,
     contractNumber: getQueryValue(request, "contractNumber") || customerFromDb.contractNumber,
@@ -1285,7 +1294,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   function drawCheck(pageIndex: number, x: number, y: number) {
-    drawOnPage(pageIndex, "X", x, y, { size: 10, bold: true, color: rgb(0.04, 0.45, 0.42) });
+    drawOnPage(pageIndex, "X", x + 0.9, y + 1.5, {
+      size: 8.5,
+      bold: true,
+      color: rgb(0.04, 0.45, 0.42),
+    });
   }
 
   function drawRightAlignedOnPage(
@@ -1734,6 +1747,36 @@ if (hasOptimizers) {
   }
 
   // Page 4 — payment section
+  if (customer.propertyType === "single_family") {
+    drawCheck(
+      3,
+      contractPdfPositions.page4.singleFamilyCheck.x,
+      contractPdfPositions.page4.singleFamilyCheck.y
+    );
+    drawOnPage(
+      3,
+      String(customer.usableAreaM2).replace(".", ","),
+      contractPdfPositions.page4.singleFamilyArea.x,
+      contractPdfPositions.page4.singleFamilyArea.y,
+      { size: contractPdfPositions.page4.singleFamilyArea.size, bold: true }
+    );
+  }
+
+  if (customer.propertyType === "apartment") {
+    drawCheck(
+      3,
+      contractPdfPositions.page4.apartmentCheck.x,
+      contractPdfPositions.page4.apartmentCheck.y
+    );
+    drawOnPage(
+      3,
+      String(customer.usableAreaM2).replace(".", ","),
+      contractPdfPositions.page4.apartmentArea.x,
+      contractPdfPositions.page4.apartmentArea.y,
+      { size: contractPdfPositions.page4.apartmentArea.size, bold: true }
+    );
+  }
+
   const drawPricePair = (
     beforeDiscount: number,
     afterDiscount: number,
@@ -1894,11 +1937,11 @@ if (hasOptimizers) {
     { size: contractPdfPositions.page9.contractNumberAndDate.size }
   );
 
-  if (visitPreviouslyScheduled && customer.realizationVariant === "1A") {
+  if (customer.realizationVariant === "1A") {
     drawCheck(8, contractPdfPositions.page9.variant1ACheck.x, contractPdfPositions.page9.variant1ACheck.y);
   }
 
-  if (visitPreviouslyScheduled && customer.realizationVariant === "1B") {
+  if (customer.realizationVariant === "1B") {
     drawCheck(8, contractPdfPositions.page9.variant1BCheck.x, contractPdfPositions.page9.variant1BCheck.y);
   }
 

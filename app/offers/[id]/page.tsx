@@ -31,6 +31,8 @@ type SaleFromOfferForm = {
   correspondenceAddress: string;
   installationSameAsContract: boolean;
   installationAddress: string;
+  propertyType: "single_family" | "apartment" | "";
+  usableAreaM2: string;
   paymentMethod: string;
   ownContributionAmount: string;
   depositAmount: string;
@@ -790,6 +792,8 @@ function emptySaleForm(): SaleFromOfferForm {
     correspondenceAddress: "",
     installationSameAsContract: true,
     installationAddress: "",
+    propertyType: "",
+    usableAreaM2: "",
     paymentMethod: "gotówka",
     ownContributionAmount: "",
     depositAmount: "",
@@ -1216,6 +1220,8 @@ export default function OfferDetailsPage() {
       correspondenceAddress: correspondenceAddress || contractAddress,
       installationSameAsContract: !installationAddress,
       installationAddress: installationAddress || contractAddress,
+      propertyType: "",
+      usableAreaM2: "",
       paymentMethod: "gotówka",
       ownContributionAmount: "",
       depositAmount: defaultDepositAmount,
@@ -1349,10 +1355,27 @@ export default function OfferDetailsPage() {
       return "Wybierz, czy wizyta była wcześniej umówiona.";
     }
 
-    if (saleForm.visitPreviouslyScheduled && !saleForm.realizationVariant) {
+    if (!saleForm.realizationVariant) {
       errors.push("realizationVariant");
       setInvalidFields(errors);
-      return "Wybierz wariant realizacji umowy 1A albo 1B.";
+      return "Wybierz, kiedy mają rozpocząć się odpłatne usługi.";
+    }
+
+    if (saleForm.customerType === "b2c" && !saleForm.propertyType) {
+      errors.push("propertyType");
+      setInvalidFields(errors);
+      return "Wybierz rodzaj nieruchomości.";
+    }
+
+    const parsedUsableArea = Number(String(saleForm.usableAreaM2).replace(",", "."));
+
+    if (
+      saleForm.customerType === "b2c" &&
+      (!Number.isFinite(parsedUsableArea) || parsedUsableArea <= 0)
+    ) {
+      errors.push("usableAreaM2");
+      setInvalidFields(errors);
+      return "Uzupełnij prawidłową powierzchnię użytkową nieruchomości.";
     }
 
     if (!saleForm.phone.trim()) {
@@ -1740,6 +1763,8 @@ export default function OfferDetailsPage() {
         installation_postal_code: installationSplit.postalCode,
         installation_city: installationSplit.city,
         installation_address: installationAddress,
+        property_type: saleForm.propertyType,
+        usable_area_m2: Number(String(saleForm.usableAreaM2).replace(",", ".")) || null,
         second_client_name: saleForm.secondClientName,
         second_client_pesel: saleForm.secondClientPesel,
         contract_place: saleForm.contractPlace,
@@ -2239,6 +2264,44 @@ if (updateClientStatusError) {
                 </label>
               )}
 
+              {saleForm.customerType === "b2c" && (
+                <>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Rodzaj nieruchomości</span>
+                    <select
+                      value={saleForm.propertyType}
+                      onChange={(event) =>
+                        updateSaleForm(
+                          "propertyType",
+                          event.target.value as SaleFromOfferForm["propertyType"]
+                        )
+                      }
+                      className={inputClass("propertyType")}
+                    >
+                      <option value="">Wybierz</option>
+                      <option value="single_family">Budynek mieszkalny jednorodzinny</option>
+                      <option value="apartment">Lokal mieszkalny w budynku wielorodzinnym</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Powierzchnia użytkowa</span>
+                    <div className="relative mt-2">
+                      <input
+                        inputMode="decimal"
+                        value={saleForm.usableAreaM2}
+                        onChange={(event) => updateSaleForm("usableAreaM2", event.target.value)}
+                        placeholder="np. 145,5"
+                        className={`${inputClass("usableAreaM2")} mt-0 pr-12`}
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm font-bold text-slate-500">
+                        m²
+                      </span>
+                    </div>
+                  </label>
+                </>
+              )}
+
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Forma płatności</span>
                 <select
@@ -2256,7 +2319,13 @@ if (updateClientStatusError) {
                     if (paymentMethod === "gotówka") {
                       updateSaleForm("ownContributionAmount", "");
                       updateSaleForm("depositAmount", calculateDefaultDepositAmount(offer.sale_price_gross));
-                      updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
+                      updateSaleForm(
+                        "depositDueDate",
+                        addDaysLocalDate(
+                          saleForm.contractDate,
+                          saleForm.visitPreviouslyScheduled === false ? 30 : 14
+                        )
+                      );
                     }
                   }}
                   className={inputClass("paymentMethod")}
@@ -2353,7 +2422,20 @@ if (updateClientStatusError) {
                     <input
                       type="date"
                       value={saleForm.contractDate}
-                      onChange={(event) => updateSaleForm("contractDate", event.target.value)}
+                      onChange={(event) => {
+                        const contractDate = event.target.value;
+                        updateSaleForm("contractDate", contractDate);
+
+                        if (saleForm.paymentMethod === "gotówka") {
+                          updateSaleForm(
+                            "depositDueDate",
+                            addDaysLocalDate(
+                              contractDate,
+                              saleForm.visitPreviouslyScheduled === false ? 30 : 14
+                            )
+                          );
+                        }
+                      }}
                       className={inputClass("contractDate")}
                     />
                   </label>
@@ -2364,7 +2446,12 @@ if (updateClientStatusError) {
                     <input
                       type="radio"
                       checked={saleForm.visitPreviouslyScheduled === true}
-                      onChange={() => updateSaleForm("visitPreviouslyScheduled", true)}
+                      onChange={() => {
+                        updateSaleForm("visitPreviouslyScheduled", true);
+                        if (saleForm.paymentMethod === "gotówka") {
+                          updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 14));
+                        }
+                      }}
                     />
                     Wizyta wcześniej umówiona
                   </label>
@@ -2375,22 +2462,40 @@ if (updateClientStatusError) {
                       checked={saleForm.visitPreviouslyScheduled === false}
                       onChange={() => {
                         updateSaleForm("visitPreviouslyScheduled", false);
-                        updateSaleForm("realizationVariant", "");
+                        if (saleForm.paymentMethod === "gotówka") {
+                          updateSaleForm("depositDueDate", addDaysLocalDate(saleForm.contractDate, 30));
+                        }
                       }}
                     />
                     Wizyta nieumówiona
                   </label>
                 </div>
 
-                {saleForm.visitPreviouslyScheduled === true && (
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {saleForm.visitPreviouslyScheduled !== null && (
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+                      <p className="font-black">
+                        Termin odstąpienia: {saleForm.visitPreviouslyScheduled ? 14 : 30} dni
+                      </p>
+                      <p className="mt-1 text-xs font-medium">
+                        Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki.
+                      </p>
+                      {!saleForm.visitPreviouslyScheduled && (
+                        <p className="mt-1 text-xs font-bold text-amber-800">
+                          Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia.
+                        </p>
+                      )}
+                    </div>
+
+                    <p className="text-sm font-black text-slate-900">Rozpoczęcie odpłatnych usług</p>
+                    <div className="grid gap-2 sm:grid-cols-2">
                     <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                       <input
                         type="radio"
                         checked={saleForm.realizationVariant === "1A"}
                         onChange={() => updateSaleForm("realizationVariant", "1A")}
                       />
-                      Wariant 1A — start przed upływem 14 dni
+                      Żądam rozpoczęcia przed upływem {saleForm.visitPreviouslyScheduled ? 14 : 30} dni
                     </label>
 
                     <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700">
@@ -2399,8 +2504,9 @@ if (updateClientStatusError) {
                         checked={saleForm.realizationVariant === "1B"}
                         onChange={() => updateSaleForm("realizationVariant", "1B")}
                       />
-                      Wariant 1B — start po upływie 14 dni
+                      Nie żądam wcześniejszego rozpoczęcia — usługi po {saleForm.visitPreviouslyScheduled ? 14 : 30} dniach
                     </label>
+                    </div>
                   </div>
                 )}
 
