@@ -848,9 +848,10 @@ async function createCalendarEventFromModal() {
   }
 
   const confirmationValidationError = validateMeetingConfirmationReminder({
-    required: newEventType === "meeting" && newEventConfirmationRequired,
+    required: newEventType !== "vacation" && newEventConfirmationRequired,
     reminderAt: newEventConfirmationReminderAt,
     meetingAt: newEventAt,
+    kind: newEventType === "phone_call" ? "phone" : "meeting",
   });
 
   if (confirmationValidationError) {
@@ -968,14 +969,12 @@ async function createCalendarEventFromModal() {
       assigned_user_id: newEventAdvisorId,
       microsoft_sync_status: newEventType === "meeting" ? "pending" : "not_synced",
       confirmation_required:
-        newEventType === "meeting" && newEventConfirmationRequired,
+        newEventConfirmationRequired,
       confirmation_reminder_at:
-        newEventType === "meeting"
-          ? meetingConfirmationReminderToIso(
-              newEventConfirmationRequired,
-              newEventConfirmationReminderAt
-            )
-          : null,
+        meetingConfirmationReminderToIso(
+          newEventConfirmationRequired,
+          newEventConfirmationReminderAt
+        ),
     })
     .select("id")
     .single();
@@ -1958,15 +1957,14 @@ async function createCalendarEventFromModal() {
                         value={newEventAt}
                         onChange={setNewEventAt}
                       />
-                      {newEventType === "meeting" && (
-                        <MeetingConfirmationReminderFields
-                          required={newEventConfirmationRequired}
-                          reminderAt={newEventConfirmationReminderAt}
-                          meetingAt={newEventAt}
-                          onRequiredChange={setNewEventConfirmationRequired}
-                          onReminderAtChange={setNewEventConfirmationReminderAt}
-                        />
-                      )}
+                      <MeetingConfirmationReminderFields
+                        required={newEventConfirmationRequired}
+                        reminderAt={newEventConfirmationReminderAt}
+                        meetingAt={newEventAt}
+                        kind={newEventType === "phone_call" ? "phone" : "meeting"}
+                        onRequiredChange={setNewEventConfirmationRequired}
+                        onReminderAtChange={setNewEventConfirmationReminderAt}
+                      />
                     </>
                   )}
 

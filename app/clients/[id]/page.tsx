@@ -1480,6 +1480,13 @@ export default function ClientPage() {
           status: "planned",
           created_by: user.id,
           assigned_user_id: client?.assigned_user_id || user.id,
+          confirmation_required: Boolean(payload.confirmationRequired),
+          confirmation_reminder_at: payload.confirmationReminderAt || null,
+          confirmation_reminder_attempted_at: null,
+          confirmation_reminder_sent_at: null,
+          confirmation_reminder_error: null,
+          client_confirmed_at: null,
+          client_confirmed_by: null,
         })
         .select("id, public_id, title, description, event_type, event_at, status")
         .single();

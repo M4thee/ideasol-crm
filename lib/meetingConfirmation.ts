@@ -2,6 +2,7 @@ export type MeetingConfirmationReminderValidationInput = {
   required: boolean;
   reminderAt: string;
   meetingAt?: string;
+  kind?: "meeting" | "phone";
 };
 
 export type MeetingConfirmationReminderMessageInput = {
@@ -9,6 +10,7 @@ export type MeetingConfirmationReminderMessageInput = {
   clientName: string;
   eventAt: string;
   eventUrl: string;
+  kind?: "meeting" | "phone";
 };
 
 function escapeHtml(value: string) {
@@ -24,24 +26,33 @@ export function validateMeetingConfirmationReminder({
   required,
   reminderAt,
   meetingAt,
+  kind = "meeting",
 }: MeetingConfirmationReminderValidationInput) {
   if (!required) return null;
 
+  const isPhoneReminder = kind === "phone";
+
   if (!reminderAt) {
-    return "Wybierz datę i godzinę przypomnienia o potwierdzeniu spotkania.";
+    return isPhoneReminder
+      ? "Wybierz datę i godzinę przypomnienia o ponownym kontakcie telefonicznym."
+      : "Wybierz datę i godzinę przypomnienia o potwierdzeniu spotkania.";
   }
 
   const reminderTime = new Date(reminderAt).getTime();
 
   if (!Number.isFinite(reminderTime) || reminderTime <= Date.now()) {
-    return "Termin przypomnienia o potwierdzeniu musi być w przyszłości.";
+    return isPhoneReminder
+      ? "Termin przypomnienia o kontakcie telefonicznym musi być w przyszłości."
+      : "Termin przypomnienia o potwierdzeniu musi być w przyszłości.";
   }
 
   if (meetingAt) {
     const meetingTime = new Date(meetingAt).getTime();
 
     if (Number.isFinite(meetingTime) && reminderTime >= meetingTime) {
-      return "Przypomnienie o potwierdzeniu musi być ustawione przed spotkaniem.";
+      return isPhoneReminder
+        ? "Przypomnienie musi być ustawione przed terminem ponownego kontaktu."
+        : "Przypomnienie o potwierdzeniu musi być ustawione przed spotkaniem.";
     }
   }
 
@@ -55,24 +66,38 @@ export function meetingConfirmationReminderToIso(required: boolean, reminderAt: 
 export function buildMeetingConfirmationReminderMessage(
   payload: MeetingConfirmationReminderMessageInput
 ) {
-  const meetingDate = new Date(payload.eventAt);
+  const eventDate = new Date(payload.eventAt);
+  const isPhoneReminder = payload.kind === "phone";
   const advisorFirstName = payload.advisorName.trim().split(/\s+/)[0] || "Doradco";
   const date = new Intl.DateTimeFormat("pl-PL", {
     timeZone: "Europe/Warsaw",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(meetingDate);
+  }).format(eventDate);
   const time = new Intl.DateTimeFormat("pl-PL", {
     timeZone: "Europe/Warsaw",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(meetingDate);
+  }).format(eventDate);
+
+  const clientName = escapeHtml(payload.clientName.trim() || "Klient");
+
+  if (isPhoneReminder) {
+    return [
+      `Cześć <strong>${escapeHtml(advisorFirstName)}</strong>,`,
+      "",
+      `Masz zaplanowany ponowny kontakt telefoniczny z klientem <strong>${clientName}</strong> w dniu <strong>${date}</strong> o godz. <strong>${time}</strong>.`,
+      "Skontaktuj się z klientem o zaplanowanej porze.",
+      "",
+      `<a href="${escapeHtml(payload.eventUrl)}">Otwórz kartę kontaktu</a>`,
+    ].join("\n");
+  }
 
   return [
     `Cześć <strong>${escapeHtml(advisorFirstName)}</strong>,`,
     "",
-    `Twoje spotkanie z klientem <strong>${escapeHtml(payload.clientName.trim() || "Klient")}</strong> w dniu <strong>${date}</strong> o godz. <strong>${time}</strong> wymaga potwierdzenia.`,
+    `Twoje spotkanie z klientem <strong>${clientName}</strong> w dniu <strong>${date}</strong> o godz. <strong>${time}</strong> wymaga potwierdzenia.`,
     "Skontaktuj się z klientem, celem potwierdzenia.",
     "",
     `<a href="${escapeHtml(payload.eventUrl)}">Otwórz kartę spotkania</a>`,

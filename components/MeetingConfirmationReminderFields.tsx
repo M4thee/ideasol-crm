@@ -11,6 +11,7 @@ type Props = {
   required: boolean;
   reminderAt: string;
   meetingAt?: string;
+  kind?: "meeting" | "phone";
   onRequiredChange: (required: boolean) => void;
   onReminderAtChange: (value: string) => void;
   disabled?: boolean;
@@ -46,6 +47,7 @@ export default function MeetingConfirmationReminderFields({
   required,
   reminderAt,
   meetingAt,
+  kind = "meeting",
   onRequiredChange,
   onReminderAtChange,
   disabled = false,
@@ -77,7 +79,9 @@ export default function MeetingConfirmationReminderFields({
           }}
           className="h-4 w-4 accent-blue-600"
         />
-        Czy klient wymaga potwierdzenia spotkania wcześniej?
+        {kind === "phone"
+          ? "Przypomnij przez Teams o ponownym kontakcie telefonicznym?"
+          : "Czy klient wymaga potwierdzenia spotkania wcześniej?"}
       </label>
 
       {required && (

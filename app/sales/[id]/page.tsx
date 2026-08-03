@@ -84,7 +84,142 @@ type Installer = {
 type InstallationOrder = {
   installer_id: string;
   installation_date: string | null;
+  supply_sources?: Partial<InstallationSupplySources> | null;
 };
+
+type InstallationSupplySource = "ideasol" | "installer";
+
+type InstallationSupplySources = {
+  panels: InstallationSupplySource;
+  inverter: InstallationSupplySource;
+  energy_storage: InstallationSupplySource;
+  construction: InstallationSupplySource;
+  materials: InstallationSupplySource;
+};
+
+const DEFAULT_INSTALLATION_SUPPLY_SOURCES: InstallationSupplySources = {
+  panels: "ideasol",
+  inverter: "ideasol",
+  energy_storage: "ideasol",
+  construction: "ideasol",
+  materials: "ideasol",
+};
+
+function installationEquipmentLabel(value: unknown) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return installationEquipmentLabel(
+      record.displayName || record.display_name || record.name || record.model || record.code
+    );
+  }
+
+  const text = String(value || "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return text && !["none", "brak", "null", "undefined"].includes(text.toLowerCase())
+    ? text
+    : "Brak / nie dotyczy";
+}
+
+function firstInstallationValue(...values: unknown[]) {
+  return values.find((value) => installationEquipmentLabel(value) !== "Brak / nie dotyczy");
+}
+
+function installationMountingLabel(value: unknown) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/_/g, " ");
+
+  if (normalized.includes("wiata") || normalized.includes("carport")) return "Wiata";
+  if (normalized.includes("grunt") || normalized.includes("ground")) return "Grunt";
+  if (normalized.includes("dachowka") || normalized.includes("tile")) return "Dach - dachówka ceramiczna";
+  if (normalized.includes("blacha") || normalized.includes("sheet")) return "Dach - blacha";
+  if (
+    normalized.includes("papa") ||
+    normalized.includes("membrana") ||
+    normalized.includes("felt") ||
+    normalized.includes("plaski")
+  ) {
+    return "Dach płaski - papa / membrana";
+  }
+  return installationEquipmentLabel(value);
+}
+
+function getInstallationOrderItems(sale: Sale) {
+  const snapshot = sale.offer_snapshot || {};
+  const offerData = snapshot.offer_data || {};
+  const form = offerData.form || {};
+  const result = offerData.result || {};
+  const panel = installationEquipmentLabel(
+    firstInstallationValue(
+      snapshot.panel_model,
+      snapshot.panel_name,
+      form.panelModel,
+      result.panelModel,
+      result.panelName
+    )
+  );
+  const inverter = installationEquipmentLabel(
+    firstInstallationValue(
+      snapshot.inverter,
+      snapshot.inverter_name,
+      result.inverter,
+      result.inverterName,
+      form.selectedInverterName
+    )
+  );
+  const storage = installationEquipmentLabel(
+    firstInstallationValue(
+      snapshot.energy_storage,
+      snapshot.storage_name,
+      result.energyStorage,
+      result.storage,
+      form.storage
+    )
+  );
+  const mountingType = installationMountingLabel(
+    firstInstallationValue(snapshot.roof_type, snapshot.roofType, form.roofType, result.roofType)
+  );
+
+  return [
+    { key: "panels" as const, label: "Panele fotowoltaiczne", detail: panel },
+    { key: "inverter" as const, label: "Falownik", detail: inverter },
+    { key: "energy_storage" as const, label: "Magazyn energii", detail: storage },
+    { key: "construction" as const, label: "Konstrukcja", detail: mountingType },
+    { key: "materials" as const, label: "Materiały", detail: "Materiały montażowe i instalacyjne" },
+  ];
+}
+
+function normalizeInstallationSupplySources(
+  value: Partial<InstallationSupplySources> | null | undefined
+): InstallationSupplySources {
+  const normalized = { ...DEFAULT_INSTALLATION_SUPPLY_SOURCES };
+
+  (Object.keys(normalized) as Array<keyof InstallationSupplySources>).forEach((key) => {
+    if (value?.[key] === "ideasol" || value?.[key] === "installer") {
+      normalized[key] = value[key];
+    }
+  });
+
+  return normalized;
+}
+
+type InstallationGenerationProgress = {
+  progress: number;
+  stage: string;
+  estimatedSecondsRemaining: number | null;
+  error?: string | null;
+};
+
+function formatEstimatedGenerationTime(seconds: number | null) {
+  if (seconds === null) return "Szacowanie czasu...";
+  if (seconds <= 0) return "Gotowe";
+  if (seconds < 60) return `około ${seconds} sek.`;
+
+  const minutes = Math.ceil(seconds / 60);
+  return `około ${minutes} min`;
+}
 
 
 type ActiveTab = "sale" | "documents" | "financial" | "notes";
@@ -350,9 +485,13 @@ export default function SalePage() {
   const [installers, setInstallers] = useState<Installer[]>([]);
   const [selectedInstallerId, setSelectedInstallerId] = useState("");
   const [installationDate, setInstallationDate] = useState("");
+  const [installationSupplySources, setInstallationSupplySources] =
+    useState<InstallationSupplySources>(DEFAULT_INSTALLATION_SUPPLY_SOURCES);
   const [loadingInstallationOrder, setLoadingInstallationOrder] = useState(false);
   const [generatingInstallationOrder, setGeneratingInstallationOrder] = useState(false);
   const [installationOrderStatus, setInstallationOrderStatus] = useState("");
+  const [installationGenerationProgress, setInstallationGenerationProgress] =
+    useState<InstallationGenerationProgress | null>(null);
 
   const [accessDenied, setAccessDenied] = useState(false);
 
@@ -384,7 +523,7 @@ export default function SalePage() {
 
   useEffect(() => {
     const canGenerateInstallationOrder =
-      hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
+      hasRealizationAccess || currentUserRole === "admin";
 
     if (
       sale &&
@@ -1247,13 +1386,14 @@ export default function SalePage() {
 
   async function openInstallationOrderModal() {
     const canGenerateInstallationOrder =
-      hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
+      hasRealizationAccess || currentUserRole === "admin";
 
     if (!sale || !canGenerateInstallationOrder) return;
 
     setShowInstallationOrderModal(true);
     setLoadingInstallationOrder(true);
     setInstallationOrderStatus("");
+    setInstallationGenerationProgress(null);
 
     const [installersResponse, orderResponse] = await Promise.all([
       supabase
@@ -1263,7 +1403,7 @@ export default function SalePage() {
         .order("company_name", { ascending: true }),
       supabase
         .from("installation_orders")
-        .select("installer_id, installation_date")
+        .select("installer_id, installation_date, supply_sources")
         .eq("sale_id", sale.id)
         .maybeSingle(),
     ]);
@@ -1292,6 +1432,9 @@ export default function SalePage() {
         ""
     );
     setInstallationDate(existingOrder?.installation_date || "");
+    setInstallationSupplySources(
+      normalizeInstallationSupplySources(existingOrder?.supply_sources)
+    );
 
     if (selectableInstallers.length === 0) {
       setInstallationOrderStatus(
@@ -1318,7 +1461,54 @@ export default function SalePage() {
     }
 
     setGeneratingInstallationOrder(true);
-    setInstallationOrderStatus("Tworzenie PDF i dołączanie dokumentów...");
+    setInstallationOrderStatus("Generowanie kompletnego zlecenia montażu...");
+    setInstallationGenerationProgress({
+      progress: 2,
+      stage: "Uruchamianie generatora",
+      estimatedSecondsRemaining: null,
+    });
+
+    const generationJobId = crypto.randomUUID();
+    let progressTimer: number | null = null;
+    let progressRequestInFlight = false;
+
+    const pollGenerationProgress = async () => {
+      if (progressRequestInFlight) return;
+      progressRequestInFlight = true;
+
+      try {
+        const progressResponse = await fetch(
+          `/api/sales/${sale.id}/installation-order-progress?jobId=${encodeURIComponent(generationJobId)}`,
+          {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            cache: "no-store",
+          }
+        );
+
+        if (progressResponse.status === 404) return;
+        if (!progressResponse.ok) return;
+
+        const progressData = await progressResponse.json();
+        setInstallationGenerationProgress({
+          progress: Number(progressData.progress || 0),
+          stage: progressData.stage || "Generowanie zlecenia montażu",
+          estimatedSecondsRemaining:
+            typeof progressData.estimatedSecondsRemaining === "number"
+              ? progressData.estimatedSecondsRemaining
+              : null,
+          error: progressData.error || null,
+        });
+      } catch (progressError) {
+        console.error("Nie udało się odświeżyć postępu generowania", progressError);
+      } finally {
+        progressRequestInFlight = false;
+      }
+    };
+
+    progressTimer = window.setInterval(() => {
+      void pollGenerationProgress();
+    }, 900);
+    void pollGenerationProgress();
 
     try {
       const response = await fetch(`/api/sales/${sale.id}/installation-order-pdf`, {
@@ -1330,6 +1520,8 @@ export default function SalePage() {
         body: JSON.stringify({
           installerId: selectedInstallerId,
           installationDate,
+          supplySources: installationSupplySources,
+          generationJobId,
         }),
       });
 
@@ -1338,8 +1530,20 @@ export default function SalePage() {
         setInstallationOrderStatus(
           errorData?.error || "Nie udało się wygenerować zlecenia montażu."
         );
+        setInstallationGenerationProgress((current) => ({
+          progress: 100,
+          stage: errorData?.error || "Generowanie nie powiodło się",
+          estimatedSecondsRemaining: 0,
+          error: errorData?.error || current?.error || "Nie udało się wygenerować PDF.",
+        }));
         return;
       }
+
+      setInstallationGenerationProgress({
+        progress: 100,
+        stage: "Zlecenie montażu jest gotowe",
+        estimatedSecondsRemaining: 0,
+      });
 
       const pdfBlob = await response.blob();
       const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -1360,7 +1564,16 @@ export default function SalePage() {
     } catch (error) {
       console.error("Błąd generowania zlecenia montażu", error);
       setInstallationOrderStatus("Wystąpił błąd podczas generowania PDF.");
+      setInstallationGenerationProgress({
+        progress: 100,
+        stage: "Generowanie nie powiodło się",
+        estimatedSecondsRemaining: 0,
+        error: "Wystąpił błąd podczas generowania PDF.",
+      });
     } finally {
+      if (progressTimer !== null) {
+        window.clearInterval(progressTimer);
+      }
       setGeneratingInstallationOrder(false);
     }
   }
@@ -1437,6 +1650,7 @@ export default function SalePage() {
       ? `SID${String(sale.public_id).padStart(6, "0")}`
       : `SID-${sale.id.slice(0, 8).toUpperCase()}`;
   const clientName = client?.full_name || client?.company_name || "Brak klienta";
+  const installationOrderItems = getInstallationOrderItems(sale);
 
   const saleCustomerData = sale.customer_data || {};
   const contractPriceRows = getContractPriceRows(saleCustomerData);
@@ -1570,7 +1784,7 @@ export default function SalePage() {
   const canManageSaleStatus =
     currentUserRole === "owner" || currentUserRole === "admin";
   const canGenerateInstallationOrder =
-    hasRealizationAccess || currentUserRole === "admin" || currentUserRole === "owner";
+    hasRealizationAccess || currentUserRole === "admin";
   const canUploadDocuments =
     currentUserRole === "admin" || Boolean(sale.seller_id && sale.seller_id === currentUserId);
   const canDeleteDocuments =
@@ -2498,7 +2712,7 @@ export default function SalePage() {
 
       {showInstallationOrderModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-sm font-semibold text-blue-600">Realizacja</p>
@@ -2564,6 +2778,48 @@ export default function SalePage() {
                     </select>
                   </div>
 
+                  <div>
+                    <div className="mb-3">
+                      <h3 className="text-sm font-bold text-slate-800">
+                        Sprzęt, konstrukcja i materiały
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Dla każdej pozycji wybierz, kto odpowiada za dostawę.
+                      </p>
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-slate-200">
+                      {installationOrderItems.map((item, index) => (
+                        <div
+                          key={item.key}
+                          className={`grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_240px] sm:items-center ${
+                            index > 0 ? "border-t border-slate-200" : ""
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-800">{item.label}</p>
+                            <p className="mt-1 break-words text-xs text-slate-500">
+                              {item.detail}
+                            </p>
+                          </div>
+                          <select
+                            value={installationSupplySources[item.key]}
+                            onChange={(event) =>
+                              setInstallationSupplySources((current) => ({
+                                ...current,
+                                [item.key]: event.target.value as InstallationSupplySource,
+                              }))
+                            }
+                            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                            aria-label={`Źródło dostawy: ${item.label}`}
+                          >
+                            <option value="ideasol">Dostawa własna IdeaSol</option>
+                            <option value="installer">Sprzęt instalatora</option>
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   {selectedInstallerId ? (
                     <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">
                       {(() => {
@@ -2594,6 +2850,51 @@ export default function SalePage() {
               {installationOrderStatus ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
                   {installationOrderStatus}
+                </div>
+              ) : null}
+
+              {installationGenerationProgress ? (
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    installationGenerationProgress.error
+                      ? "border-red-200 bg-red-50"
+                      : "border-emerald-200 bg-emerald-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-4 text-sm font-bold text-slate-800">
+                    <span>Postęp generowania</span>
+                    <span>{Math.round(installationGenerationProgress.progress)}%</span>
+                  </div>
+                  <div
+                    className="mt-3 h-3 overflow-hidden rounded-full bg-white shadow-inner"
+                    role="progressbar"
+                    aria-label="Postęp generowania zlecenia montażu"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(installationGenerationProgress.progress)}
+                  >
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-300 ${
+                        installationGenerationProgress.error ? "bg-red-500" : "bg-emerald-500"
+                      }`}
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(100, installationGenerationProgress.progress)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    Przewidywany czas do zakończenia: {formatEstimatedGenerationTime(
+                      installationGenerationProgress.estimatedSecondsRemaining
+                    )}
+                  </p>
+                  {installationGenerationProgress.error ? (
+                    <p className="mt-2 text-sm font-semibold text-red-700">
+                      {installationGenerationProgress.error}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 

@@ -915,10 +915,11 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
 
     const newDateConfirmationError = validateMeetingConfirmationReminder({
       required:
-        missingConfirmationAction === "new_date" &&
+        ["new_date", "follow_up"].includes(missingConfirmationAction) &&
         missingConfirmationReminderRequired,
       reminderAt: missingConfirmationReminderAt,
       meetingAt: missingConfirmationActionAt,
+      kind: missingConfirmationAction === "follow_up" ? "phone" : "meeting",
     });
 
     if (newDateConfirmationError) {
@@ -1013,6 +1014,11 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
         status: "planned",
         created_by: actingUserId,
         assigned_user_id: event.assigned_user_id || event.created_by || actingUserId,
+        confirmation_required: missingConfirmationReminderRequired,
+        confirmation_reminder_at: meetingConfirmationReminderToIso(
+          missingConfirmationReminderRequired,
+          missingConfirmationReminderAt
+        ),
       });
 
       if (reminderError) {
@@ -1098,9 +1104,11 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
     }
 
     const taskConfirmationError = validateMeetingConfirmationReminder({
-      required: needsMeeting && taskMeetingConfirmationRequired,
+      required:
+        (needsMeeting || needsReminder) && taskMeetingConfirmationRequired,
       reminderAt: taskMeetingConfirmationReminderAt,
-      meetingAt: taskMeetingAt,
+      meetingAt: needsMeeting ? taskMeetingAt : taskReminderAt,
+      kind: needsReminder ? "phone" : "meeting",
     });
 
     if (taskConfirmationError) {
@@ -1143,6 +1151,11 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
         status: "planned",
         created_by: user?.id || null,
         assigned_user_id: user?.id || null,
+        confirmation_required: taskMeetingConfirmationRequired,
+        confirmation_reminder_at: meetingConfirmationReminderToIso(
+          taskMeetingConfirmationRequired,
+          taskMeetingConfirmationReminderAt
+        ),
       });
 
       if (reminderError) {
@@ -1301,10 +1314,10 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
     const nextMeetingConfirmationError = validateMeetingConfirmationReminder({
       required:
         needsNextContact &&
-        nextContactType === "meeting" &&
         nextMeetingConfirmationRequired,
       reminderAt: nextMeetingConfirmationReminderAt,
       meetingAt: nextContactAt,
+      kind: nextContactType === "phone" ? "phone" : "meeting",
     });
 
     if (nextMeetingConfirmationError) {
@@ -1491,15 +1504,11 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
           status: "planned",
           created_by: user?.id || null,
           assigned_user_id: nextEventOwnerId,
-          confirmation_required:
-            nextContactType === "meeting" && nextMeetingConfirmationRequired,
-          confirmation_reminder_at:
-            nextContactType === "meeting"
-              ? meetingConfirmationReminderToIso(
-                  nextMeetingConfirmationRequired,
-                  nextMeetingConfirmationReminderAt
-                )
-              : null,
+          confirmation_required: nextMeetingConfirmationRequired,
+          confirmation_reminder_at: meetingConfirmationReminderToIso(
+            nextMeetingConfirmationRequired,
+            nextMeetingConfirmationReminderAt
+          ),
         })
         .select(calendarEventSelect)
         .single();
@@ -1947,11 +1956,21 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
                       )}
 
                       {missingConfirmationAction === "follow_up" && (
-                        <DateTimePicker
-                          label="Termin ponownego kontaktu"
-                          value={missingConfirmationActionAt}
-                          onChange={setMissingConfirmationActionAt}
-                        />
+                        <>
+                          <DateTimePicker
+                            label="Termin ponownego kontaktu"
+                            value={missingConfirmationActionAt}
+                            onChange={setMissingConfirmationActionAt}
+                          />
+                          <MeetingConfirmationReminderFields
+                            required={missingConfirmationReminderRequired}
+                            reminderAt={missingConfirmationReminderAt}
+                            meetingAt={missingConfirmationActionAt}
+                            kind="phone"
+                            onRequiredChange={setMissingConfirmationReminderRequired}
+                            onReminderAtChange={setMissingConfirmationReminderAt}
+                          />
+                        </>
                       )}
                     </div>
                   )}
@@ -2161,11 +2180,19 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
             </div>
 
             {taskEffectNeedsReminder && (
-              <div className="mt-4">
+              <div className="mt-4 space-y-4">
                 <DateTimePicker
                   label="Termin kolejnego ponownego kontaktu"
                   value={taskReminderAt}
                   onChange={setTaskReminderAt}
+                />
+                <MeetingConfirmationReminderFields
+                  required={taskMeetingConfirmationRequired}
+                  reminderAt={taskMeetingConfirmationReminderAt}
+                  meetingAt={taskReminderAt}
+                  kind="phone"
+                  onRequiredChange={setTaskMeetingConfirmationRequired}
+                  onReminderAtChange={setTaskMeetingConfirmationReminderAt}
                 />
               </div>
             )}
@@ -2347,16 +2374,15 @@ async function findReassignVacationConflict(advisorId: string, eventDateTime: st
                   </div>
                 )}
 
-                {nextContactType === "meeting" && (
-                  <MeetingConfirmationReminderFields
-                    required={nextMeetingConfirmationRequired}
-                    reminderAt={nextMeetingConfirmationReminderAt}
-                    meetingAt={nextContactAt}
-                    onRequiredChange={setNextMeetingConfirmationRequired}
-                    onReminderAtChange={setNextMeetingConfirmationReminderAt}
-                    className="mt-4"
-                  />
-                )}
+                <MeetingConfirmationReminderFields
+                  required={nextMeetingConfirmationRequired}
+                  reminderAt={nextMeetingConfirmationReminderAt}
+                  meetingAt={nextContactAt}
+                  kind={nextContactType === "phone" ? "phone" : "meeting"}
+                  onRequiredChange={setNextMeetingConfirmationRequired}
+                  onReminderAtChange={setNextMeetingConfirmationReminderAt}
+                  className="mt-4"
+                />
               </div>
             )}
             {meetingEffectStatus === "Przełożenie" && (

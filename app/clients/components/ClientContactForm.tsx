@@ -295,9 +295,10 @@ System rozliczeń: net-billing / net-metering`;
     }
 
     const confirmationValidationError = validateMeetingConfirmationReminder({
-      required: requiresMeeting && confirmationRequired,
+      required: (requiresMeeting || requiresReminder) && confirmationRequired,
       reminderAt: confirmationReminderAt,
-      meetingAt,
+      meetingAt: requiresMeeting ? meetingAt : reminderAt,
+      kind: requiresReminder ? "phone" : "meeting",
     });
 
     if (confirmationValidationError) {
@@ -316,10 +317,11 @@ System rozliczeń: net-billing / net-metering`;
       reminderAt: requiresReminder ? localDateTimeToIso(reminderAt) : undefined,
       meetingAt: requiresMeeting ? localDateTimeToIso(meetingAt) : undefined,
       assignedUserId: requiresMeeting ? advisorId : undefined,
-      confirmationRequired: requiresMeeting && confirmationRequired,
+      confirmationRequired:
+        (requiresMeeting || requiresReminder) && confirmationRequired,
       confirmationReminderAt:
         meetingConfirmationReminderToIso(
-          requiresMeeting && confirmationRequired,
+          (requiresMeeting || requiresReminder) && confirmationRequired,
           confirmationReminderAt
         ) || undefined,
     });
@@ -461,11 +463,12 @@ System rozliczeń: net-billing / net-metering`;
           />
         )}
 
-        {requiresMeeting && (
+        {(requiresMeeting || requiresReminder) && (
           <MeetingConfirmationReminderFields
             required={confirmationRequired}
             reminderAt={confirmationReminderAt}
-            meetingAt={meetingAt}
+            meetingAt={requiresMeeting ? meetingAt : reminderAt}
+            kind={requiresReminder ? "phone" : "meeting"}
             onRequiredChange={setConfirmationRequired}
             onReminderAtChange={setConfirmationReminderAt}
             className="md:col-span-2"

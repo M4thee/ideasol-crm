@@ -678,7 +678,7 @@ export default function SalesPage() {
 
                         <td className="px-4 py-4 sm:px-6 text-right">
                           <div className="flex justify-end gap-2">
-                            {(hasRealizationAccess || ["admin", "owner"].includes(currentUserRole)) && (
+                            {(hasRealizationAccess || currentUserRole === "admin") && (
                               <Link
                                 href={`/sales/${sale.id}?installationOrder=1`}
                                 className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 font-bold text-blue-700 hover:bg-blue-100"

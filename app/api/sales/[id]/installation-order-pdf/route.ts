@@ -1,8 +1,10 @@
-import { readFile } from "fs/promises";
-import path from "path";
-import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  createInstallationOrderCover,
+  DEFAULT_INSTALLATION_SUPPLY_SOURCES,
+  type InstallationSupplySources,
+} from "@/lib/installationOrderPdf";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -159,6 +161,124 @@ function getEquipment(sale: SaleRecord) {
   };
 }
 
+function normalizeTechnicalKey(value: unknown) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatMountingType(value: unknown) {
+  const normalized = normalizeTechnicalKey(value);
+  if (!normalized) return "Brak / nie dotyczy";
+  if (normalized.includes("wiata") || normalized.includes("carport")) return "Wiata";
+  if (normalized.includes("grunt") || normalized.includes("ground")) return "Grunt";
+  if (normalized.includes("dachowka") || normalized.includes("tile")) {
+    return "Dach - dachówka ceramiczna";
+  }
+  if (normalized.includes("blacha") || normalized.includes("sheet")) {
+    return "Dach - blacha";
+  }
+  if (
+    normalized.includes("papa") ||
+    normalized.includes("membrana") ||
+    normalized.includes("felt") ||
+    normalized.includes("plaski")
+  ) {
+    return "Dach płaski - papa / membrana";
+  }
+  if (normalized.includes("dach") || normalized.includes("roof")) return `Dach - ${cleanText(value)}`;
+  return equipmentLabel(value);
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(cleanText(value).replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumber(value: number, maximumFractionDigits = 2) {
+  return new Intl.NumberFormat("pl-PL", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  }).format(value);
+}
+
+function getPvDetails(sale: SaleRecord, panelModel: string) {
+  const snapshot = (sale.offer_snapshot || {}) as JsonRecord;
+  const offerData = (snapshot.offer_data || {}) as JsonRecord;
+  const form = (offerData.form || {}) as JsonRecord;
+  const result = (offerData.result || {}) as JsonRecord;
+  const panelPowerWp = numberValue(
+    firstValue(
+      snapshot.panel_power_wp,
+      snapshot.panelPowerWp,
+      form.panelPowerWp,
+      result.panelPowerWp
+    )
+  );
+  const panelCount = numberValue(
+    firstValue(snapshot.panel_count, snapshot.panelCount, form.panelCount, result.panelCount)
+  );
+  const storedTotalPowerKw = numberValue(
+    firstValue(
+      snapshot.pv_power_kw,
+      snapshot.pvPowerKw,
+      form.pvPowerKw,
+      result.pvPowerKw,
+      result.pv_power_kw
+    )
+  );
+  const totalPowerKw =
+    storedTotalPowerKw ||
+    (panelPowerWp > 0 && panelCount > 0 ? (panelPowerWp * panelCount) / 1000 : 0);
+  const mountingType = firstValue(
+    snapshot.roof_type,
+    snapshot.roofType,
+    snapshot.mounting_type,
+    form.roofType,
+    form.mountingType,
+    result.roofType,
+    result.mountingType
+  );
+  const hasPv = totalPowerKw > 0 || panelCount > 0 || panelPowerWp > 0 || panelModel !== "Brak / nie dotyczy";
+
+  return {
+    mountingType: hasPv ? formatMountingType(mountingType) : "Brak / nie dotyczy",
+    panelModel: hasPv ? panelModel : "Brak / nie dotyczy",
+    panelPowerWp: panelPowerWp > 0 ? `${formatNumber(panelPowerWp, 0)} Wp` : "Brak / nie dotyczy",
+    panelCount: panelCount > 0 ? `${formatNumber(panelCount, 0)} szt.` : "Brak / nie dotyczy",
+    totalPowerKw: totalPowerKw > 0 ? `${formatNumber(totalPowerKw)} kWp` : "Brak / nie dotyczy",
+  };
+}
+
+function parseSupplySources(value: unknown): InstallationSupplySources | null {
+  if (value === undefined || value === null) {
+    return { ...DEFAULT_INSTALLATION_SUPPLY_SOURCES };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  const keys: Array<keyof InstallationSupplySources> = [
+    "panels",
+    "inverter",
+    "energy_storage",
+    "construction",
+    "materials",
+  ];
+  const parsed = { ...DEFAULT_INSTALLATION_SUPPLY_SOURCES };
+
+  for (const key of keys) {
+    if (record[key] !== "ideasol" && record[key] !== "installer") return null;
+    parsed[key] = record[key];
+  }
+
+  return parsed;
+}
+
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
   const lines: string[] = [];
 
@@ -202,53 +322,6 @@ function drawWrappedText(
     page.drawText(line, { x, y: y - index * lineHeight, font, size, color });
   });
   return y - lines.length * lineHeight;
-}
-
-function drawSectionTitle(page: PDFPage, title: string, y: number, boldFont: PDFFont) {
-  page.drawRectangle({
-    x: PAGE_MARGIN,
-    y: y - 5,
-    width: PAGE_WIDTH - PAGE_MARGIN * 2,
-    height: 25,
-    color: rgb(0.92, 0.97, 0.96),
-  });
-  page.drawText(title, {
-    x: PAGE_MARGIN + 10,
-    y: y + 3,
-    font: boldFont,
-    size: 11,
-    color: rgb(0.04, 0.45, 0.4),
-  });
-}
-
-function drawField(
-  page: PDFPage,
-  label: string,
-  value: string,
-  x: number,
-  y: number,
-  width: number,
-  regularFont: PDFFont,
-  boldFont: PDFFont
-) {
-  page.drawText(label.toUpperCase(), {
-    x,
-    y,
-    font: boldFont,
-    size: 7.5,
-    color: rgb(0.4, 0.45, 0.5),
-  });
-  return drawWrappedText(
-    page,
-    value || "Brak danych",
-    x,
-    y - 15,
-    width,
-    regularFont,
-    10,
-    rgb(0.08, 0.12, 0.16),
-    13
-  );
 }
 
 async function addImagePage(
@@ -317,7 +390,8 @@ async function appendSaleDocuments(
   pdfDoc: PDFDocument,
   documents: SaleDocument[],
   regularFont: PDFFont,
-  skippedFiles: string[]
+  skippedFiles: string[],
+  onDocumentProcessed?: (document: SaleDocument) => Promise<void>
 ) {
   for (const document of documents) {
     const { data, error } = await supabaseAdmin.storage
@@ -326,6 +400,7 @@ async function appendSaleDocuments(
 
     if (error || !data) {
       skippedFiles.push(`${document.file_name} - nie udało się pobrać`);
+      await onDocumentProcessed?.(document);
       continue;
     }
 
@@ -349,11 +424,45 @@ async function appendSaleDocuments(
         error,
       });
       skippedFiles.push(`${document.file_name} - uszkodzony lub nieobsługiwany plik`);
+    } finally {
+      await onDocumentProcessed?.(document);
     }
   }
 }
 
+type GenerationProgressContext = {
+  jobId: string;
+  saleId: string;
+  userId: string;
+};
+
+async function updateGenerationProgress(
+  context: GenerationProgressContext,
+  progress: number,
+  stage: string,
+  options?: { error?: string | null; completed?: boolean }
+) {
+  const { error } = await supabaseAdmin
+    .from("installation_order_generation_jobs")
+    .update({
+      progress: Math.max(0, Math.min(100, Math.round(progress))),
+      stage,
+      error: options?.error ?? null,
+      updated_at: new Date().toISOString(),
+      completed_at: options?.completed ? new Date().toISOString() : null,
+    })
+    .eq("id", context.jobId)
+    .eq("sale_id", context.saleId)
+    .eq("user_id", context.userId);
+
+  if (error) {
+    console.error("Nie udało się zaktualizować postępu zlecenia montażu", error);
+  }
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
+  let progressContext: GenerationProgressContext | null = null;
+
   try {
     const authorization = request.headers.get("authorization") || "";
     const accessToken = authorization.startsWith("Bearer ")
@@ -382,8 +491,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         .maybeSingle(),
     ]);
     const canGenerate =
-      ["admin", "owner"].includes(String(profile?.role || "")) ||
-      permission?.realization === true;
+      String(profile?.role || "") === "admin" || permission?.realization === true;
 
     if (!canGenerate) {
       return NextResponse.json({ error: "Brak uprawnienia Realizacja." }, { status: 403 });
@@ -393,6 +501,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const body = await request.json();
     const installerId = cleanText(body.installerId);
     const installationDate = cleanText(body.installationDate);
+    const supplySources = parseSupplySources(body.supplySources);
+    const generationJobId = cleanText(body.generationJobId);
 
     if (!installerId) {
       return NextResponse.json({ error: "Wybierz instalatora." }, { status: 400 });
@@ -402,6 +512,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(installationDate)) {
       return NextResponse.json({ error: "Nieprawidłowa data montażu." }, { status: 400 });
+    }
+    if (!supplySources) {
+      return NextResponse.json({ error: "Nieprawidłowe źródło dostawy." }, { status: 400 });
+    }
+    if (
+      generationJobId &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        generationJobId
+      )
+    ) {
+      return NextResponse.json({ error: "Nieprawidłowy identyfikator generowania." }, { status: 400 });
     }
 
     const [saleResponse, installerResponse, documentsResponse] = await Promise.all([
@@ -471,6 +592,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
     }
 
+    if (generationJobId) {
+      const now = new Date().toISOString();
+      const { error: progressStartError } = await supabaseAdmin
+        .from("installation_order_generation_jobs")
+        .insert({
+          id: generationJobId,
+          sale_id: saleId,
+          user_id: user.id,
+          progress: 8,
+          stage: "Pobieranie danych zlecenia",
+          error: null,
+          started_at: now,
+          updated_at: now,
+          completed_at: null,
+        });
+
+      if (progressStartError) {
+        console.error("Nie udało się rozpocząć śledzenia generowania", progressStartError);
+        return NextResponse.json(
+          { error: "Nie udało się uruchomić śledzenia postępu." },
+          { status: 500 }
+        );
+      }
+
+      progressContext = {
+        jobId: generationJobId,
+        saleId,
+        userId: user.id,
+      };
+      await updateGenerationProgress(progressContext, 15, "Sprawdzanie danych instalatora");
+    }
+
     let client: JsonRecord | null = null;
     if (sale.client_id) {
       const { data: clientData, error: clientError } = await supabaseAdmin
@@ -480,6 +633,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         .maybeSingle();
       if (clientError) console.error("Błąd pobierania klienta do zlecenia montażu", clientError);
       client = clientData;
+    }
+
+    if (progressContext) {
+      await updateGenerationProgress(progressContext, 24, "Przygotowanie danych klienta i instalacji");
     }
 
     const installerSnapshot = {
@@ -496,6 +653,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         installer_id: installer.id,
         installation_date: installationDate,
         installer_snapshot: installerSnapshot,
+        supply_sources: supplySources,
         generated_by: user.id,
         generated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -505,54 +663,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     if (orderError) {
       console.error("Błąd zapisu zlecenia montażu", orderError);
+      if (progressContext) {
+        await updateGenerationProgress(progressContext, 100, "Generowanie nie powiodło się", {
+          completed: true,
+          error: "Nie udało się zapisać danych zlecenia montażu.",
+        });
+      }
       return NextResponse.json(
         { error: "Nie udało się zapisać danych zlecenia montażu." },
         { status: 500 }
       );
     }
 
-    const pdfDoc = await PDFDocument.create();
-    pdfDoc.registerFontkit(fontkit);
-    const regularFontBytes = await readFile(
-      path.join(process.cwd(), "public", "fonts", "NotoSans-Regular.ttf")
-    );
-    let boldFontBytes = regularFontBytes;
-    try {
-      boldFontBytes = await readFile(path.join(process.cwd(), "public", "fonts", "NotoSans-Bold.ttf"));
-    } catch {
-      boldFontBytes = regularFontBytes;
+    if (progressContext) {
+      await updateGenerationProgress(progressContext, 32, "Zapisywanie parametrów zlecenia w CRM");
     }
-
-    const regularFont = await pdfDoc.embedFont(regularFontBytes);
-    const boldFont = await pdfDoc.embedFont(boldFontBytes);
-    const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    page.drawRectangle({
-      x: 0,
-      y: PAGE_HEIGHT - 112,
-      width: PAGE_WIDTH,
-      height: 112,
-      color: rgb(0.035, 0.43, 0.38),
-    });
-    page.drawText("ZLECENIE MONTAŻU", {
-      x: PAGE_MARGIN,
-      y: PAGE_HEIGHT - 68,
-      font: boldFont,
-      size: 24,
-      color: rgb(1, 1, 1),
-    });
 
     const saleNumber = sale.sale_public_id
       ? cleanText(sale.sale_public_id)
       : sale.public_id
         ? `SID${String(sale.public_id).padStart(6, "0")}`
         : `SID-${sale.id.slice(0, 8).toUpperCase()}`;
-    page.drawText(saleNumber, {
-      x: PAGE_MARGIN,
-      y: PAGE_HEIGHT - 91,
-      font: regularFont,
-      size: 10,
-      color: rgb(0.86, 1, 0.97),
-    });
 
     const customerData = (sale.customer_data || {}) as JsonRecord;
     const clientName = cleanText(
@@ -569,38 +700,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     ) || "Brak danych";
     const equipment = getEquipment(sale);
     const installationAddress = getInstallationAddress(sale, client);
-
-    let y = PAGE_HEIGHT - 150;
-    drawSectionTitle(page, "Dane zlecenia", y, boldFont);
-    y -= 34;
-    drawField(page, "Data montażu", formatPolishDate(installationDate), PAGE_MARGIN, y, 230, regularFont, boldFont);
-    drawField(page, "Numer sprzedaży", saleNumber, 315, y, 238, regularFont, boldFont);
-    y -= 58;
-    drawSectionTitle(page, "Instalator", y, boldFont);
-    y -= 34;
-    drawField(page, "Nazwa firmy", installer.company_name, PAGE_MARGIN, y, 300, regularFont, boldFont);
-    drawField(page, "NIP", installer.nip || "Brak danych", 385, y, 168, regularFont, boldFont);
-    y -= 48;
-    drawField(page, "Adres", installer.address || "Brak danych", PAGE_MARGIN, y, 511, regularFont, boldFont);
-    y -= 48;
-    drawField(page, "Osoba kontaktowa", installer.contact_name || "Brak danych", PAGE_MARGIN, y, 230, regularFont, boldFont);
-    drawField(page, "Telefon", installer.phone || "Brak danych", 285, y, 130, regularFont, boldFont);
-    drawField(page, "E-mail", installer.email || "Brak danych", 430, y, 123, regularFont, boldFont);
-    y -= 62;
-    drawSectionTitle(page, "Klient i miejsce montażu", y, boldFont);
-    y -= 34;
-    drawField(page, "Klient", clientName, PAGE_MARGIN, y, 300, regularFont, boldFont);
-    drawField(page, "Telefon", clientPhone, 385, y, 168, regularFont, boldFont);
-    y -= 52;
-    drawField(page, "Adres montażu", installationAddress, PAGE_MARGIN, y, 511, regularFont, boldFont);
-    y -= 66;
-    drawSectionTitle(page, "Urządzenia", y, boldFont);
-    y -= 34;
-    drawField(page, "Model panela", equipment.panel, PAGE_MARGIN, y, 245, regularFont, boldFont);
-    drawField(page, "Model falownika", equipment.inverter, 308, y, 245, regularFont, boldFont);
-    y -= 56;
-    drawField(page, "Model magazynu energii", equipment.storage, PAGE_MARGIN, y, 511, regularFont, boldFont);
-
     const documents = (documentsResponse.data || []) as SaleDocument[];
     const auditDocuments = documents.filter((document) =>
       TECHNICAL_AUDIT_TYPES.includes(document.document_type || "")
@@ -608,20 +707,68 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const photoDocuments = documents.filter((document) =>
       PHOTO_TYPES.includes(document.document_type || "")
     );
-    page.drawText(
-      `Załączniki: audyt techniczny - ${auditDocuments.length}, zdjęcia - ${photoDocuments.length}`,
-      {
-        x: PAGE_MARGIN,
-        y: 35,
-        font: regularFont,
-        size: 8,
-        color: rgb(0.4, 0.45, 0.5),
-      }
-    );
+    const pv = getPvDetails(sale, equipment.panel);
+    const { pdfDoc, regularFont, boldFont } = await createInstallationOrderCover({
+      saleNumber,
+      installationDate: formatPolishDate(installationDate),
+      installer: {
+        companyName: installer.company_name,
+        address: installer.address || "Brak danych",
+        nip: installer.nip || "Brak danych",
+        contactName: installer.contact_name || "Brak danych",
+        phone: installer.phone || "Brak danych",
+        email: installer.email || "Brak danych",
+      },
+      client: {
+        name: clientName,
+        phone: clientPhone,
+        installationAddress,
+      },
+      pv,
+      equipment: {
+        inverter: equipment.inverter,
+        energyStorage: equipment.storage,
+      },
+      supplySources,
+      attachments: {
+        audits: auditDocuments.length,
+        photos: photoDocuments.length,
+      },
+    });
+
+    if (progressContext) {
+      await updateGenerationProgress(progressContext, 42, "Strona główna zlecenia jest gotowa");
+    }
 
     const skippedFiles: string[] = [];
-    await appendSaleDocuments(pdfDoc, auditDocuments, regularFont, skippedFiles);
-    await appendSaleDocuments(pdfDoc, photoDocuments, regularFont, skippedFiles);
+    const totalAttachments = auditDocuments.length + photoDocuments.length;
+    let processedAttachments = 0;
+    const reportAttachmentProgress = async (kind: "audyt" | "zdjęcia") => {
+      processedAttachments += 1;
+      if (!progressContext) return;
+
+      const attachmentProgress =
+        totalAttachments > 0
+          ? 42 + (processedAttachments / totalAttachments) * 48
+          : 90;
+      const kindLabel = kind === "audyt" ? "audytu technicznego" : "zdjęć";
+      await updateGenerationProgress(
+        progressContext,
+        attachmentProgress,
+        `Dołączanie ${kindLabel}: ${processedAttachments} z ${totalAttachments}`
+      );
+    };
+
+    if (totalAttachments === 0 && progressContext) {
+      await updateGenerationProgress(progressContext, 90, "Brak załączników do dołączenia");
+    }
+
+    await appendSaleDocuments(pdfDoc, auditDocuments, regularFont, skippedFiles, () =>
+      reportAttachmentProgress("audyt")
+    );
+    await appendSaleDocuments(pdfDoc, photoDocuments, regularFont, skippedFiles, () =>
+      reportAttachmentProgress("zdjęcia")
+    );
 
     if (skippedFiles.length > 0) {
       const warningPage = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -643,7 +790,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
+    if (progressContext) {
+      await updateGenerationProgress(progressContext, 96, "Finalne scalanie kompletnego PDF");
+    }
+
     const pdfBytes = await pdfDoc.save();
+
+    if (progressContext) {
+      await updateGenerationProgress(progressContext, 100, "Zlecenie montażu jest gotowe", {
+        completed: true,
+      });
+    }
+
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
@@ -654,6 +812,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   } catch (error) {
     console.error("Błąd generatora zlecenia montażu", error);
+    if (progressContext) {
+      const errorMessage = error instanceof Error ? error.message : "Nieznany błąd generowania.";
+      await updateGenerationProgress(progressContext, 100, "Generowanie nie powiodło się", {
+        completed: true,
+        error: errorMessage,
+      });
+    }
     return NextResponse.json(
       { error: "Nie udało się wygenerować zlecenia montażu." },
       { status: 500 }

@@ -1459,9 +1459,13 @@ export default function Home() {
 
     const meetingConfirmationError = validateMeetingConfirmationReminder({
       required:
-        needsMeeting(resolutionStatus) && resolutionMeetingConfirmationRequired,
+        (needsMeeting(resolutionStatus) || needsNextFollowUp(resolutionStatus)) &&
+        resolutionMeetingConfirmationRequired,
       reminderAt: resolutionMeetingConfirmationReminderAt,
-      meetingAt: resolutionMeetingAt,
+      meetingAt: needsMeeting(resolutionStatus)
+        ? resolutionMeetingAt
+        : resolutionFollowUpAt,
+      kind: needsNextFollowUp(resolutionStatus) ? "phone" : "meeting",
     });
 
     if (meetingConfirmationError) {
@@ -1520,6 +1524,11 @@ export default function Home() {
         status: "planned",
         created_by: currentUser.id,
         assigned_user_id: currentUser.id,
+        confirmation_required: resolutionMeetingConfirmationRequired,
+        confirmation_reminder_at: meetingConfirmationReminderToIso(
+          resolutionMeetingConfirmationRequired,
+          resolutionMeetingConfirmationReminderAt
+        ),
       });
 
       if (reminderError) {
@@ -2518,11 +2527,21 @@ export default function Home() {
               </select>
 
               {needsNextFollowUp(resolutionStatus) && (
-                <DateTimePicker
-                  label="Data ponownego kontaktu"
-                  value={resolutionFollowUpAt}
-                  onChange={setResolutionFollowUpAt}
-                />
+                <>
+                  <DateTimePicker
+                    label="Data ponownego kontaktu"
+                    value={resolutionFollowUpAt}
+                    onChange={setResolutionFollowUpAt}
+                  />
+                  <MeetingConfirmationReminderFields
+                    required={resolutionMeetingConfirmationRequired}
+                    reminderAt={resolutionMeetingConfirmationReminderAt}
+                    meetingAt={resolutionFollowUpAt}
+                    kind="phone"
+                    onRequiredChange={setResolutionMeetingConfirmationRequired}
+                    onReminderAtChange={setResolutionMeetingConfirmationReminderAt}
+                  />
+                </>
               )}
 
               {needsMeeting(resolutionStatus) && (

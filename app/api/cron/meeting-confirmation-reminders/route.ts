@@ -4,6 +4,7 @@ import { sendTeamsDirectMeetingConfirmationReminder } from "@/lib/microsoftTeams
 
 type PendingMeetingConfirmation = {
   id: string;
+  event_type: "meeting" | "reminder" | "phone_call";
   event_at: string;
   client_id: string;
   assigned_user_id: string | null;
@@ -16,7 +17,7 @@ function getSupabaseAdminClient() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji Supabase dla przypomnień o potwierdzeniu spotkań.");
+    throw new Error("Brak konfiguracji Supabase dla przypomnień Teams.");
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
@@ -73,9 +74,9 @@ export async function GET(request: Request) {
   const { data, error } = await supabaseAdmin
     .from("calendar_events")
     .select(
-      "id, event_at, client_id, assigned_user_id, created_by, confirmation_reminder_at"
+      "id, event_type, event_at, client_id, assigned_user_id, created_by, confirmation_reminder_at"
     )
-    .eq("event_type", "meeting")
+    .in("event_type", ["meeting", "reminder", "phone_call"])
     .eq("confirmation_required", true)
     .is("client_confirmed_at", null)
     .is("confirmation_reminder_sent_at", null)
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
     .limit(50);
 
   if (error) {
-    console.error("Nie udało się pobrać przypomnień o potwierdzeniu spotkań:", error);
+    console.error("Nie udało się pobrać przypomnień Teams:", error);
     return NextResponse.json(
       { ok: false, error: "Nie udało się pobrać przypomnień." },
       { status: 500 }
@@ -124,7 +125,7 @@ export async function GET(request: Request) {
       const advisorId = meeting.assigned_user_id || meeting.created_by;
 
       if (!advisorId) {
-        throw new Error("Spotkanie nie ma przypisanego doradcy.");
+        throw new Error("Zdarzenie nie ma przypisanego doradcy.");
       }
 
       const [{ data: advisor, error: advisorError }, { data: client, error: clientError }] =
@@ -146,7 +147,7 @@ export async function GET(request: Request) {
       }
 
       if (clientError || !client) {
-        throw new Error(clientError?.message || "Nie znaleziono klienta spotkania.");
+        throw new Error(clientError?.message || "Nie znaleziono klienta zdarzenia.");
       }
 
       const crmUrl = process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl";
@@ -157,14 +158,15 @@ export async function GET(request: Request) {
         clientName: client.full_name || client.company_name || "Klient",
         eventAt: meeting.event_at,
         eventUrl: `${crmUrl.replace(/\/$/, "")}/event/${encodeURIComponent(meeting.id)}`,
+        kind: meeting.event_type === "meeting" ? "meeting" : "phone",
       });
 
       results.push({ id: meeting.id, ok: true });
     } catch (sendError) {
       const errorMessage = serializeError(sendError);
 
-      console.error("Nie udało się wysłać przypomnienia Teams o potwierdzeniu:", {
-        meetingId: meeting.id,
+      console.error("Nie udało się wysłać przypomnienia Teams:", {
+        eventId: meeting.id,
         error: errorMessage,
       });
 

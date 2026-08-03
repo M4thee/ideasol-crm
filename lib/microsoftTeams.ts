@@ -23,6 +23,7 @@ export type TeamsMeetingConfirmationReminderPayload = {
   clientName: string;
   eventAt: string;
   eventUrl: string;
+  kind?: "meeting" | "phone";
 };
 
 export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificationPayload & {
@@ -585,7 +586,7 @@ export async function sendTeamsDirectMeetingConfirmationReminder(
 
     if (!delegatedToken.access_token) {
       throw new Error(
-        "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla przypomnienia o potwierdzeniu spotkania."
+        "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla przypomnienia Teams."
       );
     }
 
