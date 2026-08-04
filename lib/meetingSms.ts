@@ -5,10 +5,18 @@ import {
   removePolishDiacritics,
   sendSmsApiMessage,
 } from "@/lib/smsapi";
+import {
+  formatSmsAutomationDateTime,
+  getBaseSmsAutomationValues,
+  renderSmsAutomationTemplate,
+  type SmsAutomation,
+} from "@/lib/automaticSms";
+import {
+  getActiveSmsAutomations,
+  getSmsAutomationById,
+} from "@/lib/automaticSmsServer";
 
 type SupabaseAdminClient = ReturnType<typeof getSupabaseAdminClient>;
-
-type MeetingSmsType = "meeting_created" | "meeting_reminder_24h";
 
 type CalendarEventSmsData = {
   id: string;
@@ -58,28 +66,6 @@ function getSupabaseAdminClient() {
   });
 }
 
-function formatMeetingDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Nieprawidłowa data spotkania do SMS.");
-  }
-
-  return {
-    dateLabel: date.toLocaleDateString("pl-PL", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      timeZone: "Europe/Warsaw",
-    }),
-    timeLabel: date.toLocaleTimeString("pl-PL", {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "Europe/Warsaw",
-    }),
-  };
-}
-
 function getClientPhone(client: ClientSmsData) {
   return normalizePolishPhoneNumber(client.phone || client.contact_phone || "");
 }
@@ -96,28 +82,6 @@ function getAdvisorName(advisor: AdvisorSmsData | null) {
 
 function getAdvisorPhone(advisor: AdvisorSmsData | null) {
   return advisor?.phone?.trim() || IDEASOL_HOTLINE_PHONE;
-}
-
-function buildMeetingCreatedMessage(params: {
-  eventAt: string;
-  advisor: AdvisorSmsData | null;
-}) {
-  const { dateLabel, timeLabel } = formatMeetingDate(params.eventAt);
-  const advisorName = getAdvisorName(params.advisor);
-  const advisorPhone = getAdvisorPhone(params.advisor);
-
-  return `Dzień dobry. Potwierdzamy datę spotkania z naszym doradcą w dniu ${dateLabel} o godzinie ${timeLabel}. W przypadku zmiany planów prosimy o kontakt bezpośrednio z doradcą. Kontakt do doradcy: ${advisorName} tel. ${advisorPhone}. Pozdrawiamy, Zespół IdeaSol.`;
-}
-
-function buildMeetingReminderMessage(params: {
-  eventAt: string;
-  advisor: AdvisorSmsData | null;
-}) {
-  const { timeLabel } = formatMeetingDate(params.eventAt);
-  const advisorName = getAdvisorName(params.advisor);
-  const advisorPhone = getAdvisorPhone(params.advisor);
-
-  return `Przypominamy o jutrzejszym spotkaniu z naszym doradcą o godzinie ${timeLabel}. W przypadku zmiany planów prosimy o bezpośredni kontakt z doradcą: ${advisorName}, tel. ${advisorPhone}. Pozdrawiamy, zespół IdeaSol.`;
 }
 
 async function loadMeetingSmsData(params: {
@@ -195,7 +159,7 @@ async function loadMeetingSmsData(params: {
 async function hasSmsAlreadyBeenSent(params: {
   supabaseAdmin: SupabaseAdminClient;
   calendarEventId: string;
-  messageType: MeetingSmsType;
+  messageType: string;
 }) {
   const { data, error } = await params.supabaseAdmin
     .from("sms_messages")
@@ -213,8 +177,7 @@ async function hasSmsAlreadyBeenSent(params: {
 }
 
 async function sendMeetingSms(params: SendMeetingSmsInput & {
-  messageType: MeetingSmsType;
-  buildMessage: (input: { eventAt: string; advisor: AdvisorSmsData | null }) => string;
+  automation: SmsAutomation;
 }) {
   const calendarEventId = String(params.calendarEventId || "").trim();
 
@@ -240,7 +203,7 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
       skipped: true,
       reason: "Tryb testowy: numer klienta nie jest numerem testowym SMS.",
       calendarEventId,
-      messageType: params.messageType,
+      messageType: params.automation.message_type,
     };
   }
 
@@ -248,7 +211,7 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
     const alreadySent = await hasSmsAlreadyBeenSent({
       supabaseAdmin,
       calendarEventId,
-      messageType: params.messageType,
+      messageType: params.automation.message_type,
     });
 
     if (alreadySent) {
@@ -257,17 +220,22 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
         skipped: true,
         reason: "SMS tego typu został już wysłany dla tego spotkania.",
         calendarEventId,
-        messageType: params.messageType,
+        messageType: params.automation.message_type,
       };
     }
   }
 
   const sender = process.env.SMSAPI_SENDER?.trim() || "";
   const senderLabel = sender || "SMSAPI_DEFAULT";
+  const eventDateTime = formatSmsAutomationDateTime(event.event_at as string);
   const message = removePolishDiacritics(
-    params.buildMessage({
-      eventAt: event.event_at as string,
-      advisor,
+    renderSmsAutomationTemplate(params.automation.message_template, {
+      ...getBaseSmsAutomationValues(),
+      client_name: client.full_name || client.company_name || "",
+      event_date: eventDateTime.date,
+      event_time: eventDateTime.time,
+      advisor_name: getAdvisorName(advisor),
+      advisor_phone: getAdvisorPhone(advisor),
     })
   );
 
@@ -282,7 +250,10 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
       message,
       status: "pending",
       provider: "smsapi",
-      message_type: params.messageType,
+      message_type: params.automation.message_type,
+      deduplication_key: params.force
+        ? null
+        : `${params.automation.message_type}:${calendarEventId}:${event.event_at}`,
     })
     .select("id")
     .single();
@@ -339,7 +310,7 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
       skipped: false,
       smsMessageId,
       calendarEventId,
-      messageType: params.messageType,
+      messageType: params.automation.message_type,
       providerMessageId: result.providerMessageId || null,
       providerResponse: result.raw,
       testMode: result.testMode,
@@ -368,17 +339,39 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
 }
 
 export async function sendMeetingCreatedConfirmationSms(input: SendMeetingSmsInput) {
-  return sendMeetingSms({
-    ...input,
-    messageType: "meeting_created",
-    buildMessage: buildMeetingCreatedMessage,
-  });
+  const automations = await getActiveSmsAutomations("meeting_created");
+  const results = [];
+
+  for (const automation of automations) {
+    results.push(await sendMeetingSms({ ...input, automation }));
+  }
+
+  return {
+    ok: true,
+    skipped: automations.length === 0,
+    reason: automations.length === 0 ? "Brak aktywnych automatów po utworzeniu spotkania." : null,
+    results,
+  };
 }
 
-export async function sendMeetingReminderSms(input: SendMeetingSmsInput) {
-  return sendMeetingSms({
-    ...input,
-    messageType: "meeting_reminder_24h",
-    buildMessage: buildMeetingReminderMessage,
-  });
+export async function sendMeetingReminderSms(
+  input: SendMeetingSmsInput & { automationId?: string }
+) {
+  const automations = input.automationId
+    ? [await getSmsAutomationById(input.automationId, "before_meeting")].filter(
+        (automation): automation is SmsAutomation => Boolean(automation)
+      )
+    : await getActiveSmsAutomations("before_meeting");
+  const results = [];
+
+  for (const automation of automations) {
+    results.push(await sendMeetingSms({ ...input, automation }));
+  }
+
+  return {
+    ok: true,
+    skipped: automations.length === 0 || results.every((result) => result.skipped),
+    reason: automations.length === 0 ? "Brak aktywnego automatu przypomnienia." : null,
+    results,
+  };
 }

@@ -1,89 +1,33 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSmsAutomationWindow } from "@/lib/automaticSms";
+import { getActiveSmsAutomations } from "@/lib/automaticSmsServer";
 import { sendMeetingReminderSms } from "@/lib/meetingSms";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type CalendarEventReminderRow = {
   id: string;
   event_at: string | null;
-  event_type: string | null;
-  client_id: string | null;
-  assigned_user_id: string | null;
 };
-
-function getSupabaseAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji Supabase service role dla CRON SMS przypomnień.");
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
 
 function isCronAuthorized(request: Request) {
   const cronSecret = process.env.CRON_SECRET?.trim();
-
-  if (!cronSecret) {
-    return false;
-  }
-
   const authorization = request.headers.get("authorization") || "";
-  return authorization === `Bearer ${cronSecret}`;
-}
-
-function getReminderWindow(request: Request) {
-  const url = new URL(request.url);
-  const hoursAhead = Number(url.searchParams.get("hoursAhead") || "24");
-  const windowMinutes = Number(url.searchParams.get("windowMinutes") || "90");
-
-  const safeHoursAhead = Number.isFinite(hoursAhead) ? hoursAhead : 24;
-  const safeWindowMinutes = Number.isFinite(windowMinutes) ? windowMinutes : 90;
-
-  const now = new Date();
-  const targetTime = new Date(now.getTime() + safeHoursAhead * 60 * 60 * 1000);
-  const halfWindowMs = Math.max(15, safeWindowMinutes) * 60 * 1000;
-
-  return {
-    from: new Date(targetTime.getTime() - halfWindowMs).toISOString(),
-    to: new Date(targetTime.getTime() + halfWindowMs).toISOString(),
-    hoursAhead: safeHoursAhead,
-    windowMinutes: Math.max(15, safeWindowMinutes),
-  };
+  return Boolean(cronSecret && authorization === `Bearer ${cronSecret}`);
 }
 
 function serializeError(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-    };
-  }
-
-  if (typeof error === "object" && error !== null) {
-    try {
-      return JSON.parse(JSON.stringify(error));
-    } catch {
-      return String(error);
-    }
-  }
-
-  return String(error);
+  if (error instanceof Error) return { name: error.name, message: error.message };
+  return String(error || "Nieznany błąd");
 }
 
 export async function GET(request: Request) {
   try {
     if (!isCronAuthorized(request)) {
-      return NextResponse.json(
-        { ok: false, error: "Brak autoryzacji CRON." },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: "Brak autoryzacji CRON." }, { status: 401 });
     }
 
     const url = new URL(request.url);
@@ -91,86 +35,79 @@ export async function GET(request: Request) {
     const limit = Math.min(Number(url.searchParams.get("limit") || "100") || 100, 250);
     const clientId = url.searchParams.get("clientId")?.trim() || "";
     const meetingId = url.searchParams.get("meetingId")?.trim() || "";
-    const reminderWindow = getReminderWindow(request);
-    const supabaseAdmin = getSupabaseAdminClient();
+    const automations = await getActiveSmsAutomations("before_meeting");
+    const results: Array<Record<string, unknown>> = [];
 
-    let meetingsQuery = supabaseAdmin
-      .from("calendar_events")
-      .select("id, event_at, event_type, client_id, assigned_user_id")
-      .eq("event_type", "meeting")
-      .gte("event_at", reminderWindow.from)
-      .lte("event_at", reminderWindow.to)
-      .not("client_id", "is", null);
+    for (const automation of automations) {
+      const stalePendingBefore = new Date(Date.now() - 30 * 60_000).toISOString();
+      await supabaseAdmin
+        .from("sms_messages")
+        .update({
+          status: "failed",
+          error_message: "Poprzednia próba nie została zakończona. Zaplanowano ponowienie.",
+        })
+        .eq("message_type", automation.message_type)
+        .eq("status", "pending")
+        .lt("created_at", stalePendingBefore);
 
-    if (clientId) {
-      meetingsQuery = meetingsQuery.eq("client_id", clientId);
-    }
+      const window = getSmsAutomationWindow(automation.offset_minutes);
+      let query = supabaseAdmin
+        .from("calendar_events")
+        .select("id,event_at")
+        .eq("event_type", "meeting")
+        .gte("event_at", window.from)
+        .lte("event_at", window.to)
+        .not("client_id", "is", null);
 
-    if (meetingId) {
-      meetingsQuery = meetingsQuery.eq("id", meetingId);
-    }
+      if (clientId) query = query.eq("client_id", clientId);
+      if (meetingId) query = query.eq("id", meetingId);
 
-    const { data: meetingsData, error: meetingsError } = await meetingsQuery
-      .order("event_at", { ascending: true })
-      .limit(limit);
+      const { data, error } = await query.order("event_at", { ascending: true }).limit(limit);
+      if (error) throw new Error(`Nie udało się pobrać spotkań: ${error.message}`);
 
-    if (meetingsError) {
-      throw new Error(`Nie udało się pobrać spotkań do SMS przypomnień: ${meetingsError.message}`);
-    }
+      for (const meeting of (data || []) as CalendarEventReminderRow[]) {
+        if (dryRun) {
+          results.push({
+            automationId: automation.id,
+            automationTitle: automation.title,
+            calendarEventId: meeting.id,
+            eventAt: meeting.event_at,
+            window,
+            ok: true,
+            dryRun: true,
+          });
+          continue;
+        }
 
-    const meetings = (meetingsData || []) as CalendarEventReminderRow[];
-    const results: Array<{
-      calendarEventId: string;
-      eventAt: string | null;
-      ok: boolean;
-      skipped?: boolean;
-      dryRun?: boolean;
-      error?: unknown;
-      result?: unknown;
-    }> = [];
-
-    for (const meeting of meetings) {
-      if (dryRun) {
-        results.push({
-          calendarEventId: meeting.id,
-          eventAt: meeting.event_at,
-          ok: true,
-          dryRun: true,
-        });
-        continue;
-      }
-
-      try {
-        const result = await sendMeetingReminderSms({
-          calendarEventId: meeting.id,
-          triggeredByUserId: null,
-        });
-
-        results.push({
-          calendarEventId: meeting.id,
-          eventAt: meeting.event_at,
-          ok: true,
-          skipped:
-            typeof result === "object" &&
-            result !== null &&
-            "skipped" in result &&
-            Boolean((result as { skipped?: unknown }).skipped),
-          result,
-        });
-      } catch (error) {
-        const details = serializeError(error);
-        console.error("Nie udało się wysłać SMS przypomnienia o spotkaniu:", {
-          calendarEventId: meeting.id,
-          eventAt: meeting.event_at,
-          error: details,
-        });
-
-        results.push({
-          calendarEventId: meeting.id,
-          eventAt: meeting.event_at,
-          ok: false,
-          error: details,
-        });
+        try {
+          const result = await sendMeetingReminderSms({
+            calendarEventId: meeting.id,
+            triggeredByUserId: null,
+            automationId: automation.id,
+          });
+          results.push({
+            automationId: automation.id,
+            automationTitle: automation.title,
+            calendarEventId: meeting.id,
+            eventAt: meeting.event_at,
+            ok: true,
+            skipped: result.skipped,
+            result,
+          });
+        } catch (error) {
+          const details = serializeError(error);
+          console.error("Nie udało się wysłać automatycznego SMS przed spotkaniem", {
+            automationId: automation.id,
+            calendarEventId: meeting.id,
+            error: details,
+          });
+          results.push({
+            automationId: automation.id,
+            calendarEventId: meeting.id,
+            ok: false,
+            error: details,
+          });
+        }
       }
     }
 
@@ -181,12 +118,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: failed === 0,
       dryRun,
-      window: reminderWindow,
-      filters: {
-        clientId: clientId || null,
-        meetingId: meetingId || null,
-      },
-      found: meetings.length,
+      automations: automations.length,
+      found: results.length,
       sent,
       skipped,
       failed,
@@ -194,15 +127,14 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const details = serializeError(error);
-    console.error("Błąd CRON SMS przypomnień o spotkaniach:", details);
-
+    console.error("Błąd CRON automatycznych SMS przed spotkaniami", details);
     return NextResponse.json(
-      {
-        ok: false,
-        error: "Nie udało się obsłużyć CRON SMS przypomnień o spotkaniach.",
-        details,
-      },
+      { ok: false, error: "Nie udało się obsłużyć automatów SMS przed spotkaniami.", details },
       { status: 500 }
     );
   }
+}
+
+export async function POST(request: Request) {
+  return GET(request);
 }

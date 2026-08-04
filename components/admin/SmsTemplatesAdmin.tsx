@@ -12,6 +12,7 @@ import {
   type SmsTemplateTone,
 } from "@/lib/saleSms";
 import { supabase } from "@/lib/supabase";
+import AutomaticSmsAdmin from "@/components/admin/AutomaticSmsAdmin";
 
 type SmsTemplate = {
   id: string;
@@ -580,6 +581,10 @@ export default function SmsTemplatesAdmin() {
             </article>
           );
         })}
+      </div>
+
+      <div className="border-t border-slate-200 pt-8">
+        <AutomaticSmsAdmin />
       </div>
     </section>
   );
