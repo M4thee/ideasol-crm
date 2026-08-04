@@ -33,6 +33,49 @@ test("przypomnienie musi być wcześniejsze niż spotkanie", () => {
   );
 });
 
+test("przypomnienie telefoniczne może przypadać dokładnie w chwili kontaktu", () => {
+  const contactAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  assert.equal(
+    validateMeetingConfirmationReminder({
+      required: true,
+      reminderAt: contactAt,
+      meetingAt: contactAt,
+      kind: "phone",
+    }),
+    null
+  );
+});
+
+test("przypomnienie telefoniczne nie może przypadać po kontakcie", () => {
+  const contactAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const reminderAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+  assert.match(
+    validateMeetingConfirmationReminder({
+      required: true,
+      reminderAt,
+      meetingAt: contactAt,
+      kind: "phone",
+    }) || "",
+    /po terminie ponownego kontaktu/
+  );
+});
+
+test("przypomnienie o spotkaniu nadal nie może być równe terminowi spotkania", () => {
+  const meetingAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  assert.match(
+    validateMeetingConfirmationReminder({
+      required: true,
+      reminderAt: meetingAt,
+      meetingAt,
+      kind: "meeting",
+    }) || "",
+    /przed spotkaniem/
+  );
+});
+
 test("poprawny termin jest konwertowany do ISO", () => {
   const meetingAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
   const reminderAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();

@@ -49,9 +49,13 @@ export function validateMeetingConfirmationReminder({
   if (meetingAt) {
     const meetingTime = new Date(meetingAt).getTime();
 
-    if (Number.isFinite(meetingTime) && reminderTime >= meetingTime) {
+    const isAfterAllowedTime = isPhoneReminder
+      ? reminderTime > meetingTime
+      : reminderTime >= meetingTime;
+
+    if (Number.isFinite(meetingTime) && isAfterAllowedTime) {
       return isPhoneReminder
-        ? "Przypomnienie musi być ustawione przed terminem ponownego kontaktu."
+        ? "Przypomnienie nie może być ustawione po terminie ponownego kontaktu."
         : "Przypomnienie o potwierdzeniu musi być ustawione przed spotkaniem.";
     }
   }
