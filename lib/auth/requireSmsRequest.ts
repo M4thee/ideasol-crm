@@ -62,3 +62,24 @@ export async function canAccessSaleForSms(params: {
 
   return sellerProfile?.manager_id === params.userId;
 }
+
+export async function canAccessClientForSms(params: {
+  userId: string;
+  role: string;
+  assignedUserId: string | null;
+}) {
+  const normalizedRole = params.role.toLowerCase();
+
+  if (["admin", "owner", "cc"].includes(normalizedRole)) return true;
+  if (params.assignedUserId === params.userId) return true;
+
+  if (normalizedRole !== "manager" || !params.assignedUserId) return false;
+
+  const { data: assignedProfile } = await supabaseAdmin
+    .from("profiles")
+    .select("manager_id")
+    .eq("id", params.assignedUserId)
+    .maybeSingle();
+
+  return assignedProfile?.manager_id === params.userId;
+}

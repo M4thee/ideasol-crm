@@ -104,6 +104,36 @@ test("własny szablon jest blokowany, gdy brakuje danych użytych w treści", ()
   assert.match(template.reason || "", /klienta/i);
 });
 
+test("szablon relacyjny działa bez sprzedaży i zachowuje kategorię", () => {
+  const [template] = buildSaleSmsTemplates(
+    {
+      clientName: "Jan Kowalski",
+      contractNumber: "",
+      contractValue: null,
+      depositAmount: null,
+      paidTotal: null,
+      outstandingAmount: null,
+      installationDate: null,
+      installationTime: null,
+      installerCompanyName: null,
+    },
+    [
+      {
+        type: "custom_opinion",
+        title: "Prośba o opinię",
+        messageTemplate: "Dzień dobry {{client_name}}. Dziękujemy za współpracę.",
+        tone: "standard",
+        category: "relationship",
+        requiredFields: [],
+      },
+    ]
+  );
+
+  assert.equal(template.enabled, true);
+  assert.equal(template.category, "relationship");
+  assert.match(template.message, /Jan Kowalski/);
+});
+
 test("walidacja wykrywa nieobsługiwane pola dynamiczne", () => {
   assert.deepEqual(
     getUnknownSmsTemplatePlaceholders("Umowa {{contract_number}}, pole {{nieznane_pole}}"),

@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 import {
   getUnknownSmsTemplatePlaceholders,
+  getSmsTemplatePlaceholders,
   SYSTEM_SMS_TEMPLATE_REQUIRED_FIELDS,
+  SMS_TEMPLATE_CATEGORIES,
   SMS_TEMPLATE_REQUIRED_FIELDS,
   SMS_TEMPLATE_TONES,
+  type SmsTemplateCategory,
   type SmsTemplateRequiredField,
   type SmsTemplateTone,
 } from "@/lib/saleSms";
@@ -19,15 +22,18 @@ type SmsTemplateInput = {
   title?: string;
   messageTemplate?: string;
   tone?: SmsTemplateTone;
+  category?: SmsTemplateCategory;
   requiredFields?: SmsTemplateRequiredField[];
   isActive?: boolean;
   sortOrder?: number;
 };
 
 const VALID_TONES = new Set<string>(SMS_TEMPLATE_TONES);
+const VALID_CATEGORIES = new Set<string>(SMS_TEMPLATE_CATEGORIES);
 const VALID_REQUIRED_FIELDS = new Set<string>(
   SMS_TEMPLATE_REQUIRED_FIELDS.map((field) => field.key)
 );
+const CLIENT_ONLY_FIELDS = new Set(["client_name", "bank_account", "hotline"]);
 
 function serializeError(error: unknown) {
   return error instanceof Error ? error.message : String(error || "Nieznany błąd");
@@ -37,6 +43,7 @@ function normalizeInput(input: SmsTemplateInput) {
   const title = String(input.title || "").trim();
   const messageTemplate = String(input.messageTemplate || "").trim();
   const tone = String(input.tone || "standard") as SmsTemplateTone;
+  const category = String(input.category || "sale") as SmsTemplateCategory;
   const requiredFields = [
     ...new Set(
       (Array.isArray(input.requiredFields) ? input.requiredFields : []).map(String)
@@ -49,6 +56,7 @@ function normalizeInput(input: SmsTemplateInput) {
     title,
     messageTemplate,
     tone,
+    category,
     requiredFields,
     isActive: input.isActive !== false,
     sortOrder,
@@ -65,6 +73,7 @@ function validateInput(input: ReturnType<typeof normalizeInput>) {
     errors.push("Treść szablonu może mieć maksymalnie 1200 znaków.");
   }
   if (!VALID_TONES.has(input.tone)) errors.push("Wybierz prawidłowy rodzaj komunikatu.");
+  if (!VALID_CATEGORIES.has(input.category)) errors.push("Wybierz prawidłową kategorię SMS.");
   if (input.sortOrder < 0 || input.sortOrder > 10000) {
     errors.push("Kolejność musi mieścić się w zakresie od 0 do 10000.");
   }
@@ -87,6 +96,21 @@ function validateInput(input: ReturnType<typeof normalizeInput>) {
     );
   }
 
+  if (input.category !== "sale") {
+    const saleOnlyPlaceholders = getSmsTemplatePlaceholders(
+      input.messageTemplate
+    ).filter((field) => !CLIENT_ONLY_FIELDS.has(field));
+    const saleOnlyRequirements = input.requiredFields.filter(
+      (field) => field !== "client_name"
+    );
+
+    if (saleOnlyPlaceholders.length > 0 || saleOnlyRequirements.length > 0) {
+      errors.push(
+        "Szablon marketingowy lub relacyjny nie może korzystać z danych sprzedaży ani wymagać sprzedaży."
+      );
+    }
+  }
+
   return errors;
 }
 
@@ -105,7 +129,7 @@ async function getTemplates() {
   return supabaseAdmin
     .from("sms_templates")
     .select(
-      "id,template_key,title,message_template,tone,required_fields,is_active,is_system,sort_order,created_at,updated_at"
+      "id,template_key,title,message_template,tone,category,required_fields,is_active,is_system,sort_order,created_at,updated_at"
     )
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
@@ -153,6 +177,7 @@ export async function POST(request: Request) {
         title: input.title,
         message_template: input.messageTemplate,
         tone: input.tone,
+        category: input.category,
         required_fields: input.requiredFields,
         is_active: input.isActive,
         is_system: false,
@@ -161,7 +186,7 @@ export async function POST(request: Request) {
         updated_by: admin.id,
       })
       .select(
-        "id,template_key,title,message_template,tone,required_fields,is_active,is_system,sort_order,created_at,updated_at"
+        "id,template_key,title,message_template,tone,category,required_fields,is_active,is_system,sort_order,created_at,updated_at"
       )
       .single();
 
@@ -232,6 +257,7 @@ export async function PATCH(request: Request) {
         title: input.title,
         message_template: input.messageTemplate,
         tone: input.tone,
+        category: input.category,
         required_fields: requiredFields,
         is_active: input.isActive,
         sort_order: input.sortOrder,
@@ -240,7 +266,7 @@ export async function PATCH(request: Request) {
       })
       .eq("id", id)
       .select(
-        "id,template_key,title,message_template,tone,required_fields,is_active,is_system,sort_order,created_at,updated_at"
+        "id,template_key,title,message_template,tone,category,required_fields,is_active,is_system,sort_order,created_at,updated_at"
       )
       .maybeSingle();
 

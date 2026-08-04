@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   SYSTEM_SMS_TEMPLATE_REQUIRED_FIELDS,
+  SMS_TEMPLATE_CATEGORIES,
   SMS_TEMPLATE_REQUIRED_FIELDS,
   SMS_TEMPLATE_TONES,
   SMS_TEMPLATE_VARIABLES,
   type SmsTemplateRequiredField,
+  type SmsTemplateCategory,
   type SmsTemplateTone,
 } from "@/lib/saleSms";
 import { supabase } from "@/lib/supabase";
@@ -17,6 +19,7 @@ type SmsTemplate = {
   title: string;
   message_template: string;
   tone: SmsTemplateTone;
+  category: SmsTemplateCategory;
   required_fields: SmsTemplateRequiredField[];
   is_active: boolean;
   is_system: boolean;
@@ -29,6 +32,7 @@ type SmsTemplateForm = {
   title: string;
   messageTemplate: string;
   tone: SmsTemplateTone;
+  category: SmsTemplateCategory;
   requiredFields: SmsTemplateRequiredField[];
   isActive: boolean;
   sortOrder: string;
@@ -38,6 +42,7 @@ const EMPTY_FORM: SmsTemplateForm = {
   title: "",
   messageTemplate: "",
   tone: "standard",
+  category: "sale",
   requiredFields: [],
   isActive: true,
   sortOrder: "100",
@@ -49,11 +54,20 @@ const TONE_LABELS: Record<SmsTemplateTone, string> = {
   danger: "Pilna / windykacyjna",
 };
 
+const CATEGORY_LABELS: Record<SmsTemplateCategory, string> = {
+  sale: "Do sprzedaży",
+  marketing: "Marketingowy",
+  relationship: "Relacyjny",
+};
+
+const CLIENT_TEMPLATE_VARIABLES = new Set(["client_name", "bank_account", "hotline"]);
+
 function toForm(template: SmsTemplate): SmsTemplateForm {
   return {
     title: template.title,
     messageTemplate: template.message_template,
     tone: template.tone,
+    category: template.category,
     requiredFields: template.required_fields || [],
     isActive: template.is_active,
     sortOrder: String(template.sort_order),
@@ -94,7 +108,7 @@ function TemplateFields({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_150px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_180px_130px]">
         <label className="text-sm font-bold text-slate-700">
           Nazwa szablonu *
           <input
@@ -104,6 +118,31 @@ function TemplateFields({
             placeholder="np. Informacja o zakończeniu montażu"
             className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-medium text-slate-950 outline-none focus:border-fuchsia-500"
           />
+        </label>
+
+        <label className="text-sm font-bold text-slate-700">
+          Kategoria SMS
+          <select
+            value={form.category}
+            onChange={(event) => {
+              const category = event.target.value as SmsTemplateCategory;
+              onChange({
+                  ...form,
+                  category,
+                  requiredFields:
+                    category === "sale"
+                      ? form.requiredFields
+                      : form.requiredFields.filter((field) => field === "client_name"),
+              });
+            }}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-medium text-slate-950 outline-none focus:border-fuchsia-500"
+          >
+            {SMS_TEMPLATE_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {CATEGORY_LABELS[category]}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="text-sm font-bold text-slate-700">
@@ -159,9 +198,12 @@ function TemplateFields({
       </div>
 
       <div>
-        <p className="text-sm font-bold text-slate-700">Wstaw dane ze sprzedaży</p>
+        <p className="text-sm font-bold text-slate-700">Wstaw dane z CRM</p>
         <div className="mt-2 flex flex-wrap gap-2">
-          {SMS_TEMPLATE_VARIABLES.map((variable) => (
+          {SMS_TEMPLATE_VARIABLES.filter(
+            (variable) =>
+              form.category === "sale" || CLIENT_TEMPLATE_VARIABLES.has(variable.key)
+          ).map((variable) => (
             <button
               key={variable.key}
               type="button"
@@ -181,7 +223,9 @@ function TemplateFields({
           Pola użyte bezpośrednio w treści są sprawdzane automatycznie. Poniżej możesz dodać dodatkowe warunki, nawet jeśli dana wartość nie występuje w wiadomości.
         </p>
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          {SMS_TEMPLATE_REQUIRED_FIELDS.map((field) => (
+          {SMS_TEMPLATE_REQUIRED_FIELDS.filter(
+            (field) => form.category === "sale" || field.key === "client_name"
+          ).map((field) => (
             <label
               key={field.key}
               className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700"
@@ -216,6 +260,12 @@ function TemplateFields({
         />
         Szablon aktywny i widoczny w Module SMS
       </label>
+
+      <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+        {form.category === "sale"
+          ? "Ten szablon wymaga wskazania sprzedaży lub umowy."
+          : "Ten szablon można wysłać z karty dowolnego dostępnego klienta, bez wskazywania sprzedaży."}
+      </p>
     </div>
   );
 }
@@ -284,6 +334,7 @@ export default function SmsTemplatesAdmin() {
         title: form.title,
         messageTemplate: form.messageTemplate,
         tone: form.tone,
+        category: form.category,
         requiredFields: form.requiredFields,
         isActive: form.isActive,
         sortOrder: Number(form.sortOrder || 100),
@@ -343,7 +394,7 @@ export default function SmsTemplatesAdmin() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Moduł SMS</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Zarządzaj gotowymi wiadomościami widocznymi na kartach sprzedaży i klientów. Treść jest uzupełniana danymi z CRM po stronie serwera.
+            Zarządzaj gotowymi wiadomościami widocznymi w jednym Module SMS. Szablony sprzedażowe wymagają umowy, a marketingowe i relacyjne można wysłać bez sprzedaży.
           </p>
           <p className="mt-2 text-sm font-semibold text-slate-700">
             Aktywne szablony: {activeCount} z {templates.length}
@@ -454,6 +505,9 @@ export default function SmsTemplatesAdmin() {
                         </span>
                         <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-600">
                           {template.is_system ? "Systemowy" : "Własny"}
+                        </span>
+                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700">
+                          {CATEGORY_LABELS[template.category]}
                         </span>
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-bold ${

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
+import ClientSmsPanel from "@/components/sms/ClientSmsPanel";
+import type { SmsTemplateCategory } from "@/lib/saleSms";
 import OpenOcrSourceImageButton from "@/components/clients/OpenOcrSourceImageButton";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
@@ -262,6 +264,8 @@ export default function ClientPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [hasSmsAccess, setHasSmsAccess] = useState(false);
+  const [selectedSmsCategory, setSelectedSmsCategory] =
+    useState<SmsTemplateCategory>("sale");
   const [selectedSmsSaleId, setSelectedSmsSaleId] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -2241,31 +2245,57 @@ export default function ClientPage() {
 
             {activeTab === "sms" && hasSmsAccess ? (
               <div className="space-y-5">
-                {sales.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                    Klient nie ma sprzedaży, dla której można wysłać gotową wiadomość.
-                  </p>
+                <label className="block text-sm font-bold text-slate-700">
+                  Kategoria wiadomości
+                  <select
+                    value={selectedSmsCategory}
+                    onChange={(event) =>
+                      setSelectedSmsCategory(
+                        event.target.value as SmsTemplateCategory
+                      )
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-fuchsia-600"
+                  >
+                    <option value="sale">Do sprzedaży</option>
+                    <option value="marketing">Marketingowy</option>
+                    <option value="relationship">Relacyjny</option>
+                  </select>
+                </label>
+
+                {selectedSmsCategory === "sale" ? (
+                  sales.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                      Klient nie ma sprzedaży. Wybierz kategorię marketingową lub relacyjną, aby wysłać SMS bez umowy.
+                    </p>
+                  ) : (
+                    <>
+                      <label className="block text-sm font-bold text-slate-700">
+                        Sprzedaż / umowa
+                        <select
+                          value={selectedSmsSaleId}
+                          onChange={(event) => setSelectedSmsSaleId(event.target.value)}
+                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-fuchsia-600"
+                        >
+                          {sales.map((sale) => (
+                            <option key={sale.id} value={sale.id}>
+                              {sale.contract_number ||
+                                (sale.public_id
+                                  ? `SALE-${String(sale.public_id).padStart(6, "0")}`
+                                  : `SALE-${sale.id.slice(0, 8).toUpperCase()}`)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {selectedSmsSaleId ? (
+                        <SaleSmsPanel saleId={selectedSmsSaleId} />
+                      ) : null}
+                    </>
+                  )
                 ) : (
-                  <>
-                    <label className="block text-sm font-bold text-slate-700">
-                      Sprzedaż / umowa
-                      <select
-                        value={selectedSmsSaleId}
-                        onChange={(event) => setSelectedSmsSaleId(event.target.value)}
-                        className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none focus:border-fuchsia-600"
-                      >
-                        {sales.map((sale) => (
-                          <option key={sale.id} value={sale.id}>
-                            {sale.contract_number ||
-                              (sale.public_id
-                                ? `SALE-${String(sale.public_id).padStart(6, "0")}`
-                                : `SALE-${sale.id.slice(0, 8).toUpperCase()}`)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {selectedSmsSaleId ? <SaleSmsPanel saleId={selectedSmsSaleId} /> : null}
-                  </>
+                  <ClientSmsPanel
+                    clientId={clientId}
+                    category={selectedSmsCategory}
+                  />
                 )}
               </div>
             ) : null}

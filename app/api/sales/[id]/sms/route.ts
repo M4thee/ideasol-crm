@@ -3,6 +3,7 @@ import { canAccessSaleForSms, requireSmsRequest } from "@/lib/auth/requireSmsReq
 import {
   buildSaleSmsTemplates,
   type SmsTemplateDefinition,
+  type SmsTemplateCategory,
   type SmsTemplateRequiredField,
   type SmsTemplateTone,
   type SaleSmsTemplateType,
@@ -105,9 +106,10 @@ async function loadSaleSmsData(saleId: string) {
       supabaseAdmin
         .from("sms_templates")
         .select(
-          "id,template_key,title,message_template,tone,required_fields,is_active,is_system,sort_order"
+          "id,template_key,title,message_template,tone,category,required_fields,is_active,is_system,sort_order"
         )
         .eq("is_active", true)
+        .eq("category", "sale")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
     ]);
@@ -164,6 +166,7 @@ async function loadSaleSmsData(saleId: string) {
       title: template.title,
       messageTemplate: template.message_template,
       tone: template.tone as SmsTemplateTone,
+      category: template.category as SmsTemplateCategory,
       requiredFields: (template.required_fields || []) as SmsTemplateRequiredField[],
       isActive: template.is_active,
       isSystem: template.is_system,
@@ -181,7 +184,10 @@ async function loadSaleSmsData(saleId: string) {
         .eq("status", "sent")
         .in(
           "message_type",
-          [...templateTypes].map((type) => `sale_${type}`)
+          [...templateTypes].flatMap((type) => [
+            `sale_${type}`,
+            `client_${type}`,
+          ])
         )
     : { data: [], error: null };
 
@@ -218,7 +224,7 @@ async function loadSaleSmsData(saleId: string) {
       if (!wasDeliveredToIntendedRecipient(item.provider_response)) return counts;
 
       const templateType = String(item.message_type || "").replace(
-        /^sale_/,
+        /^(?:sale|client)_/,
         ""
       ) as SaleSmsTemplateType;
 

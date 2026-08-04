@@ -2,8 +2,14 @@ export const IDEASOL_BANK_ACCOUNT = "33 1140 2004 0000 3302 8689 3030";
 export const IDEASOL_HOTLINE = "41 202 02 38";
 
 export const SMS_TEMPLATE_TONES = ["standard", "warning", "danger"] as const;
+export const SMS_TEMPLATE_CATEGORIES = [
+  "sale",
+  "marketing",
+  "relationship",
+] as const;
 
 export type SmsTemplateTone = (typeof SMS_TEMPLATE_TONES)[number];
+export type SmsTemplateCategory = (typeof SMS_TEMPLATE_CATEGORIES)[number];
 export type SaleSmsTemplateType = string;
 
 export const SMS_TEMPLATE_REQUIRED_FIELDS = [
@@ -60,6 +66,7 @@ export type SmsTemplateDefinition = {
   title: string;
   messageTemplate: string;
   tone: SmsTemplateTone;
+  category?: SmsTemplateCategory;
   requiredFields: SmsTemplateRequiredField[];
   isActive?: boolean;
   isSystem?: boolean;
@@ -74,6 +81,7 @@ export type SaleSmsTemplate = {
   enabled: boolean;
   reason: string | null;
   tone: SmsTemplateTone;
+  category: SmsTemplateCategory;
   isSystem?: boolean;
 };
 
@@ -103,6 +111,7 @@ export const DEFAULT_SALE_SMS_TEMPLATE_DEFINITIONS: SmsTemplateDefinition[] = [
     type: "deposit_reminder",
     title: "Przypomnienie o wpłacie zaliczki",
     tone: "standard",
+    category: "sale",
     requiredFields: ["contract_number", "deposit_amount"],
     sortOrder: 10,
     isSystem: true,
@@ -113,6 +122,7 @@ export const DEFAULT_SALE_SMS_TEMPLATE_DEFINITIONS: SmsTemplateDefinition[] = [
     type: "payment_reminder_1",
     title: "Przypomnienie o płatności – I",
     tone: "warning",
+    category: "sale",
     requiredFields: ["contract_number", "outstanding_amount"],
     sortOrder: 20,
     isSystem: true,
@@ -123,6 +133,7 @@ export const DEFAULT_SALE_SMS_TEMPLATE_DEFINITIONS: SmsTemplateDefinition[] = [
     type: "payment_reminder_2",
     title: "Przypomnienie o płatności – II",
     tone: "warning",
+    category: "sale",
     requiredFields: ["contract_number", "outstanding_amount"],
     sortOrder: 30,
     isSystem: true,
@@ -133,6 +144,7 @@ export const DEFAULT_SALE_SMS_TEMPLATE_DEFINITIONS: SmsTemplateDefinition[] = [
     type: "payment_demand",
     title: "Wezwanie do zapłaty",
     tone: "danger",
+    category: "sale",
     requiredFields: ["outstanding_amount"],
     sortOrder: 40,
     isSystem: true,
@@ -143,6 +155,7 @@ export const DEFAULT_SALE_SMS_TEMPLATE_DEFINITIONS: SmsTemplateDefinition[] = [
     type: "installation_confirmation",
     title: "Potwierdzenie daty montażu",
     tone: "standard",
+    category: "sale",
     requiredFields: [
       "installation_date",
       "installation_time",
@@ -295,6 +308,7 @@ export function buildSaleSmsTemplates(
         enabled: !reason,
         reason: reason || null,
         tone: definition.tone,
+        category: definition.category || "sale",
         isSystem: definition.isSystem,
       };
     });
