@@ -13,6 +13,30 @@ export type MeetingConfirmationReminderMessageInput = {
   kind?: "meeting" | "phone";
 };
 
+export type MeetingConfirmationReminderEligibilityInput = {
+  eventType: "meeting" | "reminder" | "phone_call";
+  eventAt: string;
+  now?: Date;
+  phoneGraceMinutes?: number;
+};
+
+export function isMeetingConfirmationReminderEligible({
+  eventType,
+  eventAt,
+  now = new Date(),
+  phoneGraceMinutes = 10,
+}: MeetingConfirmationReminderEligibilityInput) {
+  const eventTime = new Date(eventAt).getTime();
+
+  if (!Number.isFinite(eventTime)) return false;
+
+  if (eventType === "meeting") {
+    return eventTime > now.getTime();
+  }
+
+  return eventTime >= now.getTime() - phoneGraceMinutes * 60 * 1000;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

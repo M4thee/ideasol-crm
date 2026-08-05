@@ -1,13 +1,14 @@
 
 
 import { NextResponse } from "next/server";
-import { requireSmsRequest } from "@/lib/auth/requireSmsRequest";
+import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 import {
   normalizePolishPhoneNumber,
   removePolishDiacritics,
   sendSmsApiMessage,
 } from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getConfiguredSmsSender } from "@/lib/smsSender";
 
 type SendSmsRequest = {
   clientId?: string | null;
@@ -15,7 +16,6 @@ type SendSmsRequest = {
   meetingId?: string | null;
   phone?: string;
   message?: string;
-  messageType?: string;
 };
 
 function serializeError(error: unknown) {
@@ -42,10 +42,10 @@ export async function POST(request: Request) {
   let smsMessageId: string | null = null;
 
   try {
-    const profile = await requireSmsRequest(request);
+    const profile = await requireAdminRequest(request);
     if (!profile) {
       return NextResponse.json(
-        { ok: false, error: "Brak uprawnienia SMS." },
+        { ok: false, error: "Tylko administrator może wysłać wiadomość własną." },
         { status: 403 }
       );
     }
@@ -53,9 +53,26 @@ export async function POST(request: Request) {
     const body = (await request.json()) as SendSmsRequest;
     const recipientPhone = normalizePolishPhoneNumber(String(body.phone || ""));
     const message = removePolishDiacritics(body.message).trim();
-    const sender = process.env.SMSAPI_SENDER?.trim() || "";
-    const senderLabel = sender || "SMSAPI_DEFAULT";
-    const messageType = String(body.messageType || "manual").trim() || "manual";
+    const sender = await getConfiguredSmsSender();
+    const senderLabel = sender;
+    let clientId = body.clientId || null;
+
+    if (!clientId && body.saleId) {
+      const { data: sale, error: saleError } = await supabaseAdmin
+        .from("sales")
+        .select("client_id")
+        .eq("id", body.saleId)
+        .maybeSingle();
+
+      if (saleError || !sale) {
+        return NextResponse.json(
+          { ok: false, error: "Nie znaleziono sprzedaży powiązanej z SMS-em." },
+          { status: 404 }
+        );
+      }
+
+      clientId = sale.client_id || null;
+    }
 
     if (!recipientPhone) {
       return NextResponse.json(
@@ -71,10 +88,17 @@ export async function POST(request: Request) {
       );
     }
 
+    if (message.length > 1200) {
+      return NextResponse.json(
+        { ok: false, error: "Treść SMS może mieć maksymalnie 1200 znaków." },
+        { status: 400 }
+      );
+    }
+
     const { data: smsLog, error: smsLogError } = await supabaseAdmin
       .from("sms_messages")
       .insert({
-        client_id: body.clientId || null,
+        client_id: clientId,
         sale_id: body.saleId || null,
         meeting_id: body.meetingId || null,
         sent_by_user_id: profile.id,
@@ -83,7 +107,7 @@ export async function POST(request: Request) {
         message,
         status: "pending",
         provider: "smsapi",
-        message_type: messageType,
+        message_type: "manual",
       })
       .select("id")
       .single();
@@ -125,18 +149,18 @@ export async function POST(request: Request) {
       }
 
       if (
-        body.clientId &&
+        clientId &&
         result.intendedRecipientPhone === result.actualRecipientPhone
       ) {
         const { error: activityError } = await supabaseAdmin
           .from("client_activities")
           .insert({
-            client_id: body.clientId,
+            client_id: clientId,
             created_by: profile.id,
             activity_type: "sms",
             contact_type: "sms",
             status: "sent",
-            description: message,
+            description: `Wiadomość własna: ${message}`,
           });
 
         if (activityError) {

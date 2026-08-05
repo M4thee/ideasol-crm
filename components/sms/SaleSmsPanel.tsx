@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { SaleSmsTemplate, SaleSmsTemplateType } from "@/lib/saleSms";
+import ManualSmsComposer from "@/components/sms/ManualSmsComposer";
 
 type Payment = {
   id: string;
@@ -63,7 +64,15 @@ function statusLabel(status: string) {
   return "Oczekuje";
 }
 
-export default function SaleSmsPanel({ saleId }: { saleId: string }) {
+export default function SaleSmsPanel({
+  saleId,
+  isAdmin = false,
+  showManualComposer = true,
+}: {
+  saleId: string;
+  isAdmin?: boolean;
+  showManualComposer?: boolean;
+}) {
   const [data, setData] = useState<SmsModuleData | null>(null);
   const [selectedTemplateType, setSelectedTemplateType] = useState<
     SaleSmsTemplateType | ""
@@ -303,6 +312,27 @@ export default function SaleSmsPanel({ saleId }: { saleId: string }) {
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
           {status}
         </div>
+      ) : null}
+
+      {isAdmin && showManualComposer ? (
+        <ManualSmsComposer
+          key={saleId}
+          clientId={null}
+          saleId={saleId}
+          recipients={[
+            {
+              id: "sale",
+              label: "Numer ze sprzedaży",
+              phone: data.recipientPhones.sale,
+            },
+            {
+              id: "client",
+              label: "Numer z karty klienta",
+              phone: data.recipientPhones.client,
+            },
+          ]}
+          onSent={loadModule}
+        />
       ) : null}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

@@ -2662,7 +2662,10 @@ export default function SalePage() {
               )}
 
               {activeTab === "sms" && hasSmsAccess ? (
-                <SaleSmsPanel saleId={sale.id} />
+                <SaleSmsPanel
+                  saleId={sale.id}
+                  isAdmin={currentUserRole === "admin"}
+                />
               ) : null}
             </div>
           </section>

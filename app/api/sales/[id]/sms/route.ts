@@ -14,6 +14,7 @@ import {
   sendSmsApiMessage,
 } from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getConfiguredSmsSender } from "@/lib/smsSender";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -381,8 +382,8 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const sender = process.env.SMSAPI_SENDER?.trim() || "";
-    const senderLabel = sender || "SMSAPI_DEFAULT";
+    const sender = await getConfiguredSmsSender();
+    const senderLabel = sender;
     const messageType = `sale_${templateType}`;
     const { data: smsLog, error: smsLogError } = await supabaseAdmin
       .from("sms_messages")

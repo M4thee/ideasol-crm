@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
 import ClientSmsPanel from "@/components/sms/ClientSmsPanel";
+import ManualSmsComposer from "@/components/sms/ManualSmsComposer";
 import type { SmsTemplateCategory } from "@/lib/saleSms";
 import OpenOcrSourceImageButton from "@/components/clients/OpenOcrSourceImageButton";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
@@ -569,10 +570,12 @@ export default function ClientPage() {
 
       const activitiesWithAuthors = (activitiesData || []).map((activity) => {
         const author = activity.created_by ? activityProfilesById[activity.created_by] : null;
+        const isSystemSms = activity.activity_type === "sms" && !activity.created_by;
 
         return {
           ...activity,
-          author_name: author?.display_name || "Nieznany użytkownik",
+          author_name:
+            author?.display_name || (isSystemSms ? "System IdeaSol" : "Nieznany użytkownik"),
           author_email: author?.email || null,
         };
       });
@@ -1995,7 +1998,10 @@ export default function ClientPage() {
                             contactChannelLabels[activityType as ContactChannel] || activityType;
                           const activityVisual =
                             contactChannelStyles[activityType] || contactChannelStyles.phone;
-                          const contactTypeLabel = activity.contact_type || "Kontakt";
+                          const contactTypeLabel =
+                            activity.contact_type?.toLowerCase() === "sms"
+                              ? "SMS"
+                              : activity.contact_type || "Kontakt";
 
                           return (
                             <div
@@ -2245,6 +2251,28 @@ export default function ClientPage() {
 
             {activeTab === "sms" && hasSmsAccess ? (
               <div className="space-y-5">
+                {currentUserRole === "admin" && client ? (
+                  <ManualSmsComposer
+                    clientId={clientId}
+                    recipients={[
+                      {
+                        id: "client",
+                        label: "Telefon klienta",
+                        phone: client.phone,
+                      },
+                      {
+                        id: "contact",
+                        label: "Telefon kontaktowy",
+                        phone:
+                          client.contact_phone !== client.phone
+                            ? client.contact_phone
+                            : null,
+                      },
+                    ]}
+                    onSent={loadClientCard}
+                  />
+                ) : null}
+
                 <label className="block text-sm font-bold text-slate-700">
                   Kategoria wiadomości
                   <select
@@ -2287,7 +2315,11 @@ export default function ClientPage() {
                         </select>
                       </label>
                       {selectedSmsSaleId ? (
-                        <SaleSmsPanel saleId={selectedSmsSaleId} />
+                        <SaleSmsPanel
+                          saleId={selectedSmsSaleId}
+                          isAdmin={currentUserRole === "admin"}
+                          showManualComposer={false}
+                        />
                       ) : null}
                     </>
                   )

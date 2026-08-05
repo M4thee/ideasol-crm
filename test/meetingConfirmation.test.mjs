@@ -3,9 +3,57 @@ import test from "node:test";
 
 import {
   buildMeetingConfirmationReminderMessage,
+  isMeetingConfirmationReminderEligible,
   meetingConfirmationReminderToIso,
   validateMeetingConfirmationReminder,
 } from "../lib/meetingConfirmation.ts";
+
+test("przypomnienie telefoniczne może zostać wysłane dokładnie w chwili kontaktu", () => {
+  const now = new Date("2026-08-05T09:00:00.000Z");
+
+  assert.equal(
+    isMeetingConfirmationReminderEligible({
+      eventType: "phone_call",
+      eventAt: now.toISOString(),
+      now,
+    }),
+    true
+  );
+});
+
+test("krótkie opóźnienie harmonogramu nie gubi przypomnienia telefonicznego", () => {
+  const now = new Date("2026-08-05T09:07:00.000Z");
+
+  assert.equal(
+    isMeetingConfirmationReminderEligible({
+      eventType: "phone_call",
+      eventAt: "2026-08-05T09:00:00.000Z",
+      now,
+    }),
+    true
+  );
+  assert.equal(
+    isMeetingConfirmationReminderEligible({
+      eventType: "phone_call",
+      eventAt: "2026-08-05T08:49:59.000Z",
+      now,
+    }),
+    false
+  );
+});
+
+test("przypomnienie o spotkaniu nie jest wysyłane po jego terminie", () => {
+  const now = new Date("2026-08-05T09:00:00.000Z");
+
+  assert.equal(
+    isMeetingConfirmationReminderEligible({
+      eventType: "meeting",
+      eventAt: "2026-08-05T08:59:59.000Z",
+      now,
+    }),
+    false
+  );
+});
 
 test("nie wymaga terminu przypomnienia, gdy checkbox jest wyłączony", () => {
   assert.equal(

@@ -5,6 +5,7 @@ import {
   removePolishDiacritics,
   sendSmsApiMessage,
 } from "@/lib/smsapi";
+import { getConfiguredSmsSender } from "@/lib/smsSender";
 import {
   formatSmsAutomationDateTime,
   getBaseSmsAutomationValues,
@@ -225,8 +226,8 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
     }
   }
 
-  const sender = process.env.SMSAPI_SENDER?.trim() || "";
-  const senderLabel = sender || "SMSAPI_DEFAULT";
+  const sender = await getConfiguredSmsSender();
+  const senderLabel = sender;
   const eventDateTime = formatSmsAutomationDateTime(event.event_at as string);
   const message = removePolishDiacritics(
     renderSmsAutomationTemplate(params.automation.message_template, {
@@ -298,7 +299,7 @@ async function sendMeetingSms(params: SendMeetingSmsInput & {
         activity_type: "sms",
         contact_type: "sms",
         status: "sent",
-        description: message,
+        description: `Automatyczny SMS — ${params.automation.title}\n${message}`,
       });
 
     if (activityError) {

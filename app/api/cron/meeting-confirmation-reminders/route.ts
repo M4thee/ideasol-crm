@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTeamsDirectMeetingConfirmationReminder } from "@/lib/microsoftTeams";
+import { isMeetingConfirmationReminderEligible } from "@/lib/meetingConfirmation";
 
 type PendingMeetingConfirmation = {
   id: string;
@@ -70,6 +71,7 @@ export async function GET(request: Request) {
   const supabaseAdmin = getSupabaseAdminClient();
   const now = new Date();
   const retryBefore = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  const phoneReminderGraceCutoff = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
 
   const { data, error } = await supabaseAdmin
     .from("calendar_events")
@@ -81,7 +83,7 @@ export async function GET(request: Request) {
     .is("client_confirmed_at", null)
     .is("confirmation_reminder_sent_at", null)
     .lte("confirmation_reminder_at", now.toISOString())
-    .gt("event_at", now.toISOString())
+    .gte("event_at", phoneReminderGraceCutoff)
     .or(
       `confirmation_reminder_attempted_at.is.null,confirmation_reminder_attempted_at.lte.${retryBefore}`
     )
@@ -96,7 +98,13 @@ export async function GET(request: Request) {
     );
   }
 
-  const meetings = (data || []) as PendingMeetingConfirmation[];
+  const meetings = ((data || []) as PendingMeetingConfirmation[]).filter((meeting) =>
+    isMeetingConfirmationReminderEligible({
+      eventType: meeting.event_type,
+      eventAt: meeting.event_at,
+      now,
+    })
+  );
   const results: Array<{ id: string; ok: boolean; error?: string }> = [];
 
   for (const meeting of meetings) {

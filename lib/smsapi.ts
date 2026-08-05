@@ -12,6 +12,13 @@ export type SmsApiSendMessageResult = {
   raw: unknown;
 };
 
+export type SmsApiSenderNameStatus = {
+  sender: string;
+  status: "ACTIVE" | "INACTIVE" | "NOT_FOUND" | "UNKNOWN";
+  isDefault: boolean;
+  exists: boolean;
+};
+
 type SmsEnvironment = {
   SMSAPI_TOKEN?: string;
   SMSAPI_SENDER?: string;
@@ -64,6 +71,79 @@ function getSmsApiConfig() {
     token,
     sender,
     baseUrl: baseUrl.replace(/\/$/, ""),
+  };
+}
+
+function getSmsApiErrorMessage(responseBody: unknown) {
+  if (typeof responseBody === "string") return responseBody;
+  if (typeof responseBody !== "object" || responseBody === null) {
+    return "Nieznany błąd SMSAPI.";
+  }
+
+  const errorBody = responseBody as {
+    error?: unknown;
+    message?: unknown;
+  };
+
+  return typeof errorBody.message === "string"
+    ? `SMSAPI ${String(errorBody.error || "")}: ${errorBody.message}`.trim()
+    : JSON.stringify(responseBody);
+}
+
+export async function getSmsApiSenderNameStatus(
+  senderName: string
+): Promise<SmsApiSenderNameStatus> {
+  const config = getSmsApiConfig();
+  const sender = String(senderName || "").trim();
+
+  if (!sender || sender.length > 11) {
+    throw new Error("Nazwa nadawcy musi mieć od 1 do 11 znaków.");
+  }
+
+  const response = await fetch(
+    `${config.baseUrl}/sms/sendernames/${encodeURIComponent(sender)}`,
+    {
+      headers: { Authorization: `Bearer ${config.token}` },
+      cache: "no-store",
+    }
+  );
+  const responseText = await response.text();
+  let responseBody: unknown = responseText;
+
+  try {
+    responseBody = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    responseBody = responseText;
+  }
+
+  if (response.status === 404) {
+    return {
+      sender,
+      status: "NOT_FOUND",
+      isDefault: false,
+      exists: false,
+    };
+  }
+
+  if (!response.ok) {
+    throw new Error(getSmsApiErrorMessage(responseBody));
+  }
+
+  const senderData = responseBody as {
+    sender?: unknown;
+    status?: unknown;
+    is_default?: unknown;
+  };
+  const rawStatus = String(senderData.status || "UNKNOWN").toUpperCase();
+  const status = rawStatus === "ACTIVE" || rawStatus === "INACTIVE"
+    ? rawStatus
+    : "UNKNOWN";
+
+  return {
+    sender: String(senderData.sender || sender).trim() || sender,
+    status,
+    isDefault: senderData.is_default === true,
+    exists: true,
   };
 }
 

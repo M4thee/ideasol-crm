@@ -14,6 +14,7 @@ import {
   sendSmsApiMessage,
 } from "@/lib/smsapi";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getConfiguredSmsSender } from "@/lib/smsSender";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,14 +107,14 @@ async function sendInstallationAutomation(sale: SaleRow, automation: SmsAutomati
         installer_phone: installer.phone,
       })
     );
-    const sender = process.env.SMSAPI_SENDER?.trim() || "";
+    const sender = await getConfiguredSmsSender();
     const { data: smsLog, error: smsLogError } = await supabaseAdmin
       .from("sms_messages")
       .insert({
         client_id: sale.client_id,
         sale_id: sale.id,
         recipient_phone: recipientPhone,
-        sender: sender || "SMSAPI_DEFAULT",
+        sender,
         message,
         status: "pending",
         provider: "smsapi",
@@ -171,7 +172,7 @@ async function sendInstallationAutomation(sale: SaleRow, automation: SmsAutomati
         activity_type: "sms",
         contact_type: "sms",
         status: "sent",
-        description: `${automation.title}: ${message}`,
+        description: `Automatyczny SMS — ${automation.title}\n${message}`,
       });
       if (activityError) console.error("Nie udało się zapisać aktywności SMS", activityError);
     }

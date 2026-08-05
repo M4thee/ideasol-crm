@@ -13,6 +13,7 @@ import {
 } from "@/lib/saleSms";
 import { supabase } from "@/lib/supabase";
 import AutomaticSmsAdmin from "@/components/admin/AutomaticSmsAdmin";
+import SmsSenderNamesAdmin from "@/components/admin/SmsSenderNamesAdmin";
 
 type SmsTemplate = {
   id: string;
@@ -418,6 +419,8 @@ export default function SmsTemplatesAdmin() {
           {status}
         </div>
       ) : null}
+
+      <SmsSenderNamesAdmin />
 
       {showNewForm ? (
         <div className="rounded-3xl border border-fuchsia-200 bg-fuchsia-50/60 p-5">
