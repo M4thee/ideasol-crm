@@ -4,6 +4,7 @@ import Link from "next/link";
 // ...no change above
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getCrmAuditSessionId, recordCrmAuditEvent } from "@/lib/crmAudit";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 declare global {
@@ -861,6 +862,14 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
 
   async function logout() {
     setMobileMenuOpen(false);
+    await recordCrmAuditEvent({
+      eventType: "session_ended",
+      action: "logout",
+      module: "crm",
+      summary: "Użytkownik wylogował się z CRM",
+      path: window.location.pathname,
+      sessionId: getCrmAuditSessionId(),
+    });
     await supabase.auth.signOut({ scope: "global" });
 
     try {

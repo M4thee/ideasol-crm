@@ -8,6 +8,11 @@ import {
   type CrmResumeReason,
 } from "@/lib/useCrmResumeRefresh";
 import AppHeader from "@/app/components/AppHeader";
+import {
+  getAuditContextFromPath,
+  getCrmAuditSessionId,
+  recordCrmAuditEvent,
+} from "@/lib/crmAudit";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -55,6 +60,7 @@ export default function AppShell({ children }: AppShellProps) {
   const backgroundedAtRef = useRef<number | null>(null);
   const lastResumeAtRef = useRef(0);
   const resumeInFlightRef = useRef(false);
+  const lastAuditedPathRef = useRef("");
   const router = useRouter();
   const pathname = usePathname();
   const isCalculatorApp = pathname?.startsWith("/calculator-app");
@@ -188,6 +194,47 @@ export default function AppShell({ children }: AppShellProps) {
   }, [isCalculatorApp, pathname, router]);
 
   useEffect(() => {
+    if (isCalculatorApp || !isLoggedIn || !pathname) return;
+
+    const sessionId = getCrmAuditSessionId();
+
+    if (!sessionId) return;
+
+    const sessionStartedKey = `ideasol:crm-audit-started:${sessionId}`;
+
+    if (!window.sessionStorage.getItem(sessionStartedKey)) {
+      window.sessionStorage.setItem(sessionStartedKey, new Date().toISOString());
+      void recordCrmAuditEvent({
+        eventType: "session_started",
+        action: "login",
+        module: "crm",
+        summary: "Użytkownik wszedł do CRM",
+        path: pathname,
+        sessionId,
+      });
+    }
+
+    if (lastAuditedPathRef.current === pathname) return;
+    lastAuditedPathRef.current = pathname;
+
+    const context = getAuditContextFromPath(pathname);
+    void recordCrmAuditEvent({
+      eventType: "page_view",
+      action: "view",
+      module: context.moduleName,
+      summary: `Otwarto widok ${pathname}`,
+      path: pathname,
+      clientId: context.clientId,
+      saleId: context.saleId,
+      offerId: context.offerId,
+      sessionId,
+      metadata: {
+        page_title: document.title,
+      },
+    });
+  }, [isCalculatorApp, isLoggedIn, pathname]);
+
+  useEffect(() => {
     if (isCalculatorApp) return;
 
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -264,6 +311,23 @@ export default function AppShell({ children }: AppShellProps) {
         setIsLoggedIn(true);
         backgroundedAtRef.current = null;
         emitCrmResume(reason);
+        const context = getAuditContextFromPath(pathname || "/");
+        void recordCrmAuditEvent({
+          eventType: "session_resumed",
+          action: "resume",
+          module: context.moduleName,
+          summary: "Użytkownik wrócił do aktywnej sesji CRM",
+          path: pathname || "/",
+          clientId: context.clientId,
+          saleId: context.saleId,
+          offerId: context.offerId,
+          sessionId: getCrmAuditSessionId(),
+          metadata: {
+            reason,
+            background_duration_ms:
+              backgroundedAt === null ? null : Math.max(0, now - backgroundedAt),
+          },
+        });
       } catch (error) {
         console.error("Nie udało się wznowić sesji CRM:", error);
 

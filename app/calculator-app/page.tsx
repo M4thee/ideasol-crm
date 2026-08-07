@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import OfferResult, { type OfferEmailOptions } from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
 import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
+import { recordCrmAuditEvent } from "@/lib/crmAudit";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
 import {
@@ -663,6 +664,7 @@ export default function Home() {
   const [emailStatus, setEmailStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const calculationAuditIdRef = useRef<string | null>(null);
 
   const currentUserRole = String(userProfile?.role || "seller")
     .trim()
@@ -1733,6 +1735,31 @@ export default function Home() {
       }
 
       setResult(data);
+      const calculationId = crypto.randomUUID();
+      calculationAuditIdRef.current = calculationId;
+      void recordCrmAuditEvent({
+        eventType: "calculation_completed",
+        action: "calculate",
+        module: "calculator",
+        summary: `Wykonano kalkulację: ${data.offerType}, ${Number(data.finalGross || 0).toLocaleString("pl-PL")} PLN brutto`,
+        entityType: "calculation",
+        entityId: calculationId,
+        clientId: selectedClientId || clientIdFromUrl || null,
+        correlationId: calculationId,
+        path: "/calculator-app",
+        metadata: {
+          input: calculationPayload,
+          result: {
+            offer_type: data.offerType,
+            final_net: data.finalNet,
+            final_gross: data.finalGross,
+            vat_rate: data.vatRate,
+            pv_power_kw: data.pvPowerKw,
+            inverter: data.inverter,
+            energy_storage: getResultStorageDisplayName(data),
+          },
+        },
+      });
       setCopied(false);
       setEmailStatus("");
       setSaveOfferStatus("");
@@ -1945,6 +1972,19 @@ export default function Home() {
 
     setSavedOfferId(data.id);
 
+    void recordCrmAuditEvent({
+      eventType: "offer_saved",
+      action: "save",
+      module: "offers",
+      summary: `Zapisano ofertę ${data.offer_public_id || data.id} w CRM`,
+      entityType: "client_offers",
+      entityId: data.id,
+      clientId: clientIdForSave,
+      offerId: data.id,
+      correlationId: calculationAuditIdRef.current,
+      path: "/calculator-app",
+    });
+
     setSaveOfferStatus(
       data?.offer_public_id
         ? `Oferta zapisana w CRM jako ${data.offer_public_id}.`
@@ -2086,6 +2126,17 @@ IdeaSol`;
       };
 
       const nextQueueLength = addOfflineOfferToQueue(offlineItem);
+      void recordCrmAuditEvent({
+        eventType: "offer_queued",
+        action: "queue",
+        module: "offers",
+        summary: `Oferta dla ${emailForSend} została dodana do kolejki offline`,
+        entityType: "client_offers",
+        clientId: selectedClientId,
+        correlationId: calculationAuditIdRef.current,
+        path: "/calculator-app",
+        metadata: { recipient: emailForSend, send_mode: mode },
+      });
       setQueuedOfferCount(getOfflineQueueCount());
       setSendingEmail(false);
       setEmailStatus(
@@ -2177,6 +2228,24 @@ IdeaSol`;
         throw new Error("Nie udało się wysłać maila");
       }
 
+      void recordCrmAuditEvent({
+        eventType: "offer_sent",
+        action: "send",
+        module: "offers",
+        summary: `Wysłano ofertę e-mail do ${emailForSend}`,
+        entityType: "client_offers",
+        entityId: savedOfferId,
+        clientId: selectedClientId,
+        offerId: savedOfferId,
+        correlationId: calculationAuditIdRef.current,
+        path: "/calculator-app",
+        metadata: {
+          recipient: emailForSend,
+          send_mode: mode,
+          pdf_attached: Boolean(emailOptions?.includeOfferPdf),
+        },
+      });
+
       const mailActivityDescription = [
         `Wysłano ofertę mailową z kalkulatora.`,
         savedOfferId ? `OfferID: ${savedOfferId}` : null,
@@ -2219,6 +2288,20 @@ IdeaSol`;
       setEmailStatus("Mail został wysłany i zapisany w CRM");
     } catch (error) {
       console.error("Błąd wysyłki oferty mailowej z kalkulatora:", error);
+      void recordCrmAuditEvent({
+        eventType: "offer_send_failed",
+        action: "error",
+        module: "offers",
+        summary: `Nie udało się wysłać oferty do ${emailForSend}`,
+        entityType: "client_offers",
+        clientId: selectedClientId,
+        correlationId: calculationAuditIdRef.current,
+        path: "/calculator-app",
+        metadata: {
+          recipient: emailForSend,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
       setEmailStatus(
         error instanceof Error ? error.message : "Błąd wysyłki maila"
       );
