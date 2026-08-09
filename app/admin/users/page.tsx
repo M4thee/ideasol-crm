@@ -1466,6 +1466,12 @@ export default function AdminUsersPage() {
               >
                 Skracacz linków
               </Link>
+              <Link
+                href="/admin/profit"
+                className="rounded-xl bg-[#0e6b7b] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#095966]"
+              >
+                IdeaSol Profit
+              </Link>
             </div>
           </div>
             {activeSection === "users" && (
