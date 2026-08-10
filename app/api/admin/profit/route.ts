@@ -17,11 +17,13 @@ type ProfitActionInput = {
   reason?: string;
   rewardId?: string;
   categoryId?: string;
+  categorySlug?: string;
   name?: string;
   description?: string;
   pricePoints?: number;
   deliveryType?: "digital" | "physical";
   isAvailable?: boolean;
+  isVisible?: boolean;
   sortOrder?: number;
   orderId?: string;
   orderStatus?: "approved" | "processing" | "shipped" | "completed" | "cancelled";
@@ -118,7 +120,7 @@ export async function GET(request: Request) {
         .order("name", { ascending: true }),
       profit
         .from("reward_categories")
-        .select("id,name,slug,description,sort_order,is_visible")
+        .select("id,name,slug,description,image_path,sort_order,is_visible")
         .is("archived_at", null)
         .order("sort_order", { ascending: true }),
     ]);
@@ -147,13 +149,19 @@ export async function GET(request: Request) {
       },
     }));
 
+    const mediaBaseUrl = `${process.env.PROFIT_SUPABASE_URL?.replace(/\/$/, "")}/storage/v1/object/public/profit-reward-media/`;
+    const withMediaUrl = <T extends { image_path?: string | null }>(item: T) => ({
+      ...item,
+      image_url: item.image_path ? `${mediaBaseUrl}${item.image_path.split("/").map(encodeURIComponent).join("/")}` : null,
+    });
+
     return NextResponse.json({
       ok: true,
       users,
       referrals: referralsResult.data || [],
       orders: ordersResult.data || [],
-      rewards: rewardsResult.data || [],
-      categories: categoriesResult.data || [],
+      rewards: (rewardsResult.data || []).map(withMediaUrl),
+      categories: (categoriesResult.data || []).map(withMediaUrl),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -329,6 +337,77 @@ export async function PATCH(request: Request) {
       });
 
       return NextResponse.json({ ok: true, reward });
+    }
+
+    if (input.action === "save_category") {
+      const name = cleanText(input.name);
+      const description = cleanText(input.description);
+      const sortOrder = Number(input.sortOrder || 0);
+      const requestedSlug = cleanText(input.categorySlug)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80);
+
+      if (input.categoryId && !isUuid(input.categoryId)) {
+        return NextResponse.json({ ok: false, error: "Nieprawidłowa kategoria." }, { status: 400 });
+      }
+      if (name.length < 2 || name.length > 120) {
+        return NextResponse.json({ ok: false, error: "Nazwa kategorii musi mieć od 2 do 120 znaków." }, { status: 400 });
+      }
+      if (!requestedSlug) {
+        return NextResponse.json({ ok: false, error: "Nie udało się utworzyć adresu kategorii z tej nazwy." }, { status: 400 });
+      }
+      if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) {
+        return NextResponse.json({ ok: false, error: "Nieprawidłowa kolejność kategorii." }, { status: 400 });
+      }
+
+      const categoryData = {
+        name,
+        slug: requestedSlug,
+        description: description || null,
+        sort_order: sortOrder,
+        is_visible: input.isVisible !== false,
+      };
+      let before: unknown = null;
+      let category;
+
+      if (input.categoryId) {
+        const beforeResult = await profit.from("reward_categories").select("*").eq("id", input.categoryId).maybeSingle();
+        if (beforeResult.error) throw beforeResult.error;
+        if (!beforeResult.data) {
+          return NextResponse.json({ ok: false, error: "Nie znaleziono kategorii." }, { status: 404 });
+        }
+        before = beforeResult.data;
+        const updateResult = await profit
+          .from("reward_categories")
+          .update(categoryData)
+          .eq("id", input.categoryId)
+          .select("*")
+          .single();
+        if (updateResult.error) throw updateResult.error;
+        category = updateResult.data;
+      } else {
+        const insertResult = await profit.from("reward_categories").insert(categoryData).select("*").single();
+        if (insertResult.error?.code === "23505") {
+          return NextResponse.json({ ok: false, error: "Kategoria o takim adresie już istnieje." }, { status: 409 });
+        }
+        if (insertResult.error) throw insertResult.error;
+        category = insertResult.data;
+      }
+
+      await writeAuditLog({
+        actorId: admin.id,
+        action: input.categoryId ? "reward_category_updated" : "reward_category_created",
+        entityType: "reward_category",
+        entityId: category.id,
+        beforeData: before,
+        afterData: category,
+      });
+
+      return NextResponse.json({ ok: true, category });
     }
 
     if (input.action === "transition_order") {

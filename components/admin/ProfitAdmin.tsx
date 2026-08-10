@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -47,6 +48,10 @@ type RewardCategory = {
   id: string;
   name: string;
   slug: string;
+  description: string | null;
+  image_path: string | null;
+  image_url: string | null;
+  sort_order: number;
   is_visible: boolean;
 };
 
@@ -55,6 +60,8 @@ type Reward = {
   category_id: string;
   name: string;
   description: string | null;
+  image_path: string | null;
+  image_url: string | null;
   price_points: number;
   delivery_type: "digital" | "physical";
   is_available: boolean;
@@ -102,6 +109,15 @@ type RewardFormState = {
   sortOrder: string;
 };
 
+type CategoryFormState = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  sortOrder: string;
+  isVisible: boolean;
+};
+
 const emptyReward: RewardFormState = {
   id: "",
   categoryId: "",
@@ -111,6 +127,15 @@ const emptyReward: RewardFormState = {
   deliveryType: "physical",
   isAvailable: true,
   sortOrder: "100",
+};
+
+const emptyCategory: CategoryFormState = {
+  id: "",
+  name: "",
+  slug: "",
+  description: "",
+  sortOrder: "100",
+  isVisible: true,
 };
 
 const tabs: Array<{ id: ActiveTab; label: string }> = [
@@ -202,6 +227,9 @@ export default function ProfitAdmin() {
   const [pointsValue, setPointsValue] = useState("");
   const [pointsReason, setPointsReason] = useState("");
   const [rewardForm, setRewardForm] = useState<RewardFormState>(emptyReward);
+  const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategory);
+  const [categoryImage, setCategoryImage] = useState<File | null>(null);
+  const [rewardImage, setRewardImage] = useState<File | null>(null);
 
   const loadData = useCallback(async () => {
     setError("");
@@ -250,21 +278,40 @@ export default function ProfitAdmin() {
     };
   }, [data]);
 
-  async function runAction(body: Record<string, unknown>, message: string) {
+  async function runAction<T = { ok: true }>(body: Record<string, unknown>, message: string) {
     setBusy(true);
     setError("");
     setSuccess("");
     try {
-      await profitRequest<{ ok: true }>({ method: "PATCH", body: JSON.stringify(body) });
+      const payload = await profitRequest<T & { ok: true }>({ method: "PATCH", body: JSON.stringify(body) });
       setSuccess(message);
       await loadData();
-      return true;
+      return payload;
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Nie udało się wykonać operacji.");
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function uploadMedia(entityType: "category" | "reward", entityId: string, file: File) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+
+    const body = new FormData();
+    body.set("entityType", entityType);
+    body.set("entityId", entityId);
+    body.set("file", file);
+    const response = await fetch("/api/admin/profit/media", {
+      method: "POST",
+      headers: { authorization: `Bearer ${session.access_token}` },
+      body,
+    });
+    const payload = (await response.json()) as { ok?: boolean; error?: string };
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || "Nie udało się wgrać grafiki.");
   }
 
   async function updateUser(user: ProfitUser, changes: Record<string, unknown>) {
@@ -312,12 +359,51 @@ export default function ProfitAdmin() {
       isAvailable: reward.is_available,
       sortOrder: String(reward.sort_order),
     });
+    setRewardImage(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function editCategory(category: RewardCategory) {
+    setCategoryForm({
+      id: category.id,
+      name: category.name,
+      slug: category.slug,
+      description: category.description || "",
+      sortOrder: String(category.sort_order),
+      isVisible: category.is_visible,
+    });
+    setCategoryImage(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function saveCategory(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const result = await runAction<{ ok: true; category: { id: string } }>(
+      {
+        action: "save_category",
+        categoryId: categoryForm.id || undefined,
+        categorySlug: categoryForm.slug || categoryForm.name,
+        name: categoryForm.name,
+        description: categoryForm.description,
+        sortOrder: Number(categoryForm.sortOrder),
+        isVisible: categoryForm.isVisible,
+      },
+      categoryForm.id ? "Kategoria została zaktualizowana." : "Kategoria została dodana.",
+    );
+    if (!result) return;
+    try {
+      if (categoryImage) await uploadMedia("category", result.category.id, categoryImage);
+      setCategoryForm(emptyCategory);
+      setCategoryImage(null);
+      await loadData();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Kategoria została zapisana, ale grafika nie została wgrana.");
+    }
   }
 
   async function saveReward(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const saved = await runAction(
+    const saved = await runAction<{ ok: true; reward: { id: string } }>(
       {
         action: "save_reward",
         rewardId: rewardForm.id || undefined,
@@ -331,7 +417,15 @@ export default function ProfitAdmin() {
       },
       rewardForm.id ? "Nagroda została zaktualizowana." : "Nagroda została dodana do katalogu."
     );
-    if (saved) setRewardForm({ ...emptyReward, categoryId: data?.categories[0]?.id || "" });
+    if (!saved) return;
+    try {
+      if (rewardImage) await uploadMedia("reward", saved.reward.id, rewardImage);
+      setRewardForm({ ...emptyReward, categoryId: data?.categories[0]?.id || "" });
+      setRewardImage(null);
+      await loadData();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Nagroda została zapisana, ale grafika nie została wgrana.");
+    }
   }
 
   async function transitionOrder(order: RewardOrder, status: RewardOrder["status"]) {
@@ -534,18 +628,60 @@ export default function ProfitAdmin() {
         )}
 
         {activeTab === "rewards" && (
-          <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
-            <form onSubmit={saveReward} className="h-fit rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex items-center justify-between"><h2 className="text-xl font-black">{rewardForm.id ? "Edytuj nagrodę" : "Nowa nagroda"}</h2>{rewardForm.id && <button type="button" onClick={() => setRewardForm({ ...emptyReward, categoryId: data?.categories[0]?.id || "" })} className="text-xs font-bold text-slate-500">Wyczyść</button>}</div>
-              <label className="mt-5 block text-sm font-bold">Kategoria</label><select required value={rewardForm.categoryId} onChange={(event) => setRewardForm((current) => ({ ...current, categoryId: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-950"><option value="">Wybierz kategorię</option>{data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
-              <label className="mt-4 block text-sm font-bold">Nazwa</label><input required value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" />
-              <label className="mt-4 block text-sm font-bold">Opis</label><textarea value={rewardForm.description} onChange={(event) => setRewardForm((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950" />
-              <div className="mt-4 grid grid-cols-2 gap-3"><div><label className="block text-sm font-bold">Cena kWpkt</label><input required type="number" min="1" value={rewardForm.pricePoints} onChange={(event) => setRewardForm((current) => ({ ...current, pricePoints: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div><div><label className="block text-sm font-bold">Kolejność</label><input required type="number" min="0" value={rewardForm.sortOrder} onChange={(event) => setRewardForm((current) => ({ ...current, sortOrder: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div></div>
-              <label className="mt-4 block text-sm font-bold">Dostawa</label><select value={rewardForm.deliveryType} onChange={(event) => setRewardForm((current) => ({ ...current, deliveryType: event.target.value as "digital" | "physical" }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-950"><option value="physical">Wysyłka fizyczna</option><option value="digital">Nagroda cyfrowa</option></select>
-              <label className="mt-4 flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={rewardForm.isAvailable} onChange={(event) => setRewardForm((current) => ({ ...current, isAvailable: event.target.checked }))} className="h-4 w-4" />Widoczna i dostępna</label>
-              <button disabled={busy} className="mt-6 w-full rounded-xl bg-[#0e6b7b] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{rewardForm.id ? "Zapisz zmiany" : "Dodaj nagrodę"}</button>
-            </form>
-            <section className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-2xl font-black">Katalog nagród</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{data?.rewards.map((reward) => <article key={reward.id} className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wider text-[#0e6b7b]">{reward.reward_categories?.name || "Bez kategorii"}</p><h3 className="mt-2 text-lg font-black">{reward.name}</h3></div><span className={`h-2.5 w-2.5 rounded-full ${reward.is_available ? "bg-emerald-500" : "bg-slate-300"}`} /></div><p className="mt-3 line-clamp-2 min-h-10 text-sm text-slate-500">{reward.description || "Brak opisu"}</p><p className="mt-4 text-xl font-black text-[#0e6b7b]">{formatNumber(reward.price_points)} kWpkt</p><button type="button" onClick={() => editReward(reward)} className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">Edytuj</button></article>)}</div></section>
+          <div className="space-y-5">
+            <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
+              <form onSubmit={saveCategory} className="h-fit rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-black">{categoryForm.id ? "Edytuj kategorię" : "Nowa kategoria"}</h2>
+                  {categoryForm.id && <button type="button" onClick={() => { setCategoryForm(emptyCategory); setCategoryImage(null); }} className="text-xs font-bold text-slate-500">Wyczyść</button>}
+                </div>
+                <label className="mt-5 block text-sm font-bold">Nazwa</label>
+                <input required value={categoryForm.name} onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" />
+                <label className="mt-4 block text-sm font-bold">Opis</label>
+                <textarea value={categoryForm.description} onChange={(event) => setCategoryForm((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950" />
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div><label className="block text-sm font-bold">Adres</label><input value={categoryForm.slug} onChange={(event) => setCategoryForm((current) => ({ ...current, slug: event.target.value }))} placeholder="tworzy się z nazwy" className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div>
+                  <div><label className="block text-sm font-bold">Kolejność</label><input required type="number" min="0" value={categoryForm.sortOrder} onChange={(event) => setCategoryForm((current) => ({ ...current, sortOrder: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div>
+                </div>
+                <label className="mt-4 block text-sm font-bold">Grafika kategorii</label>
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setCategoryImage(event.target.files?.[0] || null)} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-50 file:px-3 file:py-2 file:font-bold file:text-[#0e6b7b]" />
+                <p className="mt-2 text-xs text-slate-400">JPG, PNG, WebP lub GIF, maksymalnie 5 MB.</p>
+                <label className="mt-4 flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={categoryForm.isVisible} onChange={(event) => setCategoryForm((current) => ({ ...current, isVisible: event.target.checked }))} className="h-4 w-4" />Widoczna w katalogu</label>
+                <button disabled={busy} className="mt-6 w-full rounded-xl bg-[#0e6b7b] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{categoryForm.id ? "Zapisz kategorię" : "Dodaj kategorię"}</button>
+              </form>
+
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
+                <h2 className="text-2xl font-black">Kategorie nagród</h2>
+                <p className="mt-1 text-sm text-slate-500">Grafika kategorii jest wyświetlana jako baner nad jej nagrodami.</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {data?.categories.map((category) => (
+                    <article key={category.id} className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <div className="relative h-28 bg-gradient-to-br from-cyan-100 to-emerald-50 dark:from-cyan-950 dark:to-slate-900">
+                        {category.image_url ? <Image src={category.image_url} alt={category.name} fill sizes="320px" className="object-cover" /> : null}
+                      </div>
+                      <div className="p-4"><div className="flex items-start justify-between gap-3"><h3 className="font-black">{category.name}</h3><span className={`h-2.5 w-2.5 rounded-full ${category.is_visible ? "bg-emerald-500" : "bg-slate-300"}`} /></div><p className="mt-2 line-clamp-2 min-h-10 text-sm text-slate-500">{category.description || "Brak opisu"}</p><button type="button" onClick={() => editCategory(category)} className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">Edytuj</button></div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
+              <form onSubmit={saveReward} className="h-fit rounded-3xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center justify-between"><h2 className="text-xl font-black">{rewardForm.id ? "Edytuj nagrodę" : "Nowa nagroda"}</h2>{rewardForm.id && <button type="button" onClick={() => { setRewardForm({ ...emptyReward, categoryId: data?.categories[0]?.id || "" }); setRewardImage(null); }} className="text-xs font-bold text-slate-500">Wyczyść</button>}</div>
+                <label className="mt-5 block text-sm font-bold">Kategoria</label><select required value={rewardForm.categoryId} onChange={(event) => setRewardForm((current) => ({ ...current, categoryId: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-950"><option value="">Wybierz kategorię</option>{data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
+                <label className="mt-4 block text-sm font-bold">Nazwa</label><input required value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" />
+                <label className="mt-4 block text-sm font-bold">Opis</label><textarea value={rewardForm.description} onChange={(event) => setRewardForm((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950" />
+                <div className="mt-4 grid grid-cols-2 gap-3"><div><label className="block text-sm font-bold">Cena kWpkt</label><input required type="number" min="1" value={rewardForm.pricePoints} onChange={(event) => setRewardForm((current) => ({ ...current, pricePoints: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div><div><label className="block text-sm font-bold">Kolejność</label><input required type="number" min="0" value={rewardForm.sortOrder} onChange={(event) => setRewardForm((current) => ({ ...current, sortOrder: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div></div>
+                <label className="mt-4 block text-sm font-bold">Dostawa</label><select value={rewardForm.deliveryType} onChange={(event) => setRewardForm((current) => ({ ...current, deliveryType: event.target.value as "digital" | "physical" }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-950"><option value="physical">Wysyłka fizyczna</option><option value="digital">Nagroda cyfrowa</option></select>
+                <label className="mt-4 block text-sm font-bold">Zdjęcie nagrody</label>
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setRewardImage(event.target.files?.[0] || null)} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-50 file:px-3 file:py-2 file:font-bold file:text-[#0e6b7b]" />
+                <p className="mt-2 text-xs text-slate-400">JPG, PNG, WebP lub GIF, maksymalnie 5 MB.</p>
+                <label className="mt-4 flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={rewardForm.isAvailable} onChange={(event) => setRewardForm((current) => ({ ...current, isAvailable: event.target.checked }))} className="h-4 w-4" />Widoczna i dostępna</label>
+                <button disabled={busy} className="mt-6 w-full rounded-xl bg-[#0e6b7b] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{rewardForm.id ? "Zapisz zmiany" : "Dodaj nagrodę"}</button>
+              </form>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-2xl font-black">Katalog nagród</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{data?.rewards.map((reward) => <article key={reward.id} className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700"><div className="relative h-32 bg-gradient-to-br from-cyan-100 to-emerald-50 dark:from-cyan-950 dark:to-slate-900">{reward.image_url ? <Image src={reward.image_url} alt={reward.name} fill sizes="320px" className="object-cover" /> : null}</div><div className="p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wider text-[#0e6b7b]">{reward.reward_categories?.name || "Bez kategorii"}</p><h3 className="mt-2 text-lg font-black">{reward.name}</h3></div><span className={`h-2.5 w-2.5 rounded-full ${reward.is_available ? "bg-emerald-500" : "bg-slate-300"}`} /></div><p className="mt-3 line-clamp-2 min-h-10 text-sm text-slate-500">{reward.description || "Brak opisu"}</p><p className="mt-4 text-xl font-black text-[#0e6b7b]">{formatNumber(reward.price_points)} kWpkt</p><button type="button" onClick={() => editReward(reward)} className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">Edytuj</button></div></article>)}</div></div>
+            </section>
           </div>
         )}
 
