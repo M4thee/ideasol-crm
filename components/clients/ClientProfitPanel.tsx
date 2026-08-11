@@ -19,6 +19,21 @@ export type ClientProfitAccount = {
     pending_points: number | string | null;
     reserved_points: number | string | null;
   };
+  points_history: Array<{
+    id: string;
+    entry_type: string;
+    status: string;
+    points: number | string;
+    description: string;
+    reason: string | null;
+    earned_at: string | null;
+    available_at: string | null;
+    reserved_at: string | null;
+    spent_at: string | null;
+    cancelled_at: string | null;
+    expires_at: string | null;
+    created_at: string;
+  }>;
 };
 
 type Props = {
@@ -33,6 +48,40 @@ type Props = {
 function formatPoints(value: number | string | null | undefined) {
   return Number(value || 0).toLocaleString("pl-PL");
 }
+
+function formatPointChange(value: number | string) {
+  const amount = Number(value || 0);
+  return `${amount > 0 ? "+" : ""}${formatPoints(amount)} kWpkt`;
+}
+
+function formatHistoryDate(value: string) {
+  return new Intl.DateTimeFormat("pl-PL", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+const entryTypeLabels: Record<string, string> = {
+  registration: "Rejestracja",
+  own_purchase: "Zakup własny",
+  referral: "Polecenie",
+  manual_bonus: "Bonus ręczny",
+  manual_correction: "Korekta ręczna",
+  reward_reservation: "Rezerwacja nagrody",
+  reward_release: "Zwolnienie rezerwacji",
+  reward_spend: "Odbiór nagrody",
+  expiry: "Wygaśnięcie punktów",
+  reversal: "Odwrócenie operacji",
+};
+
+const pointStatusLabels: Record<string, string> = {
+  pending: "Oczekujące",
+  available: "Dostępne",
+  reserved: "Zarezerwowane",
+  spent: "Wykorzystane",
+  cancelled: "Anulowane",
+  expired: "Wygasłe",
+};
 
 async function authenticatedRequest<T>(url: string, init: RequestInit) {
   const {
@@ -211,6 +260,71 @@ export default function ClientProfitPanel({
           </div>
         )}
       </section>
+
+      {account && (
+        <section className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 className="text-lg font-black">Pełna historia kWpkt</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Wszystkie przyznania, rezerwacje, wykorzystania, korekty i wygaśnięcia punktów.
+              </p>
+            </div>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+              {account.points_history.length} {account.points_history.length === 1 ? "operacja" : "operacji"}
+            </p>
+          </div>
+
+          {account.points_history.length === 0 ? (
+            <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-800/60">
+              Na koncie nie ma jeszcze operacji punktowych.
+            </p>
+          ) : (
+            <div className="mt-5 overflow-x-auto">
+              <table className="min-w-[820px] w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-xs font-black uppercase tracking-wide text-slate-400 dark:border-slate-700">
+                    <th className="px-3 py-3">Data</th>
+                    <th className="px-3 py-3">Operacja</th>
+                    <th className="px-3 py-3">Opis</th>
+                    <th className="px-3 py-3">Status</th>
+                    <th className="px-3 py-3 text-right">Zmiana</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {account.points_history.map((entry) => {
+                    const amount = Number(entry.points || 0);
+                    return (
+                      <tr key={entry.id} className="border-b border-slate-100 align-top last:border-0 dark:border-slate-800">
+                        <td className="whitespace-nowrap px-3 py-4 text-slate-500">
+                          {formatHistoryDate(entry.created_at)}
+                        </td>
+                        <td className="px-3 py-4 font-bold text-slate-800 dark:text-slate-100">
+                          {entryTypeLabels[entry.entry_type] || entry.entry_type}
+                        </td>
+                        <td className="max-w-md px-3 py-4">
+                          <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.description}</p>
+                          {entry.reason && entry.reason !== entry.description ? (
+                            <p className="mt-1 text-xs leading-5 text-slate-500">{entry.reason}</p>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-4">
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {pointStatusLabels[entry.status] || entry.status}
+                          </span>
+                        </td>
+                        <td className={`whitespace-nowrap px-3 py-4 text-right font-black ${amount > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {formatPointChange(entry.points)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {isAdmin ? (
         <div className="grid gap-5 xl:grid-cols-2">

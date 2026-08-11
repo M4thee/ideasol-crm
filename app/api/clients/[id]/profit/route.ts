@@ -16,6 +16,32 @@ function errorMessage(error: unknown) {
   return "Nie udało się pobrać danych IdeaSol Profit.";
 }
 
+async function loadFullPointsHistory(
+  profit: ReturnType<typeof getProfitAdminClient>,
+  userId: string
+) {
+  const pageSize = 1000;
+  const history: Array<Record<string, unknown>> = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await profit
+      .from("points_ledger")
+      .select(
+        "id,entry_type,status,points,description,reason,earned_at,available_at,reserved_at,spent_at,cancelled_at,expires_at,created_at"
+      )
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    history.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+
+  return history;
+}
+
 export async function GET(request: Request, context: RouteContext) {
   const { id: clientId } = await context.params;
   const access = await requireClientAccessRequest(request, clientId);
@@ -39,7 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
       return NextResponse.json({ ok: true, profit: null });
     }
 
-    const [balanceResult, adminRegistrationResult] = await Promise.all([
+    const [balanceResult, adminRegistrationResult, pointsHistory] = await Promise.all([
       profit
         .from("user_points_balances")
         .select("available_points,pending_points,reserved_points")
@@ -53,6 +79,7 @@ export async function GET(request: Request, context: RouteContext) {
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle(),
+      loadFullPointsHistory(profit, user.id),
     ]);
 
     if (balanceResult.error) throw balanceResult.error;
@@ -69,6 +96,7 @@ export async function GET(request: Request, context: RouteContext) {
           pending_points: 0,
           reserved_points: 0,
         },
+        points_history: pointsHistory,
       },
     });
   } catch (error) {
