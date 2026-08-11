@@ -14,6 +14,15 @@ export type ClientProfitAccount = {
   is_ideasol_customer: boolean;
   registration_source: "client" | "admin";
   registered_by_admin_id: string | null;
+  current_seller: {
+    id: string;
+    crm_user_id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    phone: string | null;
+    referral_code: string;
+  } | null;
   terms_accepted_at: string | null;
   privacy_accepted_at: string | null;
   current_terms_version: string | null;
@@ -262,6 +271,12 @@ export default function ClientProfitPanel({
                 ? `Rejestrację wykonał: ${account.registration_source === "admin" ? "administrator" : "klient samodzielnie"}`
                 : "Klient nie został jeszcze zarejestrowany w programie."}
             </p>
+            {account?.current_seller && (
+              <p className="mt-2 text-sm font-bold text-[#0e6b7b]">
+                Doradca: {account.current_seller.first_name} {account.current_seller.last_name}
+                <span className="font-normal text-slate-500"> · {account.current_seller.referral_code}</span>
+              </p>
+            )}
           </div>
           <span className={`w-fit rounded-full px-3 py-1.5 text-xs font-black ${account?.account_status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>
             {account?.account_status === "active" ? "Dostęp włączony" : "Dostęp wyłączony"}

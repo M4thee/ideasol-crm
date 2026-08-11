@@ -5,6 +5,10 @@ import {
   ProfitConfigurationError,
 } from "@/lib/profit/admin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  syncAllActiveProfitSellers,
+  syncProfitSellerByCrmUserId,
+} from "@/lib/profit/sellers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +39,7 @@ type ProfitActionInput = {
   lastName?: string;
   phone?: string;
   email?: string;
+  sellerId?: string | null;
 };
 
 function errorMessage(error: unknown) {
@@ -102,9 +107,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    await syncAllActiveProfitSellers();
     const profit = getProfitAdminClient();
     const [
       usersResult,
+      sellersResult,
       balancesResult,
       referralsResult,
       ordersResult,
@@ -115,10 +122,17 @@ export async function GET(request: Request) {
       profit
         .from("profit_users")
         .select(
-          "id,idea_id,first_name,last_name,phone_e164,email,account_status,rewards_locked,joined_at,crm_client_id,crm_link_status,is_ideasol_customer,last_points_earned_at,points_expire_at"
+          "id,idea_id,first_name,last_name,phone_e164,email,account_status,rewards_locked,joined_at,crm_client_id,crm_link_status,is_ideasol_customer,last_points_earned_at,points_expire_at,current_seller_id"
         )
         .order("joined_at", { ascending: false })
         .limit(300),
+      profit
+        .from("profit_sellers")
+        .select("id,crm_user_id,crm_numeric_id,first_name,last_name,email,phone,crm_role,is_active,profit_enabled,referral_code,referral_slug")
+        .eq("is_active", true)
+        .eq("profit_enabled", true)
+        .order("last_name", { ascending: true })
+        .order("first_name", { ascending: true }),
       profit
         .from("user_points_balances")
         .select("user_id,available_points,pending_points,reserved_points"),
@@ -152,7 +166,7 @@ export async function GET(request: Request) {
       supabaseAdmin
         .from("clients")
         .select(
-          "id,public_id,full_name,company_name,contact_person,phone,contact_phone,email,status,is_lead"
+          "id,public_id,full_name,company_name,contact_person,phone,contact_phone,email,status,is_lead,assigned_user_id"
         )
         .order("full_name", { ascending: true })
         .limit(1000),
@@ -160,6 +174,7 @@ export async function GET(request: Request) {
 
     const firstError = [
       usersResult.error,
+      sellersResult.error,
       balancesResult.error,
       referralsResult.error,
       ordersResult.error,
@@ -203,6 +218,7 @@ export async function GET(request: Request) {
           phone: cleanText(client.phone) || cleanText(client.contact_phone),
           email: cleanText(client.email) || null,
           status: client.status,
+          assigned_user_id: client.assigned_user_id || null,
           profit_user: linkedUser
             ? { id: linkedUser.id, idea_id: linkedUser.idea_id }
             : null,
@@ -218,6 +234,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       users,
+      sellers: sellersResult.data || [],
       referrals: referralsResult.data || [],
       orders: ordersResult.data || [],
       rewards: (rewardsResult.data || []).map(withMediaUrl),
@@ -252,7 +269,7 @@ export async function PATCH(request: Request) {
 
       const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
-        .select("id,full_name,contact_person,phone,contact_phone,email,status,is_lead")
+        .select("id,full_name,contact_person,phone,contact_phone,email,status,is_lead,assigned_user_id")
         .eq("id", input.crmClientId)
         .maybeSingle();
 
@@ -318,6 +335,17 @@ export async function PATCH(request: Request) {
       }
       if (error) throw error;
 
+      if (client.assigned_user_id) {
+        const syncedSeller = await syncProfitSellerByCrmUserId(client.assigned_user_id);
+        if (syncedSeller) {
+          const { error: sellerAssignmentError } = await profit
+            .from("profit_users")
+            .update({ current_seller_id: syncedSeller.seller.id })
+            .eq("id", userId);
+          if (sellerAssignmentError) throw sellerAssignmentError;
+        }
+      }
+
       const { data: user, error: userError } = await profit
         .from("profit_users")
         .select("id,idea_id,first_name,last_name,phone_e164,email")
@@ -326,6 +354,83 @@ export async function PATCH(request: Request) {
       if (userError) throw userError;
 
       return NextResponse.json({ ok: true, user });
+    }
+
+    if (input.action === "assign_seller") {
+      if (!isUuid(input.userId)) {
+        return NextResponse.json({ ok: false, error: "Nieprawidłowy uczestnik." }, { status: 400 });
+      }
+      if (input.sellerId !== null && !isUuid(input.sellerId)) {
+        return NextResponse.json({ ok: false, error: "Nieprawidłowy doradca." }, { status: 400 });
+      }
+
+      const { data: before, error: beforeError } = await profit
+        .from("profit_users")
+        .select("id,current_seller_id,crm_client_id")
+        .eq("id", input.userId)
+        .maybeSingle();
+      if (beforeError) throw beforeError;
+      if (!before) {
+        return NextResponse.json({ ok: false, error: "Nie znaleziono uczestnika." }, { status: 404 });
+      }
+
+      let seller: { id: string; crm_user_id: string; first_name: string; last_name: string } | null = null;
+      if (input.sellerId) {
+        const { data, error } = await profit
+          .from("profit_sellers")
+          .select("id,crm_user_id,first_name,last_name")
+          .eq("id", input.sellerId)
+          .eq("is_active", true)
+          .eq("profit_enabled", true)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) {
+          return NextResponse.json({ ok: false, error: "Wybrany doradca nie jest aktywny." }, { status: 400 });
+        }
+        seller = data;
+      }
+
+      const { data: after, error: assignmentError } = await profit
+        .from("profit_users")
+        .update({ current_seller_id: seller?.id || null })
+        .eq("id", input.userId)
+        .select("id,current_seller_id,crm_client_id")
+        .single();
+      if (assignmentError) throw assignmentError;
+
+      if (before.crm_client_id) {
+        const { error: crmAssignmentError } = await supabaseAdmin
+          .from("clients")
+          .update({
+            assigned_user_id: seller?.crm_user_id || null,
+            assigned_to: seller?.crm_user_id || null,
+          })
+          .eq("id", before.crm_client_id);
+
+        if (crmAssignmentError) {
+          await profit
+            .from("profit_users")
+            .update({ current_seller_id: before.current_seller_id })
+            .eq("id", input.userId);
+          throw crmAssignmentError;
+        }
+      }
+
+      await writeAuditLog({
+        actorId: admin.id,
+        action: "profit_user_seller_assigned",
+        entityType: "profit_user",
+        entityId: input.userId,
+        beforeData: before,
+        afterData: {
+          ...after,
+          seller_name: seller ? `${seller.first_name} ${seller.last_name}` : null,
+          seller_crm_user_id: seller?.crm_user_id || null,
+        },
+        reason: "Ręczna zmiana doradcy w panelu IdeaSol Profit",
+      });
+
+      return NextResponse.json({ ok: true });
     }
 
     if (input.action === "update_user") {

@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getProfitAdminClient } from "@/lib/profit/admin";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { syncProfitSellerByCrmUserId } from "@/lib/profit/sellers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,6 +76,52 @@ async function recordAudit(
   if (error) console.error("Nie udało się zapisać audytu połączenia Profit z CRM", error);
 }
 
+async function alignCustomerAdvisor(input: {
+  profitUserId: string;
+  currentSellerId: string | null;
+  crmClientId: string;
+}) {
+  const profit = getProfitAdminClient();
+  const { data: client, error: clientError } = await supabaseAdmin
+    .from("clients")
+    .select("id,assigned_user_id")
+    .eq("id", input.crmClientId)
+    .maybeSingle();
+  if (clientError) throw clientError;
+  if (!client) return;
+
+  if (client.assigned_user_id) {
+    const syncedSeller = await syncProfitSellerByCrmUserId(client.assigned_user_id);
+    if (syncedSeller && syncedSeller.seller.id !== input.currentSellerId) {
+      const { error } = await profit
+        .from("profit_users")
+        .update({ current_seller_id: syncedSeller.seller.id })
+        .eq("id", input.profitUserId);
+      if (error) throw error;
+    }
+    return;
+  }
+
+  if (!input.currentSellerId) return;
+
+  const { data: seller, error: sellerError } = await profit
+    .from("profit_sellers")
+    .select("crm_user_id")
+    .eq("id", input.currentSellerId)
+    .eq("is_active", true)
+    .eq("profit_enabled", true)
+    .maybeSingle();
+  if (sellerError) throw sellerError;
+  if (!seller?.crm_user_id) return;
+
+  const { error: assignmentError } = await supabaseAdmin
+    .from("clients")
+    .update({ assigned_user_id: seller.crm_user_id, assigned_to: seller.crm_user_id })
+    .eq("id", input.crmClientId)
+    .is("assigned_user_id", null);
+  if (assignmentError) throw assignmentError;
+}
+
 export async function POST(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -89,7 +136,7 @@ export async function POST(request: Request) {
     const profit = getProfitAdminClient();
     const { data: profitUser, error: profitUserError } = await profit
       .from("profit_users")
-      .select("id,phone_e164,crm_client_id,crm_link_status")
+      .select("id,phone_e164,crm_client_id,crm_link_status,current_seller_id")
       .eq("id", payload.profitUserId)
       .maybeSingle();
 
@@ -108,6 +155,11 @@ export async function POST(request: Request) {
         if (error) throw error;
       }
       await attachProfitTag(profitUser.crm_client_id);
+      await alignCustomerAdvisor({
+        profitUserId: profitUser.id,
+        currentSellerId: profitUser.current_seller_id,
+        crmClientId: profitUser.crm_client_id,
+      });
       return NextResponse.json({
         ok: true,
         match: "linked",
@@ -182,6 +234,11 @@ export async function POST(request: Request) {
     if (updateError) throw updateError;
 
     await attachProfitTag(crmClientId);
+    await alignCustomerAdvisor({
+      profitUserId: profitUser.id,
+      currentSellerId: profitUser.current_seller_id,
+      crmClientId,
+    });
     await recordAudit(profitUser.id, "profit_user_linked_to_crm_after_self_registration", {
       crm_client_id: crmClientId,
     });

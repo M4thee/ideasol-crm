@@ -24,7 +24,20 @@ type ProfitUser = {
   crm_link_status: string;
   is_ideasol_customer: boolean;
   points_expire_at: string | null;
+  current_seller_id: string | null;
   balance: ProfitBalance;
+};
+
+type ProfitSeller = {
+  id: string;
+  crm_user_id: string;
+  crm_numeric_id: number | null;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+  crm_role: string | null;
+  referral_code: string;
 };
 
 type CrmClientCandidate = {
@@ -37,6 +50,7 @@ type CrmClientCandidate = {
   phone: string;
   email: string | null;
   status: string | null;
+  assigned_user_id: string | null;
   profit_user: { id: string; idea_id: string } | null;
 };
 
@@ -102,6 +116,7 @@ type RewardOrder = {
 
 type ProfitDashboardData = {
   users: ProfitUser[];
+  sellers: ProfitSeller[];
   referrals: ProfitReferral[];
   rewards: Reward[];
   categories: RewardCategory[];
@@ -363,6 +378,17 @@ export default function ProfitAdmin() {
       { action: "update_user", userId: user.id, ...changes },
       `Zapisano ustawienia uczestnika ${user.idea_id}.`
     );
+  }
+
+  async function assignSeller(user: ProfitUser, sellerId: string | null) {
+    const seller = data?.sellers.find((item) => item.id === sellerId);
+    const sellerName = seller ? `${seller.first_name} ${seller.last_name}` : "brak doradcy";
+    if (!window.confirm(`Przypisać ${sellerName} do konta ${user.idea_id}?`)) return false;
+    const result = await runAction(
+      { action: "assign_seller", userId: user.id, sellerId },
+      `Zmieniono doradcę uczestnika ${user.idea_id}.`
+    );
+    return Boolean(result);
   }
 
   async function adjustPoints() {
@@ -659,7 +685,7 @@ export default function ProfitAdmin() {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <h2 className="text-2xl font-black text-slate-950 dark:text-white">Uczestnicy i kilowatopunkty</h2>
-                <p className="mt-1 text-sm text-slate-500">Tworzenie kont klientów, blokady i audytowane korekty salda.</p>
+                <p className="mt-1 text-sm text-slate-500">Tworzenie kont klientów, przypisanie doradców, blokady i audytowane korekty salda.</p>
               </div>
               <div className="flex w-full flex-col gap-2 sm:flex-row xl:max-w-2xl">
                 <input
@@ -678,14 +704,36 @@ export default function ProfitAdmin() {
               </div>
             </div>
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
+              <table className="w-full min-w-[1160px] text-left text-sm">
                 <thead className="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-400 dark:border-slate-800">
-                  <tr><th className="px-3 py-3">Uczestnik</th><th className="px-3 py-3">Saldo</th><th className="px-3 py-3">Oczekujące</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Nagrody</th><th className="px-3 py-3 text-right">Działania</th></tr>
+                  <tr><th className="px-3 py-3">Uczestnik</th><th className="px-3 py-3">Doradca</th><th className="px-3 py-3">Saldo</th><th className="px-3 py-3">Oczekujące</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Nagrody</th><th className="px-3 py-3 text-right">Działania</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
                       <td className="px-3 py-4"><p className="font-black text-slate-900 dark:text-white">{user.first_name} {user.last_name}</p><p className="mt-1 text-xs text-slate-500">{user.idea_id} · {user.phone_e164}</p></td>
+                      <td className="px-3 py-4">
+                        <select
+                          aria-label={`Doradca uczestnika ${user.idea_id}`}
+                          value={user.current_seller_id || ""}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const select = event.currentTarget;
+                            const sellerId = select.value || null;
+                            void assignSeller(user, sellerId).then((saved) => {
+                              if (!saved) select.value = user.current_seller_id || "";
+                            });
+                          }}
+                          className="h-10 min-w-48 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:ring-2 focus:ring-[#0e6b7b] disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950"
+                        >
+                          <option value="">Nieprzypisany</option>
+                          {(data?.sellers || []).map((seller) => (
+                            <option key={seller.id} value={seller.id}>
+                              {seller.first_name} {seller.last_name} · {seller.referral_code}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-3 py-4 font-black text-[#0e6b7b]">{formatNumber(user.balance.available_points)} kWpkt</td>
                       <td className="px-3 py-4 text-slate-600 dark:text-slate-300">{formatNumber(user.balance.pending_points)} kWpkt</td>
                       <td className="px-3 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-black ring-1 ${statusTone(user.account_status)}`}>{user.account_status === "active" ? "Aktywne" : user.account_status === "blocked" ? "Zablokowane" : "Zamknięte"}</span></td>

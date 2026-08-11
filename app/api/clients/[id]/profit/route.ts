@@ -55,7 +55,7 @@ export async function GET(request: Request, context: RouteContext) {
     const { data: user, error: userError } = await profit
       .from("profit_users")
       .select(
-        "id,idea_id,account_status,rewards_locked,joined_at,activated_at,crm_link_status,is_ideasol_customer,terms_accepted_at,privacy_accepted_at,current_terms_version,current_privacy_version,marketing_sms_consent,marketing_email_consent,marketing_phone_consent,marketing_consent_version,marketing_consents_updated_at"
+        "id,idea_id,account_status,rewards_locked,joined_at,activated_at,crm_link_status,is_ideasol_customer,terms_accepted_at,privacy_accepted_at,current_terms_version,current_privacy_version,marketing_sms_consent,marketing_email_consent,marketing_phone_consent,marketing_consent_version,marketing_consents_updated_at,current_seller_id"
       )
       .eq("crm_client_id", clientId)
       .maybeSingle();
@@ -65,7 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
       return NextResponse.json({ ok: true, profit: null });
     }
 
-    const [balanceResult, adminRegistrationResult, pointsHistory] = await Promise.all([
+    const [balanceResult, adminRegistrationResult, pointsHistory, sellerResult] = await Promise.all([
       profit
         .from("user_points_balances")
         .select("available_points,pending_points,reserved_points")
@@ -80,10 +80,18 @@ export async function GET(request: Request, context: RouteContext) {
         .limit(1)
         .maybeSingle(),
       loadFullPointsHistory(profit, user.id),
+      user.current_seller_id
+        ? profit
+            .from("profit_sellers")
+            .select("id,crm_user_id,first_name,last_name,email,phone,referral_code")
+            .eq("id", user.current_seller_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
     if (balanceResult.error) throw balanceResult.error;
     if (adminRegistrationResult.error) throw adminRegistrationResult.error;
+    if (sellerResult.error) throw sellerResult.error;
 
     return NextResponse.json({
       ok: true,
@@ -91,6 +99,7 @@ export async function GET(request: Request, context: RouteContext) {
         ...user,
         registration_source: adminRegistrationResult.data ? "admin" : "client",
         registered_by_admin_id: adminRegistrationResult.data?.actor_id || null,
+        current_seller: sellerResult.data,
         balance: balanceResult.data || {
           available_points: 0,
           pending_points: 0,

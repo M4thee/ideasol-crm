@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
@@ -30,10 +30,42 @@ export default function SettingsPage() {
   const [marginInput, setMarginInput] = useState("0");
   const [marginStatus, setMarginStatus] = useState("");
   const [marginError, setMarginError] = useState("");
+  const [advisorLink, setAdvisorLink] = useState<{ code: string; url: string } | null>(null);
+  const [advisorLinkError, setAdvisorLinkError] = useState("");
+  const [advisorLinkLoading, setAdvisorLinkLoading] = useState(true);
+  const [copyStatus, setCopyStatus] = useState("");
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    loadSettings();
+    void loadSettings();
+    // Ustawienia są pobierane tylko raz po wejściu na stronę; kolejne odświeżenie linku ma własny przycisk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!advisorLink?.url || !qrCanvasRef.current) return;
+    let cancelled = false;
+    const canvas = qrCanvasRef.current;
+
+    void import("qrcode")
+      .then(({ default: QRCode }) =>
+        QRCode.toCanvas(canvas, advisorLink.url, {
+          width: 232,
+          margin: 2,
+          errorCorrectionLevel: "M",
+          color: { dark: "#0e6b7b", light: "#ffffff" },
+        })
+      )
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Błąd generowania kodu QR Profit:", error);
+        setAdvisorLinkError("Nie udało się wygenerować kodu QR.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [advisorLink]);
 
   async function loadSettings() {
     setLoading(true);
@@ -47,6 +79,7 @@ export default function SettingsPage() {
       return;
     }
 
+    const advisorLinkPromise = loadAdvisorLink();
     const { data, error } = await supabase
       .from("profiles")
       .select("id, email, display_name, role, default_seller_markup")
@@ -69,7 +102,64 @@ export default function SettingsPage() {
 
     setProfile(loadedProfile);
     setMarginInput(String(loadedProfile.default_seller_markup || 0));
+    await advisorLinkPromise;
     setLoading(false);
+  }
+
+  async function loadAdvisorLink() {
+    setAdvisorLinkLoading(true);
+    setAdvisorLinkError("");
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      setAdvisorLinkError("Sesja wygasła. Zaloguj się ponownie.");
+      setAdvisorLinkLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/settings/profit-advisor", {
+        cache: "no-store",
+        headers: { authorization: `Bearer ${session.access_token}` },
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        code?: string;
+        url?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.ok || !payload.code || !payload.url) {
+        throw new Error(payload.error || "Nie udało się pobrać linku.");
+      }
+      setAdvisorLink({ code: payload.code, url: payload.url });
+    } catch (error) {
+      setAdvisorLinkError(error instanceof Error ? error.message : "Nie udało się pobrać linku doradcy.");
+    } finally {
+      setAdvisorLinkLoading(false);
+    }
+  }
+
+  async function copyAdvisorLink() {
+    if (!advisorLink?.url) return;
+    try {
+      await navigator.clipboard.writeText(advisorLink.url);
+      setCopyStatus("Link skopiowany.");
+      window.setTimeout(() => setCopyStatus(""), 2500);
+    } catch {
+      setCopyStatus("Nie udało się skopiować linku.");
+    }
+  }
+
+  function downloadQrCode() {
+    if (!qrCanvasRef.current || !advisorLink) return;
+    const link = document.createElement("a");
+    link.download = `IdeaSol-Profit-${advisorLink.code}-QR.png`;
+    link.href = qrCanvasRef.current.toDataURL("image/png");
+    link.click();
   }
 
   async function changePassword() {
@@ -239,8 +329,60 @@ export default function SettingsPage() {
               Ustawienia konta
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              Zarządzaj hasłem i ustawieniami kalkulatora.
+              Zarządzaj hasłem, ustawieniami kalkulatora i swoim linkiem IdeaSol Profit.
             </p>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-3xl border border-cyan-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-[#075f70] to-[#0e6b7b] p-6 text-white">
+            <p className="text-sm font-black uppercase tracking-[0.16em] text-cyan-100">IdeaSol Profit</p>
+            <h2 className="mt-2 text-2xl font-black">Twój indywidualny link doradcy</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-cyan-50/90">
+              Klient, który założy konto z tego linku, zostanie automatycznie przypisany do Ciebie.
+            </p>
+          </div>
+
+          <div className="p-6">
+            {advisorLinkLoading && <p className="text-sm text-slate-500">Przygotowuję link i kod QR…</p>}
+            {advisorLinkError && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+                {advisorLinkError}
+                <button type="button" onClick={() => void loadAdvisorLink()} className="ml-2 underline underline-offset-2">
+                  Spróbuj ponownie
+                </button>
+              </div>
+            )}
+            {advisorLink && !advisorLinkLoading && (
+              <div className="grid gap-6 md:grid-cols-[1fr_264px] md:items-center">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Kod doradcy</p>
+                  <p className="mt-1 text-2xl font-black text-[#0e6b7b]">{advisorLink.code}</p>
+                  <label className="mt-5 block text-sm font-bold text-slate-700" htmlFor="profit-advisor-link">
+                    Link do rejestracji
+                  </label>
+                  <input
+                    id="profit-advisor-link"
+                    readOnly
+                    value={advisorLink.url}
+                    onFocus={(event) => event.currentTarget.select()}
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
+                  />
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => void copyAdvisorLink()} className="rounded-xl bg-[#0e6b7b] px-5 py-3 text-sm font-black text-white hover:bg-[#0b5d6a]">
+                      Kopiuj link
+                    </button>
+                    <button type="button" onClick={downloadQrCode} className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">
+                      Pobierz QR
+                    </button>
+                  </div>
+                  {copyStatus && <p role="status" className="mt-3 text-sm font-semibold text-emerald-700">{copyStatus}</p>}
+                </div>
+                <div className="mx-auto rounded-3xl border border-cyan-100 bg-white p-4 shadow-sm">
+                  <canvas ref={qrCanvasRef} aria-label={`Kod QR do rejestracji z kodem doradcy ${advisorLink.code}`} className="block h-[232px] w-[232px]" />
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
