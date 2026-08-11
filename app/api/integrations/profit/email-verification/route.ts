@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 type EmailVerificationPayload = {
   email?: unknown;
   firstName?: unknown;
-  code?: unknown;
+  activationUrl?: unknown;
 };
 
 function cleanText(value: unknown, maxLength: number) {
@@ -39,8 +39,9 @@ function isAuthorized(request: Request) {
   return configured.length === supplied.length && timingSafeEqual(configured, supplied);
 }
 
-function emailHtml(firstName: string, code: string) {
+function emailHtml(firstName: string, activationUrl: string) {
   const safeFirstName = escapeHtml(firstName);
+  const safeActivationUrl = escapeHtml(activationUrl);
   return `<!doctype html>
 <html lang="pl">
   <body style="margin:0;background:#f4f8f7;font-family:Arial,sans-serif;color:#0b2037">
@@ -51,9 +52,11 @@ function emailHtml(firstName: string, code: string) {
         </div>
         <div style="padding:30px 28px">
           <p style="margin:0 0 18px;font-size:17px;line-height:1.6">Dzień dobry${safeFirstName ? `, ${safeFirstName}` : ""}.</p>
-          <p style="margin:0 0 22px;font-size:16px;line-height:1.6;color:#536b6b">Wpisz poniższy kod w panelu IdeaSol Profit, aby potwierdzić swój adres e-mail:</p>
-          <div style="margin:0 0 22px;padding:18px;border-radius:16px;background:#eef8f6;text-align:center;font-size:32px;font-weight:800;letter-spacing:8px;color:#0e6b7b">${code}</div>
-          <p style="margin:0;font-size:14px;line-height:1.6;color:#718482">Kod jest ważny przez 10 minut. Jeśli nie logujesz się do IdeaSol Profit, zignoruj tę wiadomość.</p>
+          <p style="margin:0 0 22px;font-size:16px;line-height:1.6;color:#536b6b">Kliknij poniższy przycisk, aby potwierdzić swój adres e-mail w programie IdeaSol Profit.</p>
+          <p style="margin:0 0 24px;text-align:center"><a href="${safeActivationUrl}" style="display:inline-block;padding:15px 24px;border-radius:14px;background:#0e6b7b;color:#ffffff;text-decoration:none;font-size:16px;font-weight:800">Potwierdź adres e-mail</a></p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#718482">Link jest ważny przez 7 dni. Jeśli przycisk nie działa, skopiuj poniższy adres do przeglądarki:</p>
+          <p style="margin:0 0 18px;font-size:12px;line-height:1.6;word-break:break-all;color:#0e6b7b">${safeActivationUrl}</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#718482">Jeśli nie zakładasz konta w IdeaSol Profit, zignoruj tę wiadomość.</p>
         </div>
       </div>
     </div>
@@ -69,9 +72,24 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as EmailVerificationPayload;
   const email = cleanText(payload.email, 320).toLowerCase();
   const firstName = cleanText(payload.firstName, 80);
-  const code = cleanText(payload.code, 6);
+  const activationUrl = cleanText(payload.activationUrl, 1000);
+  let activationUrlObject: URL | null = null;
 
-  if (!/^\S+@\S+\.\S+$/.test(email) || !/^\d{6}$/.test(code)) {
+  try {
+    activationUrlObject = new URL(activationUrl);
+  } catch {
+    activationUrlObject = null;
+  }
+
+  if (
+    !/^\S+@\S+\.\S+$/.test(email)
+    || !activationUrlObject
+    || activationUrlObject.protocol !== "https:"
+    || activationUrlObject.hostname !== "profit.ideasol.pl"
+    || activationUrlObject.pathname !== "/aktywuj-email"
+    || !/^[0-9a-f-]{36}$/i.test(activationUrlObject.searchParams.get("challenge") ?? "")
+    || !/^[A-Za-z0-9_-]{43}$/.test(activationUrlObject.searchParams.get("token") ?? "")
+  ) {
     return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
   }
 
@@ -101,9 +119,9 @@ export async function POST(request: Request) {
       from: mailFrom,
       to: email,
       replyTo: process.env.OFFER_REPLY_TO || "kontakt@ideasol.pl",
-      subject: "Kod potwierdzający e-mail — IdeaSol Profit",
-      text: `Dzień dobry${firstName ? `, ${firstName}` : ""}. Twój kod potwierdzający e-mail w IdeaSol Profit to: ${code}. Kod jest ważny przez 10 minut.`,
-      html: emailHtml(firstName, code),
+      subject: "Potwierdź adres e-mail — IdeaSol Profit",
+      text: `Dzień dobry${firstName ? `, ${firstName}` : ""}. Potwierdź swój adres e-mail w programie IdeaSol Profit, otwierając link: ${activationUrl}. Link jest ważny przez 7 dni.`,
+      html: emailHtml(firstName, activationUrl),
     });
 
     return NextResponse.json({ ok: true });
