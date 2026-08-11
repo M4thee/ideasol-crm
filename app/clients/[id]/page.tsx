@@ -7,6 +7,9 @@ import { supabase } from "@/lib/supabase";
 import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
 import ClientSmsPanel from "@/components/sms/ClientSmsPanel";
 import ManualSmsComposer from "@/components/sms/ManualSmsComposer";
+import ClientProfitPanel, {
+  type ClientProfitAccount,
+} from "@/components/clients/ClientProfitPanel";
 import type { SmsTemplateCategory } from "@/lib/saleSms";
 import OpenOcrSourceImageButton from "@/components/clients/OpenOcrSourceImageButton";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
@@ -228,7 +231,7 @@ const contactChannelStyles: Record<
   },
 };
 
-type ActiveTab = "dashboard" | "sales" | "offers" | "meetings" | "sms";
+type ActiveTab = "dashboard" | "sales" | "offers" | "meetings" | "sms" | "profit";
 
 const tabs: { id: ActiveTab; label: string }[] = [
   { id: "dashboard", label: "Pulpit" },
@@ -236,6 +239,7 @@ const tabs: { id: ActiveTab; label: string }[] = [
   { id: "offers", label: "Oferty" },
   { id: "meetings", label: "Spotkania" },
   { id: "sms", label: "Moduł SMS" },
+  { id: "profit", label: "PROFIT" },
 ];
 
 export default function ClientPage() {
@@ -265,6 +269,9 @@ export default function ClientPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [hasSmsAccess, setHasSmsAccess] = useState(false);
+  const [profitAccount, setProfitAccount] = useState<ClientProfitAccount | null>(null);
+  const [profitLoading, setProfitLoading] = useState(true);
+  const [profitError, setProfitError] = useState("");
   const [selectedSmsCategory, setSelectedSmsCategory] =
     useState<SmsTemplateCategory>("sale");
   const [selectedSmsSaleId, setSelectedSmsSaleId] = useState("");
@@ -298,10 +305,51 @@ export default function ClientPage() {
 
   useEffect(() => {
     loadClientCard();
+    loadClientProfit();
     loadAssignmentData();
     loadMeetingAdvisors();
     loadMentionableUsers();
   }, [clientId]);
+
+  async function loadClientProfit() {
+    setProfitLoading(true);
+    setProfitError("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+      }
+
+      const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/profit`, {
+        headers: { authorization: `Bearer ${session.access_token}` },
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        profit?: ClientProfitAccount | null;
+      };
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Nie udało się pobrać danych IdeaSol Profit.");
+      }
+
+      setProfitAccount(payload.profit || null);
+    } catch (profitLoadError) {
+      setProfitAccount(null);
+      setProfitError(
+        profitLoadError instanceof Error
+          ? profitLoadError.message
+          : "Nie udało się pobrać danych IdeaSol Profit."
+      );
+    } finally {
+      setProfitLoading(false);
+    }
+  }
 
   async function loadClientCard() {
     setLoading(true);
@@ -1719,7 +1767,14 @@ export default function ClientPage() {
           <div className="flex flex-wrap items-start justify-between gap-4 bg-[#C7EAF0] px-6 py-6 dark:bg-slate-900">
             <div>
               <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <p className="text-sm font-semibold text-slate-600">{visibleLeadId}</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-600">{visibleLeadId}</p>
+                  {profitAccount?.idea_id ? (
+                    <p className="mt-0.5 text-xs font-bold text-[#0e6b7b]">
+                      IdeaID: {profitAccount.idea_id}
+                    </p>
+                  ) : null}
+                </div>
                 <p className="text-[11px] font-medium text-slate-500">
                   Dodano: {new Date(client.created_at).toLocaleString("pl-PL")}
                 </p>
@@ -1970,6 +2025,17 @@ export default function ClientPage() {
           </div>
 
           <div className="p-6">
+            {activeTab === "profit" && (
+              <ClientProfitPanel
+                clientId={clientId}
+                isAdmin={String(currentUserRole || "").toLowerCase() === "admin"}
+                account={profitAccount}
+                loading={profitLoading}
+                loadError={profitError}
+                onRefresh={loadClientProfit}
+              />
+            )}
+
             {activeTab === "dashboard" && (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 <div className="space-y-8">

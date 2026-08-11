@@ -257,7 +257,7 @@ export async function PATCH(request: Request) {
         .maybeSingle();
 
       if (clientError) throw clientError;
-      if (!client || (client.is_lead !== false && client.status !== "Klient aktywny")) {
+      if (!client) {
         return NextResponse.json(
           { ok: false, error: "Nie znaleziono tego klienta w CRM." },
           { status: 404 }
