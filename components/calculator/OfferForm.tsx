@@ -1,6 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { supabase } from "@/lib/supabase";
+import {
+  CustomInverterFields,
+  CustomPanelFields,
+  CustomStorageFields,
+} from "@/components/calculator/CustomEquipmentFields";
+import {
+  CUSTOM_INVERTER_CODE,
+  CUSTOM_PANEL_CODE,
+  CUSTOM_STORAGE_CODE,
+  type CustomEquipment,
+} from "@/lib/calculator/customEquipment";
 
 function isOfferFormOnline() {
   if (typeof navigator === "undefined") return true;
@@ -171,6 +182,11 @@ type OfferFormProps = {
   setSellerMarkup: (value: number) => void;
   selectedAdditionalServices?: SelectedAdditionalService[];
   setSelectedAdditionalServices?: (value: SelectedAdditionalService[]) => void;
+  customModeAvailable?: boolean;
+  customMode: boolean;
+  setCustomMode: (value: boolean) => void;
+  customEquipment: CustomEquipment;
+  setCustomEquipment: Dispatch<SetStateAction<CustomEquipment>>;
 };
 
 export default function OfferForm({
@@ -222,6 +238,11 @@ export default function OfferForm({
   setSellerMarkup,
   selectedAdditionalServices = [],
   setSelectedAdditionalServices = () => { },
+  customModeAvailable = false,
+  customMode,
+  setCustomMode,
+  customEquipment,
+  setCustomEquipment,
 }: OfferFormProps) {
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
@@ -550,6 +571,7 @@ export default function OfferForm({
     existingPvAnswer === "no" ||
     (existingPvAnswer === "yes" && Number.isFinite(existingPvPowerNumber) && existingPvPowerNumber > 0);
   useEffect(() => {
+    if (customMode) return;
     if (!hasStorageSelected) return;
     if (storage === "none") return;
     if (storagesToShow.length === 0) return;
@@ -565,12 +587,44 @@ export default function OfferForm({
     }
   }, [
     hasStorageSelected,
+    customMode,
     setResult,
     setSelectedInverterName,
     setStorage,
     storage,
     storagesToShow,
   ]);
+
+  function invalidateCalculation() {
+    setResult(null);
+    setEmailStatus("");
+  }
+
+  function changeCustomMode(enabled: boolean) {
+    setCustomMode(enabled);
+    invalidateCalculation();
+
+    if (enabled) {
+      setPanelModel(CUSTOM_PANEL_CODE);
+      setStorage(hasStorageSelected ? CUSTOM_STORAGE_CODE : "none");
+      setSelectedInverterName(CUSTOM_INVERTER_CODE);
+      setCustomEquipment((current) => ({
+        ...current,
+        inverter: {
+          ...current.inverter,
+          type: hasStorageSelected ? "hybrid" : "ongrid",
+          batteryVoltageType: hasStorageSelected
+            ? current.storage.voltageType
+            : current.inverter.batteryVoltageType,
+        },
+      }));
+      return;
+    }
+
+    setPanelModel(panels[0]?.code || "AMERISOLAR_450_FB");
+    setStorage(hasStorageSelected ? storagesToShow[0]?.code || "none" : "none");
+    setSelectedInverterName("auto");
+  }
 
   function updateOfferModules(nextHasPv: boolean, nextHasStorage: boolean) {
     if (!nextHasPv && !nextHasStorage) {
@@ -580,7 +634,7 @@ export default function OfferForm({
       setIncludeSubsidy(false);
       setIsUpsell(false);
       setExistingPvPowerKw("0");
-      setSelectedInverterName("auto");
+      setSelectedInverterName(customMode ? CUSTOM_INVERTER_CODE : "auto");
       setResult(null);
       setEmailStatus("");
       return;
@@ -605,18 +659,34 @@ export default function OfferForm({
     if (nextOfferType === "pv_storage") {
       setIncludeSubsidy(true);
       if (storage === "none") {
-        setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
+        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "ZBPOWER_10");
       }
     }
 
     if (nextOfferType === "storage") {
       setIncludeSubsidy(true);
       if (storage === "none") {
-        setStorage(storagesToShow[0]?.code || "ZBPOWER_10");
+        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "ZBPOWER_10");
       }
     }
 
-    setSelectedInverterName("auto");
+    if (customMode) {
+      setCustomEquipment((current) => ({
+        ...current,
+        inverter: {
+          ...current.inverter,
+          type: nextHasStorage ? "hybrid" : "ongrid",
+          batteryVoltageType: nextHasStorage
+            ? current.storage.voltageType
+            : current.inverter.batteryVoltageType,
+        },
+      }));
+      setPanelModel(CUSTOM_PANEL_CODE);
+      setStorage(nextHasStorage ? CUSTOM_STORAGE_CODE : "none");
+      setSelectedInverterName(CUSTOM_INVERTER_CODE);
+    } else {
+      setSelectedInverterName("auto");
+    }
   }
 
   return (
@@ -875,6 +945,25 @@ export default function OfferForm({
 
       </div>
 
+      {customModeAvailable ? (
+        <div className="mb-5 rounded-3xl border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4 shadow-sm dark:border-violet-500/50 dark:from-violet-950/30 dark:to-fuchsia-950/20">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={customMode}
+              onChange={(event) => changeCustomMode(event.target.checked)}
+              className="mt-1 h-5 w-5 accent-violet-600"
+            />
+            <div>
+              <div className="font-black text-violet-900 dark:text-violet-100">Custom Mode — sprzęt niestandardowy</div>
+              <p className="mt-1 text-xs leading-relaxed text-violet-700 dark:text-violet-300">
+                Wpisujesz sprzęt jednorazowo. Nie zostanie dodany do katalogu i nie będzie widoczny dla innych użytkowników.
+              </p>
+            </div>
+          </label>
+        </div>
+      ) : null}
+
       {/* MODULE/PRODUCT SECTION */}
       <div className={`mb-5 transition ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
         <div className="mb-4 flex items-center gap-2">
@@ -908,28 +997,36 @@ export default function OfferForm({
 
             {hasPvSelected && (
               <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                <label className="block lg:col-span-1">
-                  <span className="text-sm text-slate-700 dark:text-slate-200">Model panelu</span>
+                {customMode ? (
+                  <CustomPanelFields
+                    value={customEquipment.panel}
+                    onChange={(panel) => setCustomEquipment((current) => ({ ...current, panel }))}
+                    onInvalidate={invalidateCalculation}
+                  />
+                ) : (
+                  <label className="block lg:col-span-1">
+                    <span className="text-sm text-slate-700 dark:text-slate-200">Model panelu</span>
 
-                  <select
-                    className="mt-2 h-[50px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-                    value={panelModel}
-                    onChange={(e) => {
-                      const nextPanelModel = e.target.value;
+                    <select
+                      className="mt-2 h-[50px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
+                      value={panelModel}
+                      onChange={(e) => {
+                        const nextPanelModel = e.target.value;
 
-                      setPanelModel(nextPanelModel);
-                      setSelectedInverterName("auto");
-                      calculateNearestPanelCount(manualPowerKw, nextPanelModel);
-                      setResult(null);
-                    }}
-                  >
-                    {panelsToShow.map((panel) => (
-                      <option key={panel.code} value={panel.code}>
-                        {panel.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                        setPanelModel(nextPanelModel);
+                        setSelectedInverterName("auto");
+                        calculateNearestPanelCount(manualPowerKw, nextPanelModel);
+                        setResult(null);
+                      }}
+                    >
+                      {panelsToShow.map((panel) => (
+                        <option key={panel.code} value={panel.code}>
+                          {panel.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <label className="block">
                   <span className="text-sm text-slate-700 dark:text-slate-200">Moc instalacji</span>
@@ -1036,57 +1133,76 @@ export default function OfferForm({
 
             {hasStorageSelected && (
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-emerald-100 bg-white/80 p-3 dark:border-emerald-500/30 dark:bg-slate-950 lg:col-span-2">
-                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    Typ magazynu energii
-                  </div>
+                {customMode ? (
+                  <CustomStorageFields
+                    value={customEquipment.storage}
+                    onChange={(nextStorage) => {
+                      setCustomEquipment((current) => ({
+                        ...current,
+                        storage: nextStorage,
+                        inverter: {
+                          ...current.inverter,
+                          batteryVoltageType: nextStorage.voltageType,
+                          type: "hybrid",
+                        },
+                      }));
+                    }}
+                    onInvalidate={invalidateCalculation}
+                  />
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-emerald-100 bg-white/80 p-3 dark:border-emerald-500/30 dark:bg-slate-950 lg:col-span-2">
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        Typ magazynu energii
+                      </div>
 
-                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                    {[
-                      { value: "all", label: "Wszystkie" },
-                      { value: "low_voltage", label: "LV - niskonapięciowe" },
-                      { value: "high_voltage", label: "HV - wysokonapięciowe" },
-                    ].map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => {
-                          setStorageVoltageFilter(option.value as StorageVoltageFilter);
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                        {[
+                          { value: "all", label: "Wszystkie" },
+                          { value: "low_voltage", label: "LV - niskonapięciowe" },
+                          { value: "high_voltage", label: "HV - wysokonapięciowe" },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => {
+                              setStorageVoltageFilter(option.value as StorageVoltageFilter);
+                              setResult(null);
+                            }}
+                            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
+                                ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-500/20"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
+                              }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <label className="block">
+                      <span className="text-sm text-slate-700 dark:text-slate-200">
+                        Model magazynu energii
+                      </span>
+
+                      <select
+                        className="mt-2 h-[104px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
+                        value={storage}
+                        onChange={(e) => {
+                          setStorage(e.target.value);
+                          setSelectedInverterName("auto");
                           setResult(null);
                         }}
-                        className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-500/20"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
-                          }`}
                       >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <label className="block">
-                  <span className="text-sm text-slate-700 dark:text-slate-200">
-                    Model magazynu energii
-                  </span>
-
-
-                  <select
-                    className="mt-2 h-[104px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-                    value={storage}
-                    onChange={(e) => {
-                      setStorage(e.target.value);
-                      setSelectedInverterName("auto");
-                      setResult(null);
-                    }}
-                  >
-                    {storagesToShow.map((storageItem) => (
-                      <option key={storageItem.code} value={storageItem.code}>
-                        {storageItem.name} ({getStorageVoltageLabel(getStorageVoltageType(storageItem))})
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                        {storagesToShow.map((storageItem) => (
+                          <option key={storageItem.code} value={storageItem.code}>
+                            {storageItem.name} ({getStorageVoltageLabel(getStorageVoltageType(storageItem))})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
 
                 <label className="flex min-h-[104px] cursor-pointer items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-950">
                   <input
@@ -1247,39 +1363,47 @@ export default function OfferForm({
         </div>
       )}
       {(hasPvSelected || hasStorageSelected) && !clientHasOwnHybridInverter && (
-        <label className="mb-5 block">
-          <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
+        customMode ? (
+          <CustomInverterFields
+            value={customEquipment.inverter}
+            onChange={(inverter) => setCustomEquipment((current) => ({ ...current, inverter }))}
+            onInvalidate={invalidateCalculation}
+          />
+        ) : (
+          <label className="mb-5 block">
+            <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
 
-          <select
-            className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-            value={selectedInverterName}
-            onChange={(e) => {
-              setSelectedInverterName(e.target.value);
-              setResult(null);
-            }}
-          >
-            <option value="auto">
-              {hasStorageSelected
-                ? "Automatycznie dobierz falownik hybrydowy"
-                : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
-            </option>
+            <select
+              className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
+              value={selectedInverterName}
+              onChange={(e) => {
+                setSelectedInverterName(e.target.value);
+                setResult(null);
+              }}
+            >
+              <option value="auto">
+                {hasStorageSelected
+                  ? "Automatycznie dobierz falownik hybrydowy"
+                  : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
+              </option>
 
-            {invertersToShow
-              .filter((inverterItem) => {
-                if (hasStorageSelected) return inverterItem.type === "hybrid";
-                return inverterItem.type !== "hybrid";
-              })
-              .map((inverterItem, index) => (
-                <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
-                  {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
-                </option>
-              ))}
-          </select>
+              {invertersToShow
+                .filter((inverterItem) => {
+                  if (hasStorageSelected) return inverterItem.type === "hybrid";
+                  return inverterItem.type !== "hybrid";
+                })
+                .map((inverterItem, index) => (
+                  <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
+                    {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
+                  </option>
+                ))}
+            </select>
 
-          <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
-            Funkcja automatyczna dobiera falownik po mocyinstalacji. Ręczny wybór pozwala zmienić model i typ falownika np. sieciowy na hybrydowy.”.
-          </p>
-        </label>
+            <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
+              Funkcja automatyczna dobiera falownik po mocy instalacji. Ręczny wybór pozwala zmienić model i typ falownika, np. z sieciowego na hybrydowy.
+            </p>
+          </label>
+        )
       )}
 
       {hasStorageSelected && (

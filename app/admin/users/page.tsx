@@ -24,6 +24,7 @@ type Profile = {
   hidden_from_assignment?: boolean | null;
   realization_access: boolean;
   sms_access: boolean;
+  custom_mode_access: boolean;
 };
 
 type ClientTag = {
@@ -429,7 +430,7 @@ export default function AdminUsersPage() {
 
     const { data: permissionsData, error: permissionsError } = await supabase
       .from("user_permissions")
-      .select("user_id, realization, sms");
+      .select("user_id, realization, sms, custom_mode");
 
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
@@ -447,12 +448,19 @@ export default function AdminUsersPage() {
         Boolean(permission.sms),
       ])
     );
+    const customModeByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.custom_mode),
+      ])
+    );
 
     setProfiles(
       (data ?? []).map((profile) => ({
         ...profile,
         realization_access: realizationByUserId.get(profile.id) || false,
         sms_access: smsByUserId.get(profile.id) || false,
+        custom_mode_access: customModeByUserId.get(profile.id) || false,
       })) as Profile[]
     );
     setLoading(false);
@@ -467,6 +475,7 @@ export default function AdminUsersPage() {
     const {
       realization_access: realizationAccess,
       sms_access: smsAccess,
+      custom_mode_access: customModeAccess,
       ...profileValues
     } = values;
     const payload: Partial<Profile> = profileValues;
@@ -503,7 +512,11 @@ export default function AdminUsersPage() {
       }
     }
 
-    if (realizationAccess !== undefined || smsAccess !== undefined) {
+    if (
+      realizationAccess !== undefined ||
+      smsAccess !== undefined ||
+      customModeAccess !== undefined
+    ) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -523,6 +536,8 @@ export default function AdminUsersPage() {
             realization:
               realizationAccess ?? currentProfile?.realization_access ?? false,
             sms: smsAccess ?? currentProfile?.sms_access ?? false,
+            custom_mode:
+              customModeAccess ?? currentProfile?.custom_mode_access ?? false,
             updated_by: user.id,
             updated_at: new Date().toISOString(),
           },
@@ -1063,6 +1078,16 @@ export default function AdminUsersPage() {
       changeLines.push(
         `Uprawnienie SMS: ${profile.sms_access ? "Tak" : "Nie"} → ${
           changes.sms_access ? "Tak" : "Nie"
+        }`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "custom_mode_access") &&
+      changes.custom_mode_access !== profile.custom_mode_access
+    ) {
+      changeLines.push(
+        `Uprawnienie Custom Mode: ${profile.custom_mode_access ? "Tak" : "Nie"} → ${
+          changes.custom_mode_access ? "Tak" : "Nie"
         }`
       );
     }
@@ -1836,7 +1861,7 @@ export default function AdminUsersPage() {
             </div>
           ) : (
             <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-              <table className="min-w-[1150px] divide-y divide-slate-200">
+              <table className="min-w-[1280px] divide-y divide-slate-200">
                 <thead>
                   <tr className="text-left text-sm font-semibold text-slate-600">
                     <th className="px-4 py-3">
@@ -1903,6 +1928,7 @@ export default function AdminUsersPage() {
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
                     <th className="px-4 py-3 text-center">SMS</th>
+                    <th className="px-4 py-3 text-center">Custom Mode</th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -2036,6 +2062,30 @@ export default function AdminUsersPage() {
                               className="h-4 w-4 rounded border-slate-300 accent-fuchsia-700"
                             />
                             {(editedProfile.sms_access ?? profile.sms_access) ? "Tak" : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={
+                                editedProfile.custom_mode_access ??
+                                profile.custom_mode_access
+                              }
+                              onChange={(event) => {
+                                updateEditedProfile(profile.id, {
+                                  custom_mode_access: event.target.checked,
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 accent-violet-700"
+                            />
+                            {(
+                              editedProfile.custom_mode_access ??
+                              profile.custom_mode_access
+                            )
+                              ? "Tak"
+                              : "Nie"}
                           </label>
                         </td>
 

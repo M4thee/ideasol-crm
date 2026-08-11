@@ -415,9 +415,59 @@ export async function GET() {
   }
 }
 
+function readBearerToken(request: Request) {
+  const authorization = request.headers.get("authorization") || "";
+
+  return authorization.toLowerCase().startsWith("bearer ")
+    ? authorization.slice(7).trim()
+    : "";
+}
+
 export async function POST(request: Request) {
   const body = await request.json();
+  const customModeRequested = body?.customMode === true;
+  let authenticatedUserId: string | null = null;
+
+  if (customModeRequested) {
+    const accessToken = readBearerToken(request);
+
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "Tryb niestandardowy wymaga aktywnej sesji użytkownika." },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(accessToken);
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Sesja wygasła. Zaloguj się ponownie." },
+        { status: 401 }
+      );
+    }
+
+    const { data: permission, error: permissionError } = await supabase
+      .from("user_permissions")
+      .select("custom_mode")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (permissionError || permission?.custom_mode !== true) {
+      return NextResponse.json(
+        { error: "Brak uprawnienia Custom Mode." },
+        { status: 403 }
+      );
+    }
+
+    authenticatedUserId = user.id;
+  }
+
   const sellerProfileId =
+    authenticatedUserId ||
     body?.advisor?.id ||
     body?.createdBy ||
     null;

@@ -1358,6 +1358,34 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const additionalProductsData = getAdditionalProductsData(sale);
   const technicalData = getTechnicalData(sale);
   const storageDetails = parseStorageDetails(technicalData);
+  const offerSnapshot = (sale.offer_snapshot || {}) as Record<string, any>;
+  const customOfferData = (offerSnapshot.offer_data || {}) as Record<string, any>;
+  const customEquipment = (
+    customOfferData.customEquipment ||
+    customOfferData.form?.customEquipment ||
+    customOfferData.result?.customEquipment ||
+    offerSnapshot.customEquipment ||
+    null
+  ) as Record<string, any> | null;
+  const isCustomMode = Boolean(
+    customOfferData.customMode ||
+    customOfferData.form?.customMode ||
+    customOfferData.result?.customMode ||
+    offerSnapshot.customMode
+  );
+
+  function makeCustomWarrantyRow(
+    equipment: Record<string, any> | null | undefined,
+    fallbackName: unknown
+  ) {
+    return {
+      producerAndModel:
+        cleanText(equipment?.displayName) || humanizeEquipmentName(fallbackName),
+      guarantor: cleanText(equipment?.warrantyGuarantor),
+      period: cleanText(equipment?.warrantyPeriod),
+    };
+  }
+
   const [panelsResult, invertersResult, storagesResult] = await Promise.all([
     supabase
       .from("panels")
@@ -1380,26 +1408,32 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const warrantyRows = {
     panel: technicalData.hasPv
-      ? makeContractWarrantyRow(
-          panelsResult.data || [],
-          technicalData.panelModel,
-          humanizeEquipmentName(technicalData.panelModel)
-        )
+      ? isCustomMode
+        ? makeCustomWarrantyRow(customEquipment?.panel, technicalData.panelModel)
+        : makeContractWarrantyRow(
+            panelsResult.data || [],
+            technicalData.panelModel,
+            humanizeEquipmentName(technicalData.panelModel)
+          )
       : null,
     inverter:
       technicalData.hasInverter && !technicalData.clientHasOwnHybridInverter
-        ? makeContractWarrantyRow(
-            invertersResult.data || [],
-            technicalData.inverterModel,
-            humanizeEquipmentName(technicalData.inverterModel)
-          )
+        ? isCustomMode
+          ? makeCustomWarrantyRow(customEquipment?.inverter, technicalData.inverterModel)
+          : makeContractWarrantyRow(
+              invertersResult.data || [],
+              technicalData.inverterModel,
+              humanizeEquipmentName(technicalData.inverterModel)
+            )
         : null,
     storage: technicalData.hasStorage
-      ? makeContractWarrantyRow(
-          storagesResult.data || [],
-          technicalData.storageModel,
-          [storageDetails.brand, storageDetails.model].filter(Boolean).join(" ")
-        )
+      ? isCustomMode
+        ? makeCustomWarrantyRow(customEquipment?.storage, technicalData.storageModel)
+        : makeContractWarrantyRow(
+            storagesResult.data || [],
+            technicalData.storageModel,
+            [storageDetails.brand, storageDetails.model].filter(Boolean).join(" ")
+          )
       : null,
   };
   const saleNumber = customer.contractNumber || sale.contract_number || sale.public_id || sale.sale_id || sale.id;

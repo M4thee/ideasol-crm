@@ -6,6 +6,12 @@ import OfferResult, { type OfferEmailOptions } from "@/components/calculator/Off
 import OfferForm from "@/components/calculator/OfferForm";
 import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
 import { recordCrmAuditEvent } from "@/lib/crmAudit";
+import {
+  CUSTOM_PANEL_CODE,
+  CUSTOM_STORAGE_CODE,
+  createDefaultCustomEquipment,
+  type CustomEquipment,
+} from "@/lib/calculator/customEquipment";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
 import GrantCalculator from "@/components/calculator/GrantCalculator";
@@ -177,6 +183,7 @@ type UserProfile = {
   default_seller_markup?: number | null;
   role: "admin" | "owner" | "seller" | "cc" | null;
   is_active?: boolean | null;
+  custom_mode_access?: boolean;
 };
 
 type CrmClientOption = {
@@ -486,6 +493,10 @@ export default function Home() {
   const [selectedAdditionalServices, setSelectedAdditionalServices] = useState<SelectedAdditionalService[]>([]);
   const [identicalSetCount, setIdenticalSetCount] = useState(1);
   const [includeCatalogCards, setIncludeCatalogCards] = useState(true);
+  const [customMode, setCustomMode] = useState(false);
+  const [customEquipment, setCustomEquipment] = useState<CustomEquipment>(
+    createDefaultCustomEquipment
+  );
 
   const [billingSystem, setBillingSystem] = useState<
     "net_billing" | "net_metering"
@@ -511,6 +522,8 @@ export default function Home() {
   const advisorEmail = currentUserEmail || "kontakt@ideasol.pl";
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
   const canSeePricingPanel = currentUserRole.includes("admin");
+  const customModeAvailable = userProfile?.custom_mode_access === true;
+  const customModeActive = customMode && customModeAvailable;
   useEffect(() => {
     function updateOnlineStatus() {
       setIsOffline(!isCalculatorOnline());
@@ -528,6 +541,10 @@ export default function Home() {
   }, []);
 
   function getPanelPowerWp(model: string) {
+    if (customModeActive && model === CUSTOM_PANEL_CODE) {
+      return Number(customEquipment.panel.powerWp || 0);
+    }
+
     const selectedPanel = panels.find((panel) => panel.code === model);
 
     if (selectedPanel) {
@@ -539,6 +556,10 @@ export default function Home() {
   }
 
   function getPanelDisplayName(model: string) {
+    if (customModeActive && model === CUSTOM_PANEL_CODE) {
+      return customEquipment.panel.displayName.trim() || "Panel niestandardowy";
+    }
+
     const selectedPanel = panels.find((panel) => panel.code === model);
 
     return selectedPanel?.display_name || selectedPanel?.name || model;
@@ -556,6 +577,10 @@ export default function Home() {
   }
 
   function getSelectedInverterType(inverterDisplayName: string) {
+    if (customModeActive && inverterDisplayName === customEquipment.inverter.displayName) {
+      return customEquipment.inverter.type;
+    }
+
     if (!inverterDisplayName || inverterDisplayName === "Brak") {
       return null;
     }
@@ -621,6 +646,15 @@ export default function Home() {
       return null;
     }
 
+    if (customModeActive) {
+      const url = customEquipment.panel.catalogCardUrl.trim();
+      const title = customEquipment.panel.displayName.trim();
+
+      return url && title
+        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-panelu.pdf"), url }
+        : null;
+    }
+
     const selectedPanel = panels.find((panel) => panel.code === panelModel);
     const url = selectedPanel?.catalog_card_url || selectedPanel?.catalogCardUrl || null;
 
@@ -642,6 +676,15 @@ export default function Home() {
       return null;
     }
 
+    if (customModeActive) {
+      const url = customEquipment.storage.catalogCardUrl.trim();
+      const title = customEquipment.storage.displayName.trim();
+
+      return url && title
+        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-magazynu-energii.pdf"), url }
+        : null;
+    }
+
     const selectedStorage = storages.find((catalogStorage) => catalogStorage.code === storage);
     const url = selectedStorage?.catalog_card_url || selectedStorage?.catalogCardUrl || null;
 
@@ -661,6 +704,15 @@ export default function Home() {
   function getSelectedInverterCatalogCard(offerResult: Result): CatalogCardEmailAttachment | null {
     if (!offerResult.inverter || offerResult.inverter === "Brak") {
       return null;
+    }
+
+    if (customModeActive) {
+      const url = customEquipment.inverter.catalogCardUrl.trim();
+      const title = customEquipment.inverter.displayName.trim();
+
+      return url && title
+        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-falownika.pdf"), url }
+        : null;
     }
 
     const selectedInverter =
@@ -745,7 +797,15 @@ export default function Home() {
       }
 
       if (data) {
-        const profile = data as UserProfile;
+        const { data: customModePermission } = await supabase
+          .from("user_permissions")
+          .select("custom_mode")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        const profile = {
+          ...data,
+          custom_mode_access: customModePermission?.custom_mode === true,
+        } as UserProfile;
         setUserProfile(profile);
 
         const defaultMargin = profile.default_seller_markup;
@@ -993,6 +1053,7 @@ export default function Home() {
 
       if (loadedPanels.length > 0) {
         setPanelModel((current) =>
+          current === CUSTOM_PANEL_CODE ||
           loadedPanels.some((panel: CatalogPanel) => panel.code === current)
             ? current
             : loadedPanels[0].code
@@ -1002,6 +1063,7 @@ export default function Home() {
       if (loadedStorages.length > 0) {
         setStorage((current) =>
           current === "none" ||
+            current === CUSTOM_STORAGE_CODE ||
             loadedStorages.some((catalogStorage: CatalogStorage) => catalogStorage.code === current)
             ? current
             : loadedStorages[0].code
@@ -1197,6 +1259,8 @@ export default function Home() {
 
   function buildCalculationPayload() {
     return {
+      customMode: customModeActive,
+      customEquipment: customModeActive ? customEquipment : null,
       offerType,
       panelModel,
       panelCount,
@@ -1252,11 +1316,25 @@ export default function Home() {
           nodeEnv: process.env.NODE_ENV,
         }) as Result;
       } else {
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+
+        if (calculationPayload.customMode) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+
+          if (!session?.access_token) {
+            throw new Error("Tryb niestandardowy wymaga aktywnej sesji użytkownika.");
+          }
+
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+
         const res = await fetch("/api/calculate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify(calculationPayload),
         });
 
@@ -1315,6 +1393,8 @@ export default function Home() {
   }
 
   function resetForm() {
+    setCustomMode(false);
+    setCustomEquipment(createDefaultCustomEquipment());
     setOfferType("none");
     setPanelModel("AMERISOLAR_450_FB");
     setPanelCount(16);
@@ -1377,6 +1457,15 @@ export default function Home() {
     );
     const selectedClientEmailForOffer =
       selectedClientForOffer?.email?.trim() || clientEmail.trim();
+    const panelModelForSave = customModeActive
+      ? customEquipment.panel.displayName.trim()
+      : panelModel;
+    const storageForSave = customModeActive
+      ? customEquipment.storage.displayName.trim()
+      : storage;
+    const inverterForSave = customModeActive
+      ? customEquipment.inverter.displayName.trim()
+      : selectedInverterName;
 
     const offerPayload = {
       client_id: clientIdForSave,
@@ -1400,31 +1489,35 @@ export default function Home() {
       subsidy_eu_bonus: result.subsidyAllocation?.euBonus ?? null,
       subsidy_total: result.subsidyAllocation?.total ?? null,
       pv_power_kw: result.pvPowerKw,
-      panel_model: panelModel,
+      panel_model: panelModelForSave,
       panel_count: panelCount,
       panel_power_wp: getPanelPowerWp(panelModel),
       inverter: result.inverter,
       energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
       offer_data: {
+        customMode: customModeActive,
+        customEquipment: customModeActive ? customEquipment : null,
         result,
         contractBreakdown: result.contractBreakdown || null,
         additionalServices: selectedAdditionalServices,
         additional_services: selectedAdditionalServices,
         form: {
+          customMode: customModeActive,
+          customEquipment: customModeActive ? customEquipment : null,
           offerType,
-          panelModel,
+          panelModel: panelModelForSave,
           panelCount,
           manualPowerKw,
           roofType,
-          storage,
+          storage: storageForSave,
           withEms: Boolean(result.withEms),
           withBackup: Boolean(result.withBackup),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw: isUpsell ? existingPvPowerKw : "0",
           billingSystem,
-          selectedInverterName,
+          selectedInverterName: inverterForSave,
           clientHasOwnHybridInverter,
           sellerMarkup,
           vatRate,
@@ -1593,21 +1686,25 @@ IdeaSol`;
           clientEmail: emailForSend,
           selectedClientEmail,
           typedClientEmail,
+          customMode: customModeActive,
+          customEquipment: customModeActive ? customEquipment : null,
           offerType,
-          panelModel,
+          panelModel: getPanelDisplayName(panelModel),
           panelCount,
           panelPowerWp: getPanelPowerWp(panelModel),
           panelName: getPanelDisplayName(panelModel),
           manualPowerKw,
           roofType,
-          storage,
+          storage: customModeActive ? customEquipment.storage.displayName : storage,
           withEms: Boolean(result.withEms),
           withBackup: Boolean(result.withBackup),
           includeSubsidy,
           isUpsell,
           existingPvPowerKw,
           billingSystem,
-          selectedInverterName,
+          selectedInverterName: customModeActive
+            ? customEquipment.inverter.displayName
+            : selectedInverterName,
           clientHasOwnHybridInverter,
           sellerMarkup,
           vatRate,
@@ -1710,7 +1807,7 @@ IdeaSol`;
           offerType: result.offerType,
           pvPowerKw: result.pvPowerKw,
           panelName: getPanelDisplayName(panelModel),
-          panelModel,
+          panelModel: getPanelDisplayName(panelModel),
           panelCount,
           panelPowerWp: getPanelPowerWp(panelModel),
           inverter: result.inverter,
@@ -1899,11 +1996,15 @@ IdeaSol`;
           energy_storage: getResultStorageDisplayName(queuedResult),
           roof_type: snapshot.roofType || null,
           offer_data: {
+            customMode: Boolean(snapshot.customMode),
+            customEquipment: snapshot.customEquipment || null,
             result: queuedResult,
             contractBreakdown: queuedResult.contractBreakdown || null,
             additionalServices: selectedAdditionalServicesSnapshot,
             additional_services: selectedAdditionalServicesSnapshot,
             form: {
+              customMode: Boolean(snapshot.customMode),
+              customEquipment: snapshot.customEquipment || null,
               offerType: snapshot.offerType || queuedResult.offerType,
               panelModel: snapshot.panelModel || null,
               panelCount: Number(snapshot.panelCount || 0),
@@ -2185,6 +2286,11 @@ IdeaSol`;
               setSellerMarkup={setSellerMarkup}
               selectedAdditionalServices={selectedAdditionalServices}
               setSelectedAdditionalServices={setSelectedAdditionalServices}
+              customModeAvailable={customModeAvailable}
+              customMode={customModeActive}
+              setCustomMode={setCustomMode}
+              customEquipment={customEquipment}
+              setCustomEquipment={setCustomEquipment}
             />
 
             {result && (

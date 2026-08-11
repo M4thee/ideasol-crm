@@ -1,4 +1,10 @@
 import { calculatePmeSubsidy } from "@/lib/calculator/pmeSubsidy";
+import {
+  CUSTOM_INVERTER_CODE,
+  CUSTOM_PANEL_CODE,
+  CUSTOM_STORAGE_CODE,
+  normalizeCustomEquipment,
+} from "@/lib/calculator/customEquipment";
 
 export type CalculatorCatalog = {
   panels: Record<string, PanelItem>;
@@ -540,10 +546,86 @@ function calculateManagerOverrideNet(params: {
 
 export function calculateOffer(input: CalculateOfferInput) {
   let body = { ...input.body };
-  const catalog = input.catalog;
+  let catalog = input.catalog;
   const currentUser = input.currentUser || null;
   const settingsRow = input.settingsRow || null;
   const nodeEnv = input.nodeEnv || "production";
+
+  let normalizedCustomEquipment = null;
+
+  if (body.customMode === true) {
+    const offerType = String(body.offerType || "pv_storage");
+    const hasPv = offerType === "pv" || offerType === "pv_storage";
+    const hasStorage = offerType === "storage" || offerType === "pv_storage";
+
+    normalizedCustomEquipment = normalizeCustomEquipment(body.customEquipment, {
+      hasPv,
+      hasStorage,
+      clientHasOwnHybridInverter: Boolean(body.clientHasOwnHybridInverter),
+    });
+
+    catalog = {
+      panels: {
+        ...catalog.panels,
+        ...(hasPv
+          ? {
+              [CUSTOM_PANEL_CODE]: {
+                name: normalizedCustomEquipment.panel.displayName,
+                displayName: normalizedCustomEquipment.panel.displayName,
+                powerWp: normalizedCustomEquipment.panel.powerWp,
+                priceNet: normalizedCustomEquipment.panel.priceNet,
+                catalogCardUrl: normalizedCustomEquipment.panel.catalogCardUrl || null,
+              },
+            }
+          : {}),
+      },
+      inverters: [
+        ...catalog.inverters,
+        ...(!body.clientHasOwnHybridInverter
+          ? [
+              {
+                name: CUSTOM_INVERTER_CODE,
+                displayName: normalizedCustomEquipment.inverter.displayName,
+                type: normalizedCustomEquipment.inverter.type,
+                batteryVoltageType: normalizedCustomEquipment.inverter.batteryVoltageType,
+                maxPvKw: normalizedCustomEquipment.inverter.maxPvKw,
+                priceNet: normalizedCustomEquipment.inverter.priceNet,
+                catalogCardUrl: normalizedCustomEquipment.inverter.catalogCardUrl || null,
+                isEu: normalizedCustomEquipment.inverter.isEu,
+                hasEms: normalizedCustomEquipment.inverter.hasEms,
+              },
+            ]
+          : []),
+      ],
+      storages: {
+        ...catalog.storages,
+        ...(hasStorage
+          ? {
+              [CUSTOM_STORAGE_CODE]: {
+                name: normalizedCustomEquipment.storage.displayName,
+                displayName: normalizedCustomEquipment.storage.displayName,
+                capacityKwh: normalizedCustomEquipment.storage.capacityKwh,
+                voltageType: normalizedCustomEquipment.storage.voltageType,
+                priceNet: normalizedCustomEquipment.storage.priceNet,
+                installationNet: 0,
+                catalogCardUrl: normalizedCustomEquipment.storage.catalogCardUrl || null,
+                isEu: normalizedCustomEquipment.storage.isEu,
+              },
+            }
+          : {}),
+      },
+    };
+
+    body = {
+      ...body,
+      panelModel: hasPv ? CUSTOM_PANEL_CODE : body.panelModel,
+      storage: hasStorage ? CUSTOM_STORAGE_CODE : "none",
+      selectedInverterName: body.clientHasOwnHybridInverter
+        ? "none"
+        : CUSTOM_INVERTER_CODE,
+      customEquipment: normalizedCustomEquipment,
+    };
+  }
 
   const currentOverrides = body.pricingOverrides || {};
   body = {
@@ -1012,6 +1094,8 @@ export function calculateOffer(input: CalculateOfferInput) {
   const storageDisplayName = getStorageDisplayName(storage);
 
   return {
+    customMode: body.customMode === true,
+    customEquipment: normalizedCustomEquipment,
     pvPowerKw,
     inverterSizingPvPowerKw,
     inverter: "displayName" in inverter ? inverter.displayName : inverter.name,
