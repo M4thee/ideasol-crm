@@ -76,7 +76,6 @@ type Reward = {
   image_path: string | null;
   image_url: string | null;
   price_points: number;
-  market_value_pln: number | string;
   delivery_type: "digital" | "physical";
   is_available: boolean;
   sort_order: number;
@@ -87,12 +86,6 @@ type RewardOrder = {
   id: string;
   status: "new" | "approved" | "processing" | "shipped" | "completed" | "cancelled";
   total_points: number;
-  total_market_value_pln: number | string | null;
-  tax_treatment: "consumer_exempt" | "consumer_withholding" | "business_income" | "manual_review";
-  tax_due_pln: number | string;
-  tax_payment_status: "not_required" | "pending" | "paid";
-  tax_paid_at: string | null;
-  tax_payment_reference: string | null;
   delivery_type: "digital" | "physical";
   recipient_first_name: string | null;
   recipient_last_name: string | null;
@@ -104,18 +97,7 @@ type RewardOrder = {
     reward_name_snapshot: string;
     quantity: number;
     line_points: number;
-    unit_market_value_pln: number | string | null;
-    line_market_value_pln: number | string | null;
   }>;
-};
-
-type AnnualTaxSummary = {
-  user_id: string;
-  award_year: number;
-  completed_order_count: number;
-  total_market_value_pln: number | string;
-  total_tax_due_pln: number | string;
-  total_tax_paid_pln: number | string;
 };
 
 type ProfitDashboardData = {
@@ -124,7 +106,6 @@ type ProfitDashboardData = {
   rewards: Reward[];
   categories: RewardCategory[];
   orders: RewardOrder[];
-  annualTaxSummaries: AnnualTaxSummary[];
   crmClients: CrmClientCandidate[];
   generatedAt: string;
 };
@@ -137,7 +118,6 @@ type RewardFormState = {
   name: string;
   description: string;
   pricePoints: string;
-  marketValuePln: string;
   deliveryType: "digital" | "physical";
   isAvailable: boolean;
   sortOrder: string;
@@ -158,7 +138,6 @@ const emptyReward: RewardFormState = {
   name: "",
   description: "",
   pricePoints: "",
-  marketValuePln: "",
   deliveryType: "physical",
   isAvailable: true,
   sortOrder: "100",
@@ -199,10 +178,6 @@ const orderStatusLabel: Record<RewardOrder["status"], string> = {
 
 function formatNumber(value: number | string | null | undefined) {
   return Number(value || 0).toLocaleString("pl-PL");
-}
-
-function formatMoney(value: number | string | null | undefined) {
-  return Number(value || 0).toLocaleString("pl-PL", { style: "currency", currency: "PLN" });
 }
 
 function formatDate(value: string | null | undefined) {
@@ -345,11 +320,6 @@ export default function ProfitAdmin() {
     };
   }, [data]);
 
-  const userById = useMemo(
-    () => new Map((data?.users || []).map((user) => [user.id, user])),
-    [data?.users]
-  );
-
   async function runAction<T = { ok: true }>(body: Record<string, unknown>, message: string) {
     setBusy(true);
     setError("");
@@ -475,7 +445,6 @@ export default function ProfitAdmin() {
       name: reward.name,
       description: reward.description || "",
       pricePoints: String(reward.price_points),
-      marketValuePln: String(reward.market_value_pln),
       deliveryType: reward.delivery_type,
       isAvailable: reward.is_available,
       sortOrder: String(reward.sort_order),
@@ -532,7 +501,6 @@ export default function ProfitAdmin() {
         name: rewardForm.name,
         description: rewardForm.description,
         pricePoints: Number(rewardForm.pricePoints),
-        marketValuePln: Number(rewardForm.marketValuePln.replace(",", ".")),
         deliveryType: rewardForm.deliveryType,
         isAvailable: rewardForm.isAvailable,
         sortOrder: Number(rewardForm.sortOrder),
@@ -570,16 +538,6 @@ export default function ProfitAdmin() {
 
     if (!window.confirm(`Zmienić status zamówienia na „${orderStatusLabel[status]}”?`)) return;
     await runAction(body, `Status zamówienia został zmieniony na „${orderStatusLabel[status]}”.`);
-  }
-
-  async function markTaxPaid(order: RewardOrder) {
-    const reference = window.prompt(`Podatek do wpłaty: ${formatMoney(order.tax_due_pln)}. Podaj identyfikator wpłaty lub notatkę księgową:`);
-    if (!reference) return;
-    if (!window.confirm(`Odnotować wpłatę podatku ${formatMoney(order.tax_due_pln)}?`)) return;
-    await runAction(
-      { action: "mark_tax_paid", orderId: order.id, taxPaymentReference: reference },
-      "Wpłata podatku została odnotowana. Zamówienie można zatwierdzić."
-    );
   }
 
   if (loading) {
@@ -893,7 +851,6 @@ export default function ProfitAdmin() {
                 <label className="mt-4 block text-sm font-bold">Nazwa</label><input required value={rewardForm.name} onChange={(event) => setRewardForm((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" />
                 <label className="mt-4 block text-sm font-bold">Opis</label><textarea value={rewardForm.description} onChange={(event) => setRewardForm((current) => ({ ...current, description: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-slate-200 p-3 dark:border-slate-700 dark:bg-slate-950" />
                 <div className="mt-4 grid grid-cols-2 gap-3"><div><label className="block text-sm font-bold">Cena kWpkt</label><input required type="number" min="1" value={rewardForm.pricePoints} onChange={(event) => setRewardForm((current) => ({ ...current, pricePoints: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div><div><label className="block text-sm font-bold">Kolejność</label><input required type="number" min="0" value={rewardForm.sortOrder} onChange={(event) => setRewardForm((current) => ({ ...current, sortOrder: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /></div></div>
-                <label className="mt-4 block text-sm font-bold">Wartość rynkowa brutto (PLN)</label><input required type="number" min="0.01" max="1000000" step="0.01" value={rewardForm.marketValuePln} onChange={(event) => setRewardForm((current) => ({ ...current, marketValuePln: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-3 dark:border-slate-700 dark:bg-slate-950" /><p className="mt-2 text-xs leading-5 text-slate-400">Podstawa kontroli limitu podatkowego 2 000 zł. Dla katalogu przyjęto początkowo przelicznik 100 kWpkt = 1 zł; skoryguj do aktualnej wartości rynkowej nagrody.</p>
                 <label className="mt-4 block text-sm font-bold">Dostawa</label><select value={rewardForm.deliveryType} onChange={(event) => setRewardForm((current) => ({ ...current, deliveryType: event.target.value as "digital" | "physical" }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 dark:border-slate-700 dark:bg-slate-950"><option value="physical">Wysyłka fizyczna</option><option value="digital">Nagroda cyfrowa</option></select>
                 <label className="mt-4 block text-sm font-bold">Zdjęcie nagrody</label>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setRewardImage(event.target.files?.[0] || null)} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-50 file:px-3 file:py-2 file:font-bold file:text-[#0e6b7b]" />
@@ -901,16 +858,15 @@ export default function ProfitAdmin() {
                 <label className="mt-4 flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={rewardForm.isAvailable} onChange={(event) => setRewardForm((current) => ({ ...current, isAvailable: event.target.checked }))} className="h-4 w-4" />Widoczna i dostępna</label>
                 <button disabled={busy} className="mt-6 w-full rounded-xl bg-[#0e6b7b] px-4 py-3 text-sm font-black text-white disabled:opacity-50">{rewardForm.id ? "Zapisz zmiany" : "Dodaj nagrodę"}</button>
               </form>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-2xl font-black">Katalog nagród</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{data?.rewards.map((reward) => <article key={reward.id} className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700"><div className="relative h-32 bg-gradient-to-br from-cyan-100 to-emerald-50 dark:from-cyan-950 dark:to-slate-900">{reward.image_url ? <Image src={reward.image_url} alt={reward.name} fill sizes="320px" className="object-cover" /> : null}</div><div className="p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wider text-[#0e6b7b]">{reward.reward_categories?.name || "Bez kategorii"}</p><h3 className="mt-2 text-lg font-black">{reward.name}</h3></div><span className={`h-2.5 w-2.5 rounded-full ${reward.is_available ? "bg-emerald-500" : "bg-slate-300"}`} /></div><p className="mt-3 line-clamp-2 min-h-10 text-sm text-slate-500">{reward.description || "Brak opisu"}</p><p className="mt-4 text-xl font-black text-[#0e6b7b]">{formatNumber(reward.price_points)} kWpkt</p><p className="mt-1 text-xs font-bold text-slate-500">Wartość podatkowa: {formatMoney(reward.market_value_pln)}</p><button type="button" onClick={() => editReward(reward)} className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">Edytuj</button></div></article>)}</div></div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900"><h2 className="text-2xl font-black">Katalog nagród</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{data?.rewards.map((reward) => <article key={reward.id} className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700"><div className="relative h-32 bg-gradient-to-br from-cyan-100 to-emerald-50 dark:from-cyan-950 dark:to-slate-900">{reward.image_url ? <Image src={reward.image_url} alt={reward.name} fill sizes="320px" className="object-cover" /> : null}</div><div className="p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wider text-[#0e6b7b]">{reward.reward_categories?.name || "Bez kategorii"}</p><h3 className="mt-2 text-lg font-black">{reward.name}</h3></div><span className={`h-2.5 w-2.5 rounded-full ${reward.is_available ? "bg-emerald-500" : "bg-slate-300"}`} /></div><p className="mt-3 line-clamp-2 min-h-10 text-sm text-slate-500">{reward.description || "Brak opisu"}</p><p className="mt-4 text-xl font-black text-[#0e6b7b]">{formatNumber(reward.price_points)} kWpkt</p><button type="button" onClick={() => editReward(reward)} className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">Edytuj</button></div></article>)}</div></div>
             </section>
           </div>
         )}
 
         {activeTab === "orders" && (
           <section className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
-            <h2 className="text-2xl font-black">Zamówienia nagród</h2><p className="mt-1 text-sm text-slate-500">Przy opodatkowanej nagrodzie klient wpłaca IdeaSol 10% jej wartości. Po odnotowaniu wpłaty można zatwierdzić realizację i wysyłkę.</p>
-            {data?.annualTaxSummaries.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{data.annualTaxSummaries.map((summary) => { const summaryUser = userById.get(summary.user_id); return <div key={`${summary.user_id}-${summary.award_year}`} className="rounded-2xl bg-slate-50 p-4 text-sm dark:bg-slate-800/60"><p className="font-black">{summaryUser ? `${summaryUser.first_name} ${summaryUser.last_name} · ` : ""}{summary.award_year}</p><p className="mt-1 text-slate-500">{summary.completed_order_count} wydanych nagród · wartość {formatMoney(summary.total_market_value_pln)} · podatek {formatMoney(summary.total_tax_due_pln)}</p></div>; })}</div> : null}
-            <div className="mt-5 space-y-3">{data?.orders.length ? data.orders.map((order) => <article key={order.id} className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700"><div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{order.profit_users?.first_name} {order.profit_users?.last_name}</h3><span className="text-xs text-slate-500">{order.profit_users?.idea_id}</span><span className={`rounded-full px-2.5 py-1 text-xs font-black ring-1 ${statusTone(order.status)}`}>{orderStatusLabel[order.status]}</span>{order.tax_payment_status === "pending" ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-black text-amber-700 ring-1 ring-amber-200">Podatek do wpłaty</span> : order.tax_payment_status === "paid" ? <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">Podatek wpłacony</span> : null}</div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{order.reward_order_items.map((item) => `${item.reward_name_snapshot} × ${item.quantity}`).join(", ") || "Nagroda"}</p><p className="mt-2 text-sm font-black text-[#0e6b7b]">{formatNumber(order.total_points)} kWpkt · {formatMoney(order.total_market_value_pln)} · {formatDate(order.created_at)}</p>{Number(order.tax_due_pln) > 0 ? <p className="mt-1 text-xs font-bold text-amber-700">Podatek 10%: {formatMoney(order.tax_due_pln)}{order.tax_payment_reference ? ` · ${order.tax_payment_reference}` : ""}</p> : <p className="mt-1 text-xs text-slate-500">Podatek od tej jednorazowej nagrody: nie jest wymagany</p>}</div><div className="flex flex-wrap gap-2">{order.tax_payment_status === "pending" && <button disabled={busy} onClick={() => void markTaxPaid(order)} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-white">Odnotuj wpłatę podatku</button>}{order.status === "new" && order.tax_payment_status !== "pending" && <button disabled={busy} onClick={() => void transitionOrder(order, "approved")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Zatwierdź</button>}{order.status === "approved" && <button disabled={busy} onClick={() => void transitionOrder(order, "processing")} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white">Rozpocznij realizację</button>}{order.status === "processing" && <button disabled={busy} onClick={() => void transitionOrder(order, "shipped")} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white">Oznacz jako wysłane</button>}{["approved", "processing", "shipped"].includes(order.status) && <button disabled={busy} onClick={() => void transitionOrder(order, "completed")} className="rounded-lg bg-[#0e6b7b] px-3 py-2 text-xs font-black text-white">Zakończ</button>}{!["completed", "cancelled"].includes(order.status) && <button disabled={busy} onClick={() => void transitionOrder(order, "cancelled")} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600">Anuluj</button>}</div></div></article>) : <p className="rounded-2xl bg-slate-50 p-6 text-sm text-slate-500 dark:bg-slate-800/50">Brak zamówień nagród.</p>}</div>
+            <h2 className="text-2xl font-black">Zamówienia nagród</h2>
+            <div className="mt-5 space-y-3">{data?.orders.length ? data.orders.map((order) => <article key={order.id} className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700"><div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-black">{order.profit_users?.first_name} {order.profit_users?.last_name}</h3><span className="text-xs text-slate-500">{order.profit_users?.idea_id}</span><span className={`rounded-full px-2.5 py-1 text-xs font-black ring-1 ${statusTone(order.status)}`}>{orderStatusLabel[order.status]}</span></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{order.reward_order_items.map((item) => `${item.reward_name_snapshot} × ${item.quantity}`).join(", ") || "Nagroda"}</p><p className="mt-2 text-sm font-black text-[#0e6b7b]">{formatNumber(order.total_points)} kWpkt · {formatDate(order.created_at)}</p></div><div className="flex flex-wrap gap-2">{order.status === "new" && <button disabled={busy} onClick={() => void transitionOrder(order, "approved")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Zatwierdź</button>}{order.status === "approved" && <button disabled={busy} onClick={() => void transitionOrder(order, "processing")} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white">Rozpocznij realizację</button>}{order.status === "processing" && <button disabled={busy} onClick={() => void transitionOrder(order, "shipped")} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white">Oznacz jako wysłane</button>}{["approved", "processing", "shipped"].includes(order.status) && <button disabled={busy} onClick={() => void transitionOrder(order, "completed")} className="rounded-lg bg-[#0e6b7b] px-3 py-2 text-xs font-black text-white">Zakończ</button>}{!["completed", "cancelled"].includes(order.status) && <button disabled={busy} onClick={() => void transitionOrder(order, "cancelled")} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-black text-red-600">Anuluj</button>}</div></div></article>) : <p className="rounded-2xl bg-slate-50 p-6 text-sm text-slate-500 dark:bg-slate-800/50">Brak zamówień nagród.</p>}</div>
           </section>
         )}
       </div>

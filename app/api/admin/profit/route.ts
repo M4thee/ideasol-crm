@@ -22,7 +22,6 @@ type ProfitActionInput = {
   name?: string;
   description?: string;
   pricePoints?: number;
-  marketValuePln?: number;
   deliveryType?: "digital" | "physical";
   isAvailable?: boolean;
   isVisible?: boolean;
@@ -31,7 +30,6 @@ type ProfitActionInput = {
   orderStatus?: "approved" | "processing" | "shipped" | "completed" | "cancelled";
   trackingNumber?: string;
   trackingUrl?: string;
-  taxPaymentReference?: string;
   crmClientId?: string;
   firstName?: string;
   lastName?: string;
@@ -112,7 +110,6 @@ export async function GET(request: Request) {
       ordersResult,
       rewardsResult,
       categoriesResult,
-      annualTaxResult,
       crmClientsResult,
     ] = await Promise.all([
       profit
@@ -135,14 +132,14 @@ export async function GET(request: Request) {
       profit
         .from("reward_orders")
         .select(
-          "id,user_id,status,total_points,total_market_value_pln,tax_treatment,tax_due_pln,tax_payment_status,tax_paid_at,tax_payment_reference,delivery_type,recipient_first_name,recipient_last_name,tracking_number,tracking_url,admin_note,created_at,updated_at,profit_users!reward_orders_user_id_fkey(idea_id,first_name,last_name),reward_order_items(reward_name_snapshot,quantity,line_points,unit_market_value_pln,line_market_value_pln)"
+          "id,user_id,status,total_points,delivery_type,recipient_first_name,recipient_last_name,tracking_number,tracking_url,admin_note,created_at,updated_at,profit_users!reward_orders_user_id_fkey(idea_id,first_name,last_name),reward_order_items(reward_name_snapshot,quantity,line_points)"
         )
         .order("created_at", { ascending: false })
         .limit(200),
       profit
         .from("rewards")
         .select(
-          "id,category_id,name,description,image_path,price_points,market_value_pln,delivery_type,is_available,sort_order,archived_at,created_at,updated_at,reward_categories!rewards_category_id_fkey(name,slug)"
+          "id,category_id,name,description,image_path,price_points,delivery_type,is_available,sort_order,archived_at,created_at,updated_at,reward_categories!rewards_category_id_fkey(name,slug)"
         )
         .is("archived_at", null)
         .order("sort_order", { ascending: true })
@@ -152,10 +149,6 @@ export async function GET(request: Request) {
         .select("id,name,slug,description,image_path,sort_order,is_visible")
         .is("archived_at", null)
         .order("sort_order", { ascending: true }),
-      profit
-        .from("reward_tax_annual_summary")
-        .select("user_id,award_year,completed_order_count,total_market_value_pln,total_tax_due_pln,total_tax_paid_pln")
-        .order("award_year", { ascending: false }),
       supabaseAdmin
         .from("clients")
         .select(
@@ -172,7 +165,6 @@ export async function GET(request: Request) {
       ordersResult.error,
       rewardsResult.error,
       categoriesResult.error,
-      annualTaxResult.error,
       crmClientsResult.error,
     ].find(Boolean);
 
@@ -230,7 +222,6 @@ export async function GET(request: Request) {
       orders: ordersResult.data || [],
       rewards: (rewardsResult.data || []).map(withMediaUrl),
       categories: (categoriesResult.data || []).map(withMediaUrl),
-      annualTaxSummaries: annualTaxResult.data || [],
       crmClients,
       generatedAt: new Date().toISOString(),
     });
@@ -428,7 +419,6 @@ export async function PATCH(request: Request) {
       const name = cleanText(input.name);
       const description = cleanText(input.description);
       const pricePoints = Number(input.pricePoints);
-      const marketValuePln = Number(input.marketValuePln);
       const sortOrder = Number(input.sortOrder || 0);
 
       if (!isUuid(input.categoryId) || (input.rewardId && !isUuid(input.rewardId))) {
@@ -439,9 +429,6 @@ export async function PATCH(request: Request) {
       }
       if (!Number.isInteger(pricePoints) || pricePoints <= 0 || pricePoints > 10_000_000) {
         return NextResponse.json({ ok: false, error: "Podaj prawidłową cenę w kWpkt." }, { status: 400 });
-      }
-      if (!Number.isFinite(marketValuePln) || marketValuePln <= 0 || marketValuePln > 1_000_000) {
-        return NextResponse.json({ ok: false, error: "Podaj prawidłową wartość rynkową brutto nagrody w PLN." }, { status: 400 });
       }
       if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) {
         return NextResponse.json({ ok: false, error: "Nieprawidłowa kolejność nagrody." }, { status: 400 });
@@ -455,7 +442,6 @@ export async function PATCH(request: Request) {
         name,
         description: description || null,
         price_points: pricePoints,
-        market_value_pln: Math.round(marketValuePln * 100) / 100,
         delivery_type: input.deliveryType,
         is_available: input.isAvailable !== false,
         sort_order: sortOrder,
@@ -589,12 +575,6 @@ export async function PATCH(request: Request) {
           p_order_id: input.orderId,
           p_actor: admin.id,
         });
-        if (error?.message.includes("TAX_PAYMENT_REQUIRED")) {
-          return NextResponse.json({ ok: false, error: "Najpierw odnotuj wpłatę podatku od tej nagrody." }, { status: 400 });
-        }
-        if (error?.message.includes("TAX_REVIEW_REQUIRED")) {
-          return NextResponse.json({ ok: false, error: "Zamówienie wymaga ręcznej weryfikacji wartości i rozliczenia podatkowego." }, { status: 400 });
-        }
         if (error) throw error;
       } else if (input.orderStatus === "completed") {
         const { error } = await profit.rpc("complete_reward_order", {
@@ -653,44 +633,6 @@ export async function PATCH(request: Request) {
         });
       }
 
-      return NextResponse.json({ ok: true });
-    }
-
-    if (input.action === "mark_tax_paid") {
-      if (!isUuid(input.orderId)) {
-        return NextResponse.json({ ok: false, error: "Nieprawidłowe zamówienie." }, { status: 400 });
-      }
-      const reference = cleanText(input.taxPaymentReference);
-      if (reference.length < 3 || reference.length > 200) {
-        return NextResponse.json({ ok: false, error: "Podaj identyfikator wpłaty lub krótką notatkę księgową." }, { status: 400 });
-      }
-      const { data: before, error: beforeError } = await profit
-        .from("reward_orders")
-        .select("id,tax_due_pln,tax_payment_status,tax_paid_at,tax_payment_reference")
-        .eq("id", input.orderId)
-        .maybeSingle();
-      if (beforeError) throw beforeError;
-      if (!before) return NextResponse.json({ ok: false, error: "Nie znaleziono zamówienia." }, { status: 404 });
-      if (before.tax_payment_status !== "pending" || Number(before.tax_due_pln) <= 0) {
-        return NextResponse.json({ ok: false, error: "To zamówienie nie oczekuje na wpłatę podatku." }, { status: 400 });
-      }
-      const paidAt = new Date().toISOString();
-      const { data: after, error } = await profit
-        .from("reward_orders")
-        .update({ tax_payment_status: "paid", tax_paid_at: paidAt, tax_payment_reference: reference })
-        .eq("id", input.orderId)
-        .select("id,tax_due_pln,tax_payment_status,tax_paid_at,tax_payment_reference")
-        .single();
-      if (error) throw error;
-      await writeAuditLog({
-        actorId: admin.id,
-        action: "reward_order_tax_paid",
-        entityType: "reward_order",
-        entityId: input.orderId,
-        beforeData: before,
-        afterData: after,
-        reason: reference,
-      });
       return NextResponse.json({ ok: true });
     }
 
