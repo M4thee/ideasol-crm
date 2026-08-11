@@ -18,6 +18,9 @@ type ProfitReferralPayload = {
     phone?: string;
     email?: string;
     product?: "PV" | "ME" | "PV_ME";
+    marketingSmsConsent?: boolean;
+    marketingEmailConsent?: boolean;
+    marketingConsentVersion?: string;
   };
 };
 
@@ -124,6 +127,7 @@ export async function POST(request: Request) {
   const email = cleanText(payload.prospect?.email, 320).toLowerCase();
   const product = payload.prospect?.product;
   const sellerCrmUserId = isUuid(payload.sellerCrmUserId) ? payload.sellerCrmUserId : null;
+  const marketingConsentVersion = cleanText(payload.prospect?.marketingConsentVersion, 32);
 
   if (
     !isUuid(referralId) ||
@@ -223,19 +227,27 @@ export async function POST(request: Request) {
       if (clientError) throw clientError;
       clientId = client.id;
 
-      const note = [
-        "Polecenie z programu IdeaSol Profit.",
-        `Referral ID: ${referralId}`,
-        `Polecający: ${cleanText(payload.referrerName, 220)} (${cleanText(payload.referrerIdeaId, 20)})`,
-        `Produkt: ${productLabel(product)}`,
-      ].join("\n");
-      const { error: noteError } = await supabaseAdmin.from("client_notes").insert({
-        client_id: clientId,
-        content: note,
-        created_by: ownerUserId,
-      });
-      if (noteError) throw noteError;
     }
+
+    const note = [
+      "Kontakt z linku IdeaSol.",
+      `Referral ID: ${referralId}`,
+      `Polecający: ${cleanText(payload.referrerName, 220)} (${cleanText(payload.referrerIdeaId, 20)})`,
+      `Produkt: ${productLabel(product)}`,
+      ...(marketingConsentVersion
+        ? [
+            `Zgoda marketingowa SMS: ${payload.prospect?.marketingSmsConsent === true ? "TAK" : "NIE"}`,
+            `Zgoda marketingowa e-mail: ${payload.prospect?.marketingEmailConsent === true ? "TAK" : "NIE"}`,
+            `Wersja zgód: ${marketingConsentVersion}`,
+          ]
+        : []),
+    ].join("\n");
+    const { error: noteError } = await supabaseAdmin.from("client_notes").insert({
+      client_id: clientId,
+      content: note,
+      created_by: ownerUserId,
+    });
+    if (noteError) throw noteError;
 
     await attachProfitTag(clientId);
 
