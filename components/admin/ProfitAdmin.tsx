@@ -27,6 +27,19 @@ type ProfitUser = {
   balance: ProfitBalance;
 };
 
+type CrmClientCandidate = {
+  id: string;
+  public_id: number | null;
+  display_name: string;
+  company_name: string | null;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string | null;
+  status: string | null;
+  profit_user: { id: string; idea_id: string } | null;
+};
+
 type ProfitReferral = {
   id: string;
   registered_at: string;
@@ -93,6 +106,7 @@ type ProfitDashboardData = {
   rewards: Reward[];
   categories: RewardCategory[];
   orders: RewardOrder[];
+  crmClients: CrmClientCandidate[];
   generatedAt: string;
 };
 
@@ -226,6 +240,15 @@ export default function ProfitAdmin() {
   const [selectedUser, setSelectedUser] = useState<ProfitUser | null>(null);
   const [pointsValue, setPointsValue] = useState("");
   const [pointsReason, setPointsReason] = useState("");
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [crmClientSearch, setCrmClientSearch] = useState("");
+  const [selectedCrmClientId, setSelectedCrmClientId] = useState("");
+  const [manualUser, setManualUser] = useState({
+    firstName: "",
+    lastName: "",
+    phone: "",
+    email: "",
+  });
   const [rewardForm, setRewardForm] = useState<RewardFormState>(emptyReward);
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategory);
   const [categoryImage, setCategoryImage] = useState<File | null>(null);
@@ -262,6 +285,25 @@ export default function ProfitAdmin() {
         .includes(query)
     );
   }, [data?.users, search]);
+
+  const filteredCrmClients = useMemo(() => {
+    const query = crmClientSearch.trim().toLowerCase();
+    const clients = data?.crmClients || [];
+    if (!query) return clients;
+    return clients.filter((client) =>
+      [
+        client.display_name,
+        client.company_name,
+        client.phone,
+        client.email,
+        client.public_id,
+      ]
+        .filter((value) => value !== null && value !== undefined)
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [crmClientSearch, data?.crmClients]);
 
   const stats = useMemo(() => {
     const users = data?.users || [];
@@ -345,6 +387,54 @@ export default function ProfitAdmin() {
       setSelectedUser(null);
       setPointsValue("");
       setPointsReason("");
+    }
+  }
+
+  function selectCrmClient(clientId: string) {
+    setSelectedCrmClientId(clientId);
+    const client = data?.crmClients.find((item) => item.id === clientId);
+    setManualUser({
+      firstName: client?.first_name || "",
+      lastName: client?.last_name || "",
+      phone: client?.phone || "",
+      email: client?.email || "",
+    });
+  }
+
+  function closeCreateUser() {
+    setShowCreateUser(false);
+    setCrmClientSearch("");
+    setSelectedCrmClientId("");
+    setManualUser({ firstName: "", lastName: "", phone: "", email: "" });
+  }
+
+  async function createUserFromCrm(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedCrmClientId) {
+      setError("Wybierz klienta z CRM.");
+      return;
+    }
+
+    const result = await runAction<{
+      ok: true;
+      user: { idea_id: string; first_name: string; last_name: string };
+    }>(
+      {
+        action: "create_user_from_crm",
+        crmClientId: selectedCrmClientId,
+        firstName: manualUser.firstName,
+        lastName: manualUser.lastName,
+        phone: manualUser.phone,
+        email: manualUser.email,
+      },
+      "Konto klienta zostało utworzone."
+    );
+
+    if (result) {
+      closeCreateUser();
+      setSuccess(
+        `Utworzono konto ${result.user.idea_id} dla ${result.user.first_name} ${result.user.last_name}.`
+      );
     }
   }
 
@@ -566,17 +656,26 @@ export default function ProfitAdmin() {
 
         {activeTab === "users" && (
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <h2 className="text-2xl font-black text-slate-950 dark:text-white">Uczestnicy i kilowatopunkty</h2>
-                <p className="mt-1 text-sm text-slate-500">Blokada konta, blokada nagród i audytowane korekty salda.</p>
+                <p className="mt-1 text-sm text-slate-500">Tworzenie kont klientów, blokady i audytowane korekty salda.</p>
               </div>
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Szukaj po IdeaID, nazwisku lub telefonie"
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none ring-[#0e6b7b] focus:ring-2 sm:max-w-sm dark:border-slate-700 dark:bg-slate-950"
-              />
+              <div className="flex w-full flex-col gap-2 sm:flex-row xl:max-w-2xl">
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Szukaj po IdeaID, nazwisku lub telefonie"
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none ring-[#0e6b7b] focus:ring-2 dark:border-slate-700 dark:bg-slate-950"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCreateUser(true)}
+                  className="h-11 shrink-0 rounded-xl bg-[#0e6b7b] px-4 text-sm font-black text-white"
+                >
+                  Utwórz konto klienta
+                </button>
+              </div>
             </div>
             <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-sm">
@@ -602,6 +701,85 @@ export default function ProfitAdmin() {
               </table>
             </div>
           </section>
+        )}
+
+        {showCreateUser && (
+          <div className="fixed inset-0 z-[10020] grid place-items-center overflow-y-auto bg-slate-950/55 p-4 backdrop-blur-sm">
+            <form
+              onSubmit={createUserFromCrm}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="create-profit-user-title"
+              className="my-4 w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 sm:p-7"
+            >
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[#0e6b7b]">IdeaSol Profit</p>
+              <h2 id="create-profit-user-title" className="mt-2 text-2xl font-black text-slate-950 dark:text-white">
+                Utwórz konto dla klienta CRM
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Konto będzie aktywne od razu, połączone z kartą klienta i otrzyma bonus startowy programu.
+              </p>
+
+              <label className="mt-5 block text-sm font-bold" htmlFor="crm-client-search">Znajdź klienta</label>
+              <input
+                id="crm-client-search"
+                value={crmClientSearch}
+                onChange={(event) => setCrmClientSearch(event.target.value)}
+                placeholder="Nazwisko, firma, telefon lub numer klienta"
+                className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none focus:ring-2 focus:ring-[#0e6b7b] dark:border-slate-700 dark:bg-slate-950"
+              />
+              <label className="mt-4 block text-sm font-bold" htmlFor="crm-client-select">Klient z CRM</label>
+              <select
+                id="crm-client-select"
+                required
+                size={Math.min(Math.max(filteredCrmClients.length, 3), 6)}
+                value={selectedCrmClientId}
+                onChange={(event) => selectCrmClient(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 text-sm outline-none focus:ring-2 focus:ring-[#0e6b7b] dark:border-slate-700 dark:bg-slate-950"
+              >
+                {filteredCrmClients.map((client) => (
+                  <option key={client.id} value={client.id} disabled={Boolean(client.profit_user)}>
+                    {client.display_name}
+                    {client.company_name ? ` · ${client.company_name}` : ""}
+                    {client.phone ? ` · ${client.phone}` : ""}
+                    {client.profit_user ? ` · konto ${client.profit_user.idea_id} już istnieje` : ""}
+                  </option>
+                ))}
+              </select>
+              {filteredCrmClients.length === 0 && (
+                <p className="mt-2 text-sm text-amber-600">Nie znaleziono klienta spełniającego kryteria.</p>
+              )}
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-bold" htmlFor="profit-first-name">Imię</label>
+                  <input id="profit-first-name" required value={manualUser.firstName} onChange={(event) => setManualUser((current) => ({ ...current, firstName: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-4 dark:border-slate-700 dark:bg-slate-950" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold" htmlFor="profit-last-name">Nazwisko</label>
+                  <input id="profit-last-name" required value={manualUser.lastName} onChange={(event) => setManualUser((current) => ({ ...current, lastName: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-4 dark:border-slate-700 dark:bg-slate-950" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold" htmlFor="profit-phone">Telefon do logowania</label>
+                  <input id="profit-phone" required inputMode="tel" value={manualUser.phone} onChange={(event) => setManualUser((current) => ({ ...current, phone: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-4 dark:border-slate-700 dark:bg-slate-950" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold" htmlFor="profit-email">E-mail (opcjonalnie)</label>
+                  <input id="profit-email" type="email" value={manualUser.email} onChange={(event) => setManualUser((current) => ({ ...current, email: event.target.value }))} className="mt-2 h-11 w-full rounded-xl border border-slate-200 px-4 dark:border-slate-700 dark:bg-slate-950" />
+                </div>
+              </div>
+
+              <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs leading-5 text-slate-500 dark:bg-slate-800/60">
+                Klient zaloguje się numerem telefonu i kodem SMS. Zgody marketingowe pozostaną wyłączone.
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <button type="button" onClick={closeCreateUser} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 dark:text-slate-300">Anuluj</button>
+                <button type="submit" disabled={busy || !selectedCrmClientId} className="rounded-xl bg-[#0e6b7b] px-5 py-2.5 text-sm font-black text-white disabled:opacity-50">
+                  {busy ? "Tworzenie…" : "Utwórz konto"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
         {selectedUser && (

@@ -4,6 +4,7 @@ import {
   getProfitAdminClient,
   ProfitConfigurationError,
 } from "@/lib/profit/admin";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,11 @@ type ProfitActionInput = {
   orderStatus?: "approved" | "processing" | "shipped" | "completed" | "cancelled";
   trackingNumber?: string;
   trackingUrl?: string;
+  crmClientId?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
 };
 
 function errorMessage(error: unknown) {
@@ -45,6 +51,25 @@ function isUuid(value: unknown): value is string {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     cleanText(value)
   );
+}
+
+function normalizePhone(value: unknown) {
+  const raw = cleanText(value);
+  const digits = raw.replace(/\D/g, "");
+
+  if (/^[0-9]{9}$/.test(digits)) return `+48${digits}`;
+  if (/^48[0-9]{9}$/.test(digits)) return `+${digits}`;
+  if (/^00[1-9][0-9]{7,14}$/.test(digits)) return `+${digits.slice(2)}`;
+  if (raw.startsWith("+") && /^[1-9][0-9]{7,14}$/.test(digits)) return `+${digits}`;
+  return null;
+}
+
+function splitCustomerName(value: unknown) {
+  const parts = cleanText(value).split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts.shift() || "",
+    lastName: parts.join(" "),
+  };
 }
 
 async function writeAuditLog(input: {
@@ -85,11 +110,12 @@ export async function GET(request: Request) {
       ordersResult,
       rewardsResult,
       categoriesResult,
+      crmClientsResult,
     ] = await Promise.all([
       profit
         .from("profit_users")
         .select(
-          "id,idea_id,first_name,last_name,phone_e164,email,account_status,rewards_locked,joined_at,crm_link_status,is_ideasol_customer,last_points_earned_at,points_expire_at"
+          "id,idea_id,first_name,last_name,phone_e164,email,account_status,rewards_locked,joined_at,crm_client_id,crm_link_status,is_ideasol_customer,last_points_earned_at,points_expire_at"
         )
         .order("joined_at", { ascending: false })
         .limit(300),
@@ -123,6 +149,13 @@ export async function GET(request: Request) {
         .select("id,name,slug,description,image_path,sort_order,is_visible")
         .is("archived_at", null)
         .order("sort_order", { ascending: true }),
+      supabaseAdmin
+        .from("clients")
+        .select(
+          "id,public_id,full_name,company_name,contact_person,phone,contact_phone,email,status,is_lead"
+        )
+        .order("full_name", { ascending: true })
+        .limit(1000),
     ]);
 
     const firstError = [
@@ -132,6 +165,7 @@ export async function GET(request: Request) {
       ordersResult.error,
       rewardsResult.error,
       categoriesResult.error,
+      crmClientsResult.error,
     ].find(Boolean);
 
     if (firstError) throw firstError;
@@ -148,6 +182,32 @@ export async function GET(request: Request) {
         reserved_points: 0,
       },
     }));
+    const profitUserByCrmClient = new Map(
+      users
+        .filter((user) => user.crm_client_id)
+        .map((user) => [user.crm_client_id as string, user])
+    );
+    const crmClients = (crmClientsResult.data || [])
+      .filter((client) => client.is_lead === false || client.status === "Klient aktywny")
+      .map((client) => {
+        const customerName = cleanText(client.full_name) || cleanText(client.contact_person);
+        const parsedName = splitCustomerName(customerName);
+        const linkedUser = profitUserByCrmClient.get(client.id);
+        return {
+          id: client.id,
+          public_id: client.public_id,
+          display_name: customerName || cleanText(client.company_name) || "Klient bez nazwy",
+          company_name: cleanText(client.company_name) || null,
+          first_name: parsedName.firstName,
+          last_name: parsedName.lastName,
+          phone: cleanText(client.phone) || cleanText(client.contact_phone),
+          email: cleanText(client.email) || null,
+          status: client.status,
+          profit_user: linkedUser
+            ? { id: linkedUser.id, idea_id: linkedUser.idea_id }
+            : null,
+        };
+      });
 
     const mediaBaseUrl = `${process.env.PROFIT_SUPABASE_URL?.replace(/\/$/, "")}/storage/v1/object/public/profit-reward-media/`;
     const withMediaUrl = <T extends { image_path?: string | null }>(item: T) => ({
@@ -162,6 +222,7 @@ export async function GET(request: Request) {
       orders: ordersResult.data || [],
       rewards: (rewardsResult.data || []).map(withMediaUrl),
       categories: (categoriesResult.data || []).map(withMediaUrl),
+      crmClients,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -183,6 +244,89 @@ export async function PATCH(request: Request) {
   try {
     const input = (await request.json()) as ProfitActionInput;
     const profit = getProfitAdminClient();
+
+    if (input.action === "create_user_from_crm") {
+      if (!isUuid(input.crmClientId)) {
+        return NextResponse.json({ ok: false, error: "Wybierz klienta z CRM." }, { status: 400 });
+      }
+
+      const { data: client, error: clientError } = await supabaseAdmin
+        .from("clients")
+        .select("id,full_name,contact_person,phone,contact_phone,email,status,is_lead")
+        .eq("id", input.crmClientId)
+        .maybeSingle();
+
+      if (clientError) throw clientError;
+      if (!client || (client.is_lead !== false && client.status !== "Klient aktywny")) {
+        return NextResponse.json(
+          { ok: false, error: "Nie znaleziono tego klienta w CRM." },
+          { status: 404 }
+        );
+      }
+
+      const parsedName = splitCustomerName(client.full_name || client.contact_person);
+      const firstName = cleanText(input.firstName) || parsedName.firstName;
+      const lastName = cleanText(input.lastName) || parsedName.lastName;
+      const phone = normalizePhone(input.phone || client.phone || client.contact_phone);
+      const email = cleanText(input.email ?? client.email).toLowerCase();
+
+      if (firstName.length < 2 || firstName.length > 80 || lastName.length < 2 || lastName.length > 120) {
+        return NextResponse.json(
+          { ok: false, error: "Podaj poprawne imię i nazwisko uczestnika." },
+          { status: 400 }
+        );
+      }
+      if (!phone) {
+        return NextResponse.json(
+          { ok: false, error: "Podaj poprawny numer telefonu klienta." },
+          { status: 400 }
+        );
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return NextResponse.json(
+          { ok: false, error: "Podaj poprawny adres e-mail albo pozostaw pole puste." },
+          { status: 400 }
+        );
+      }
+
+      const { data: userId, error } = await profit.rpc("admin_create_profit_user_from_crm", {
+        p_crm_client_id: client.id,
+        p_first_name: firstName,
+        p_last_name: lastName,
+        p_phone_e164: phone,
+        p_email: email || null,
+        p_actor: admin.id,
+      });
+
+      if (error?.message.includes("CRM_CLIENT_ALREADY_REGISTERED")) {
+        return NextResponse.json(
+          { ok: false, error: "Ten klient ma już konto w IdeaSol Profit." },
+          { status: 409 }
+        );
+      }
+      if (error?.message.includes("PHONE_ALREADY_REGISTERED")) {
+        return NextResponse.json(
+          { ok: false, error: "Konto z tym numerem telefonu już istnieje." },
+          { status: 409 }
+        );
+      }
+      if (error?.message.includes("EMAIL_ALREADY_REGISTERED")) {
+        return NextResponse.json(
+          { ok: false, error: "Konto z tym adresem e-mail już istnieje." },
+          { status: 409 }
+        );
+      }
+      if (error) throw error;
+
+      const { data: user, error: userError } = await profit
+        .from("profit_users")
+        .select("id,idea_id,first_name,last_name,phone_e164,email")
+        .eq("id", userId)
+        .single();
+      if (userError) throw userError;
+
+      return NextResponse.json({ ok: true, user });
+    }
 
     if (input.action === "update_user") {
       if (!isUuid(input.userId)) {
