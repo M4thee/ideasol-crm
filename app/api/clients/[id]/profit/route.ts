@@ -55,7 +55,7 @@ export async function GET(request: Request, context: RouteContext) {
     const { data: user, error: userError } = await profit
       .from("profit_users")
       .select(
-        "id,idea_id,account_status,rewards_locked,joined_at,activated_at,crm_link_status,is_ideasol_customer"
+        "id,idea_id,account_status,rewards_locked,joined_at,activated_at,crm_link_status,is_ideasol_customer,terms_accepted_at,privacy_accepted_at,current_terms_version,current_privacy_version,marketing_sms_consent,marketing_email_consent,marketing_phone_consent,marketing_consent_version,marketing_consents_updated_at"
       )
       .eq("crm_client_id", clientId)
       .maybeSingle();

@@ -14,6 +14,15 @@ export type ClientProfitAccount = {
   is_ideasol_customer: boolean;
   registration_source: "client" | "admin";
   registered_by_admin_id: string | null;
+  terms_accepted_at: string | null;
+  privacy_accepted_at: string | null;
+  current_terms_version: string | null;
+  current_privacy_version: string | null;
+  marketing_sms_consent: boolean;
+  marketing_email_consent: boolean;
+  marketing_phone_consent: boolean;
+  marketing_consent_version: string | null;
+  marketing_consents_updated_at: string | null;
   balance: {
     available_points: number | string | null;
     pending_points: number | string | null;
@@ -59,6 +68,22 @@ function formatHistoryDate(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatConsentDate(value: string | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("pl-PL", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function ConsentStatus({ accepted, acceptedLabel, missingLabel }: { accepted: boolean; acceptedLabel: string; missingLabel: string }) {
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${accepted ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}>
+      {accepted ? acceptedLabel : missingLabel}
+    </span>
+  );
 }
 
 const entryTypeLabels: Record<string, string> = {
@@ -260,6 +285,61 @@ export default function ClientProfitPanel({
           </div>
         )}
       </section>
+
+      {account && (
+        <section className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-lg font-black">Regulamin i zgody</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Bieżący status dokumentów i dobrowolnych zgód zapisany na koncie klienta w IdeaSol Profit.
+              </p>
+            </div>
+            <div className="flex gap-3 text-xs font-bold">
+              <a href="https://profit.ideasol.pl/regulamin" target="_blank" rel="noreferrer" className="text-[#0e6b7b] hover:underline">Regulamin</a>
+              <a href="https://profit.ideasol.pl/polityka-prywatnosci" target="_blank" rel="noreferrer" className="text-[#0e6b7b] hover:underline">Polityka prywatności</a>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <article className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+              <div className="flex items-start justify-between gap-3">
+                <div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Dokument</p><h4 className="mt-1 font-black">Regulamin programu</h4></div>
+                <ConsentStatus accepted={Boolean(account.terms_accepted_at)} acceptedLabel="Zaakceptowany" missingLabel="Do akceptacji" />
+              </div>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                {account.terms_accepted_at ? `${formatConsentDate(account.terms_accepted_at)}${account.current_terms_version ? ` · wersja ${account.current_terms_version}` : ""}` : "Klient nie zaakceptował jeszcze regulaminu."}
+              </p>
+            </article>
+
+            <article className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+              <div className="flex items-start justify-between gap-3">
+                <div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Dokument</p><h4 className="mt-1 font-black">Polityka prywatności</h4></div>
+                <ConsentStatus accepted={Boolean(account.privacy_accepted_at)} acceptedLabel="Potwierdzona" missingLabel="Do potwierdzenia" />
+              </div>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                {account.privacy_accepted_at ? `${formatConsentDate(account.privacy_accepted_at)}${account.current_privacy_version ? ` · wersja ${account.current_privacy_version}` : ""}` : "Klient nie potwierdził jeszcze zapoznania się z dokumentem."}
+              </p>
+            </article>
+
+            {[
+              ["SMS/MMS", account.marketing_sms_consent],
+              ["E-mail", account.marketing_email_consent],
+              ["Połączenia telefoniczne", account.marketing_phone_consent],
+            ].map(([label, accepted]) => (
+              <article key={String(label)} className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                <div className="flex items-start justify-between gap-3">
+                  <div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Marketing</p><h4 className="mt-1 font-black">{String(label)}</h4></div>
+                  <ConsentStatus accepted={Boolean(accepted)} acceptedLabel="Zgoda wyrażona" missingLabel="Brak zgody" />
+                </div>
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  {account.marketing_consents_updated_at ? `Stan z ${formatConsentDate(account.marketing_consents_updated_at)}${account.marketing_consent_version ? ` · wersja ${account.marketing_consent_version}` : ""}` : "Klient nie zapisał jeszcze ustawień marketingowych."}
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {account && (
         <section className="rounded-2xl border border-slate-200 p-5 dark:border-slate-700">
