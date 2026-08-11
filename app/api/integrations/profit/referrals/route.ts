@@ -18,6 +18,7 @@ type ProfitReferralPayload = {
     phone?: string;
     email?: string;
     product?: "PV" | "ME" | "PV_ME";
+    phoneContactConsent?: boolean;
     marketingSmsConsent?: boolean;
     marketingEmailConsent?: boolean;
     marketingConsentVersion?: string;
@@ -236,6 +237,7 @@ export async function POST(request: Request) {
       `Produkt: ${productLabel(product)}`,
       ...(marketingConsentVersion
         ? [
+            `Zgoda na kontakt telefoniczny: ${payload.prospect?.phoneContactConsent === true ? "TAK" : "NIE"}`,
             `Zgoda marketingowa SMS: ${payload.prospect?.marketingSmsConsent === true ? "TAK" : "NIE"}`,
             `Zgoda marketingowa e-mail: ${payload.prospect?.marketingEmailConsent === true ? "TAK" : "NIE"}`,
             `Wersja zgód: ${marketingConsentVersion}`,

@@ -107,6 +107,7 @@ async function processReferralJobs() {
             phone: referral.referred_phone_e164 || referral.phone_e164 || referral.phone,
             email: referral.referred_email || referral.email || undefined,
             product: productCode(referral.product),
+            phoneContactConsent: referral.source_type === "member_link" ? referral.consent_declared === true : undefined,
             marketingSmsConsent: referral.marketing_sms_consent === true,
             marketingEmailConsent: referral.marketing_email_consent === true,
             marketingConsentVersion: referral.marketing_consent_version || undefined,
