@@ -32,6 +32,10 @@ type ExportSession = {
   utm_term: string | null;
   device_type: string | null;
   is_test: boolean;
+  is_spam: boolean;
+  spam_reason: string | null;
+  spam_marked_at: string | null;
+  spam_marked_by: string | null;
   max_step: number;
   last_event: string;
   event_count: number;
@@ -151,10 +155,20 @@ function createWorkbook(
     "Strona wejścia": session.landing_url || "",
     Referrer: session.referrer || "",
     "Przeglądarka / urządzenie": session.user_agent || "",
+    Spam: session.is_spam ? "Tak" : "Nie",
+    "Powód oznaczenia jako spam": session.spam_reason || "",
+    "Oznaczono jako spam": session.spam_marked_at ? new Date(session.spam_marked_at) : "",
+    "ID administratora oznaczającego spam": session.spam_marked_by || "",
     "ID sesji": session.id,
   }));
 
-  const sessionsSheet = XLSX.utils.json_to_sheet(rows, { cellDates: true });
+  const validRows = rows.filter((_, index) => !sessions[index]?.is_spam);
+  const spamRows = rows.filter((_, index) => sessions[index]?.is_spam);
+  const sessionsSheet = XLSX.utils.json_to_sheet(validRows, { cellDates: true });
+  const spamSheet = XLSX.utils.json_to_sheet(
+    spamRows.length ? spamRows : [{ Informacja: "Brak wizyt oznaczonych jako spam w tym zakresie." }],
+    { cellDates: true }
+  );
   sessionsSheet["!cols"] = [
     { wch: 21 }, { wch: 21 }, { wch: 16 }, { wch: 18 }, { wch: 9 },
     { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 20 }, { wch: 28 },
@@ -176,7 +190,10 @@ function createWorkbook(
     ["Skuteczne wysłania formularza", summary.successful_submissions || 0],
     ["Leady istniejące w CRM", summary.leads || 0],
     ["Pełne raporty", summary.reports_unlocked || 0],
-    ["Liczba wyeksportowanych wizyt", sessions.length],
+    ["Spam (wykluczony z konwersji)", summary.spam || 0],
+    ["Prawidłowe wizyty w arkuszu Wizyty", validRows.length],
+    ["Wizyty w arkuszu Spam", spamRows.length],
+    ["Łączna liczba wyeksportowanych wizyt", sessions.length],
     [
       "Uwaga",
       sessions.length >= EXPORT_LIMIT
@@ -189,6 +206,7 @@ function createWorkbook(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, infoSheet, "Podsumowanie");
   XLSX.utils.book_append_sheet(workbook, sessionsSheet, "Wizyty");
+  XLSX.utils.book_append_sheet(workbook, spamSheet, "Spam");
 
   return XLSX.write(workbook, {
     type: "buffer",

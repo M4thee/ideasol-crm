@@ -14,6 +14,7 @@ type AnalyticsSummary = {
   reports_unlocked: number;
   recommended: number;
   not_recommended: number;
+  spam: number;
 };
 
 type AnalyticsSession = {
@@ -34,6 +35,11 @@ type AnalyticsSession = {
   utm_content: string | null;
   device_type: string | null;
   is_test: boolean;
+  is_spam: boolean;
+  spam_reason: string | null;
+  spam_marked_at: string | null;
+  spam_marked_by: string | null;
+  spam_marked_by_name?: string | null;
   max_step: number;
   last_event: string;
   event_count: number;
@@ -65,6 +71,7 @@ const EMPTY_SUMMARY: AnalyticsSummary = {
   reports_unlocked: 0,
   recommended: 0,
   not_recommended: 0,
+  spam: 0,
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -234,17 +241,24 @@ export default function CalculatorAnalyticsAdmin() {
   const [events, setEvents] = useState<AnalyticsEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [spamReason, setSpamReason] = useState("Fałszywe dane kontaktowe");
+  const [spamSaving, setSpamSaving] = useState(false);
 
   const pageSize = 50;
   const totalPages = Math.max(1, Math.ceil(count / pageSize));
 
-  const authorizedFetch = useCallback(async (path: string) => {
+  const authorizedFetch = useCallback(async (path: string, init: RequestInit = {}) => {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) throw new Error("Sesja wygasła. Zaloguj się ponownie.");
 
     return fetch(path, {
-      headers: { Authorization: `Bearer ${token}` },
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...init.headers,
+      },
       cache: "no-store",
     });
   }, []);
@@ -286,6 +300,7 @@ export default function CalculatorAnalyticsAdmin() {
 
   async function openSession(session: AnalyticsSession) {
     setSelectedSession(session);
+    setSpamReason(session.spam_reason || "Fałszywe dane kontaktowe");
     setEvents([]);
     setEventsLoading(true);
 
@@ -296,11 +311,41 @@ export default function CalculatorAnalyticsAdmin() {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Nie udało się pobrać osi czasu.");
       setSelectedSession(data.session);
+      setSpamReason(data.session.spam_reason || "Fałszywe dane kontaktowe");
       setEvents(data.events || []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Nie udało się pobrać osi czasu.");
     } finally {
       setEventsLoading(false);
+    }
+  }
+
+  async function updateSpam(isSpam: boolean) {
+    if (!selectedSession) return;
+    setSpamSaving(true);
+    setError("");
+
+    try {
+      const response = await authorizedFetch("/api/admin/calculator-analytics", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sessionId: selectedSession.id,
+          isSpam,
+          reason: isSpam ? spamReason : undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Nie udało się zmienić statusu wizyty.");
+      }
+
+      setSelectedSession(data.session);
+      setSpamReason(data.session.spam_reason || "Fałszywe dane kontaktowe");
+      await loadSessions();
+    } catch (spamError) {
+      setError(spamError instanceof Error ? spamError.message : "Nie udało się zmienić statusu wizyty.");
+    } finally {
+      setSpamSaving(false);
     }
   }
 
@@ -354,7 +399,7 @@ export default function CalculatorAnalyticsAdmin() {
     {
       label: "Leady istniejące w CRM",
       value: summary.leads,
-      note: `${summary.successful_submissions} skutecznych wysłań formularza w tym okresie`,
+      note: `${summary.successful_submissions} prawidłowych wysłań · ${summary.spam} oznaczonych jako spam`,
     },
   ];
 
@@ -515,11 +560,12 @@ export default function CalculatorAnalyticsAdmin() {
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-500">Brak wizyt w wybranym okresie.</td></tr>
                 )}
                 {sessions.map((session) => (
-                  <tr key={session.id} className="align-top hover:bg-slate-50/80">
+                  <tr key={session.id} className={`align-top ${session.is_spam ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-slate-50/80"}`}>
                     <td className="whitespace-nowrap px-5 py-4">
                       <p className="font-bold">{formatDate(session.first_seen_at)}</p>
                       <p className="mt-1 text-xs text-slate-500">{session.device_type || "nieznane urządzenie"}</p>
                       {session.is_test && <span className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">TEST</span>}
+                      {session.is_spam && <span className="ml-1 mt-2 inline-flex rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-black text-white">SPAM</span>}
                     </td>
                     <td className="px-5 py-4">
                       <p className="font-bold">{getLocation(session)}</p>
@@ -531,7 +577,7 @@ export default function CalculatorAnalyticsAdmin() {
                       {getCreativeLabel(session) && <p className="mt-1 text-xs font-bold text-emerald-700">materiał: {getCreativeLabel(session)}</p>}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${session.lead_client_id ? "bg-emerald-100 text-emerald-800" : session.max_step >= 7 ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-700"}`}>
+                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${session.is_spam ? "bg-rose-100 text-rose-800" : session.lead_client_id ? "bg-emerald-100 text-emerald-800" : session.max_step >= 7 ? "bg-sky-100 text-sky-800" : "bg-slate-100 text-slate-700"}`}>
                         {PROGRESS_LABELS[session.max_step] || `Etap ${session.max_step}`}
                       </span>
                       <p className="mt-2 text-xs text-slate-500">{session.event_count} zdarzeń</p>
@@ -595,6 +641,64 @@ export default function CalculatorAnalyticsAdmin() {
             </div>
 
             <div className="p-6">
+              <section className={`mb-7 rounded-2xl border p-5 ${selectedSession.is_spam ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-slate-50"}`}>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className={`text-xs font-black uppercase tracking-[0.16em] ${selectedSession.is_spam ? "text-rose-700" : "text-slate-500"}`}>
+                      Klasyfikacja wizyty
+                    </p>
+                    <h3 className="mt-1 text-lg font-black">
+                      {selectedSession.is_spam ? "Oznaczono jako spam" : "Prawidłowa wizyta"}
+                    </h3>
+                    {selectedSession.is_spam && (
+                      <div className="mt-2 text-sm text-rose-900">
+                        <p><span className="font-black">Powód:</span> {selectedSession.spam_reason || "Brak powodu"}</p>
+                        {selectedSession.spam_marked_at && (
+                          <p className="mt-1 text-xs text-rose-700">
+                            {formatDate(selectedSession.spam_marked_at)} · {selectedSession.spam_marked_by_name || "System"}
+                          </p>
+                        )}
+                        <p className="mt-2 text-xs font-semibold text-rose-700">
+                          Ta wizyta pozostaje w audycie ruchu, ale nie jest liczona jako lead, skuteczna konwersja ani pełny raport.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedSession.is_spam ? (
+                    <button
+                      type="button"
+                      onClick={() => void updateSpam(false)}
+                      disabled={spamSaving}
+                      className="shrink-0 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-black text-rose-800 transition hover:bg-rose-100 disabled:opacity-50"
+                    >
+                      {spamSaving ? "Zapisywanie…" : "Przywróć jako prawidłowy"}
+                    </button>
+                  ) : (
+                    <div className="w-full sm:max-w-sm">
+                      <label className="block text-xs font-black uppercase tracking-wide text-slate-500" htmlFor="spam-reason">
+                        Powód oznaczenia
+                      </label>
+                      <input
+                        id="spam-reason"
+                        value={spamReason}
+                        onChange={(event) => setSpamReason(event.target.value)}
+                        maxLength={500}
+                        className="mt-2 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void updateSpam(true)}
+                        disabled={spamSaving || spamReason.trim().length < 3}
+                        className="mt-2 w-full rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-rose-700 disabled:opacity-50"
+                      >
+                        {spamSaving ? "Zapisywanie…" : "Oznacz jako spam"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </section>
+
               <h3 className="text-lg font-black">Oś czasu</h3>
               {eventsLoading ? (
                 <p className="mt-5 text-sm font-semibold text-slate-500">Pobieranie zdarzeń…</p>

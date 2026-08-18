@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMetaCrmEvent } from "@/lib/metaConversions";
+import { normalizePolishMobilePhone } from "@/lib/polishMobilePhone";
 import {
   assignLead,
   attachIntegrationTags,
@@ -754,16 +755,25 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as LeadPayload;
     const contact = payload.contact ?? {};
     const firstName = cleanText(contact.firstName);
-    const phone = cleanText(contact.phone);
+    const phone = normalizePolishMobilePhone(contact.phone);
     const postalCode = cleanText(contact.postalCode);
     const turnstileToken = cleanText(contact.turnstileToken);
 
-    if (!firstName || phone.replace(/\D/g, "").length < 9 || !/^\d{2}-\d{3}$/.test(postalCode)) {
+    if (!firstName || !/^\d{2}-\d{3}$/.test(postalCode)) {
       return NextResponse.json(
         { error: "Nieprawidłowe dane kontaktowe." },
         { status: 400, headers: getCorsHeaders(request) }
       );
     }
+
+    if (!phone) {
+      return NextResponse.json(
+        { error: "Podaj prawidłowy polski numer komórkowy." },
+        { status: 400, headers: getCorsHeaders(request) }
+      );
+    }
+
+    payload.contact = { ...contact, phone };
 
     const isTurnstileValid = await verifyTurnstileToken(turnstileToken, request);
 

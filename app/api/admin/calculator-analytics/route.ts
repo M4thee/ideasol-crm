@@ -9,8 +9,24 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function withSpamMarkerName(session: Record<string, unknown>) {
+  const spamMarkedBy = typeof session.spam_marked_by === "string" ? session.spam_marked_by : null;
+  if (!spamMarkedBy) return { ...session, spam_marked_by_name: null };
+
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("display_name")
+    .eq("id", spamMarkedBy)
+    .maybeSingle();
+
+  return { ...session, spam_marked_by_name: data?.display_name || "Administrator" };
+}
+
 export async function GET(request: Request) {
-  if (!(await requireAdminRequest(request))) {
+  const admin = await requireAdminRequest(request);
+  if (!admin) {
     return NextResponse.json({ ok: false, error: "Brak uprawnień." }, { status: 403 });
   }
 
@@ -38,7 +54,11 @@ export async function GET(request: Request) {
         return NextResponse.json({ ok: false, error: "Nie znaleziono wizyty." }, { status: 404 });
       }
 
-      return NextResponse.json({ ok: true, session, events: events || [] });
+      return NextResponse.json({
+        ok: true,
+        session: await withSpamMarkerName(session as unknown as Record<string, unknown>),
+        events: events || [],
+      });
     }
 
     let range: ReturnType<typeof readCalculatorAnalyticsRange>;
@@ -95,6 +115,71 @@ export async function GET(request: Request) {
     console.error("Błąd pobierania analityki kalkulatora", error);
     return NextResponse.json(
       { ok: false, error: "Nie udało się pobrać analityki kalkulatora." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const admin = await requireAdminRequest(request);
+  if (!admin) {
+    return NextResponse.json({ ok: false, error: "Brak uprawnień." }, { status: 403 });
+  }
+
+  try {
+    const body = (await request.json()) as {
+      sessionId?: string;
+      isSpam?: boolean;
+      reason?: string;
+    };
+    const sessionId = body.sessionId?.trim() || "";
+    const reason = body.reason?.trim() || "";
+
+    if (!UUID_PATTERN.test(sessionId) || typeof body.isSpam !== "boolean") {
+      return NextResponse.json({ ok: false, error: "Nieprawidłowe dane zmiany." }, { status: 400 });
+    }
+
+    if (body.isSpam && (reason.length < 3 || reason.length > 500)) {
+      return NextResponse.json(
+        { ok: false, error: "Podaj powód oznaczenia jako spam (3–500 znaków)." },
+        { status: 400 }
+      );
+    }
+
+    const update = body.isSpam
+      ? {
+          is_spam: true,
+          spam_reason: reason,
+          spam_marked_at: new Date().toISOString(),
+          spam_marked_by: admin.id,
+        }
+      : {
+          is_spam: false,
+          spam_reason: null,
+          spam_marked_at: null,
+          spam_marked_by: null,
+        };
+
+    const { data: session, error } = await supabaseAdmin
+      .from("energy_storage_calculator_sessions")
+      .update(update)
+      .eq("id", sessionId)
+      .select(CALCULATOR_ANALYTICS_SESSION_COLUMNS)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!session) {
+      return NextResponse.json({ ok: false, error: "Nie znaleziono wizyty." }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      session: await withSpamMarkerName(session as unknown as Record<string, unknown>),
+    });
+  } catch (error) {
+    console.error("Błąd zmiany statusu spamu w analityce kalkulatora", error);
+    return NextResponse.json(
+      { ok: false, error: "Nie udało się zmienić statusu wizyty." },
       { status: 500 }
     );
   }
