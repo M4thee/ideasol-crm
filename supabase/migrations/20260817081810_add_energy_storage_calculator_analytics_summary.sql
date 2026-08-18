@@ -1,0 +1,3 @@
+-- Included in 20260817081444_add_energy_storage_calculator_analytics.sql so a fresh
+-- database receives the complete analytics module atomically. This version is kept
+-- to match the migration history of the shared Supabase project.

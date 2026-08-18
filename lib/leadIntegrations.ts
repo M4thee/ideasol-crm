@@ -132,6 +132,27 @@ async function claimRoundRobinUser(integrationId: string) {
   return getProfile(typeof data === "string" ? data : null);
 }
 
+async function claimRoundRobinCandidate(
+  integrationId: string,
+  candidateUserIds: string[]
+) {
+  const { data, error } = await supabaseAdmin.rpc(
+    "claim_next_lead_integration_candidate",
+    {
+      p_integration_id: integrationId,
+      p_candidate_ids: candidateUserIds,
+    }
+  );
+
+  if (error) {
+    throw new Error(
+      `Nie udało się przydzielić leada wśród najbliższych doradców: ${error.message}`
+    );
+  }
+
+  return getProfile(typeof data === "string" ? data : null);
+}
+
 function normalizePostalCode(value?: string | null) {
   const digits = String(value ?? "").replace(/\D/g, "");
   return digits.length === 5 ? `${digits.slice(0, 2)}-${digits.slice(2)}` : null;
@@ -167,11 +188,48 @@ async function getPostalCoordinates(postalCode: string): Promise<Coordinates | n
     return null;
   }
 
-  const validLocations = (knownLocations ?? []).filter(
+  let validLocations = (knownLocations ?? []).filter(
     (location) =>
       Number.isFinite(Number(location.latitude)) &&
       Number.isFinite(Number(location.longitude))
   );
+
+  if (validLocations.length === 0) {
+    const prefix = normalizedPostalCode.slice(0, 2);
+    const targetNumber = Number(normalizedPostalCode.replace("-", ""));
+    const { data: fallbackLocations, error: fallbackError } = await supabaseAdmin
+      .from("postal_code_locations")
+      .select("postal_code,latitude,longitude")
+      .like("postal_code", `${prefix}-%`)
+      .limit(500);
+
+    if (fallbackError) {
+      console.error("[LEAD ASSIGNMENT] postal code prefix fallback", fallbackError);
+      return null;
+    }
+
+    const nearestFallback = (fallbackLocations ?? [])
+      .filter(
+        (location) =>
+          normalizePostalCode(location.postal_code) &&
+          Number.isFinite(Number(location.latitude)) &&
+          Number.isFinite(Number(location.longitude))
+      )
+      .sort((first, second) => {
+        const firstNumber = Number(
+          normalizePostalCode(first.postal_code)?.replace("-", "") || 0
+        );
+        const secondNumber = Number(
+          normalizePostalCode(second.postal_code)?.replace("-", "") || 0
+        );
+        return (
+          Math.abs(firstNumber - targetNumber) -
+          Math.abs(secondNumber - targetNumber)
+        );
+      })[0];
+
+    validLocations = nearestFallback ? [nearestFallback] : [];
+  }
 
   if (validLocations.length === 0) return null;
 
@@ -185,7 +243,7 @@ async function getPostalCoordinates(postalCode: string): Promise<Coordinates | n
   };
 }
 
-async function findNearestParticipant(
+async function findNearestParticipants(
   postalCode: string | null | undefined,
   eligibleUsers: AssignableLeadUser[]
 ) {
@@ -205,7 +263,7 @@ async function findNearestParticipant(
     throw new Error(`Nie udało się pobrać lokalizacji użytkowników: ${error.message}`);
   }
 
-  let nearest: { userId: string; distanceKm: number } | null = null;
+  const nearestByUser = new Map<string, number>();
 
   for (const serviceLocation of serviceLocations ?? []) {
     if (!eligibleIds.has(serviceLocation.user_id)) continue;
@@ -214,15 +272,25 @@ async function findNearestParticipant(
     if (!userCoordinates) continue;
 
     const distanceKm = calculateDistanceKm(leadCoordinates, userCoordinates);
-    const radiusKm = Number(serviceLocation.radius_km ?? 80);
 
-    if (distanceKm > radiusKm) continue;
-    if (!nearest || distanceKm < nearest.distanceKm) {
-      nearest = { userId: serviceLocation.user_id, distanceKm };
+    const currentDistance = nearestByUser.get(serviceLocation.user_id);
+    if (currentDistance === undefined || distanceKm < currentDistance) {
+      nearestByUser.set(serviceLocation.user_id, distanceKm);
     }
   }
 
-  return nearest ? getProfile(nearest.userId) : null;
+  const rankedUsers = [...nearestByUser.entries()]
+    .map(([userId, distanceKm]) => ({ userId, distanceKm }))
+    .sort((first, second) => first.distanceKm - second.distanceKm);
+
+  for (const user of eligibleUsers) {
+    if (rankedUsers.length >= 3) break;
+    if (!rankedUsers.some((candidate) => candidate.userId === user.id)) {
+      rankedUsers.push({ userId: user.id, distanceKm: Number.POSITIVE_INFINITY });
+    }
+  }
+
+  return rankedUsers.slice(0, 3);
 }
 
 export async function assignLead(
@@ -251,14 +319,17 @@ export async function assignLead(
   }
 
   if (integration.assignment_rule === "postal_code") {
-    const nearestUser = await findNearestParticipant(
+    const nearestUsers = await findNearestParticipants(
       input.postalCode,
       eligibleUsers
     );
 
-    if (nearestUser) {
+    if (nearestUsers?.length) {
       return {
-        user: nearestUser,
+        user: await claimRoundRobinCandidate(
+          integration.id,
+          nearestUsers.map((candidate) => candidate.userId)
+        ),
         requestedRule: "postal_code",
         appliedRule: "postal_code",
         fallbackReason: null,

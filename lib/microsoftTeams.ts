@@ -547,7 +547,26 @@ export async function sendTeamsBoardMetaLeadNotification(
 }
 
 export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {
-  return sendTeamsDirectCalendarNotification(payload);
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
+
+  if (!delegatedRefreshToken) {
+    throw new Error(
+      "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki wiadomości Teams o leadzie z kalkulatora."
+    );
+  }
+
+  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+  if (!delegatedToken.access_token) {
+    throw new Error(
+      "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla leada z kalkulatora."
+    );
+  }
+
+  return sendTeamsDelegatedDirectCalendarNotification({
+    ...payload,
+    accessToken: delegatedToken.access_token,
+  });
 }
 
 export async function sendTeamsDirectNoteMentionNotification(

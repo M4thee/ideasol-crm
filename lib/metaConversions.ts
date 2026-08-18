@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type MetaCrmEventName = "Schedule" | "QualifiedLead" | "Purchase";
+export type MetaCrmEventName = "Lead" | "Schedule" | "QualifiedLead" | "Purchase";
 
 export type MetaCrmUser = {
   email?: string | null;
@@ -10,7 +10,13 @@ export type MetaCrmUser = {
   city?: string | null;
   postalCode?: string | null;
   externalId: string;
+  clientIpAddress?: string | null;
+  clientUserAgent?: string | null;
+  fbp?: string | null;
+  fbc?: string | null;
 };
+
+type MetaCustomDataValue = string | number | boolean | null | undefined;
 
 type SendMetaCrmEventInput = {
   eventName: MetaCrmEventName;
@@ -19,6 +25,8 @@ type SendMetaCrmEventInput = {
   user: MetaCrmUser;
   value?: number;
   currency?: "PLN";
+  sourceUrl?: string | null;
+  customData?: Record<string, MetaCustomDataValue>;
 };
 
 type MetaApiResponse = {
@@ -128,19 +136,29 @@ export async function sendMetaCrmEvent(
     zp: hashIfPresent(normalizePostalCode(input.user.postalCode)),
     country: [sha256("pl")],
     external_id: [sha256(input.user.externalId)],
+    client_ip_address: input.user.clientIpAddress?.trim() || undefined,
+    client_user_agent: input.user.clientUserAgent?.trim() || undefined,
+    fbp: input.user.fbp?.trim() || undefined,
+    fbc: input.user.fbc?.trim() || undefined,
   };
+
+  const customData = Object.fromEntries(
+    Object.entries(input.customData || {}).filter(([, value]) => value !== undefined)
+  );
 
   const event = {
     event_name: input.eventName,
     event_time: Math.floor((input.eventTime || new Date()).getTime() / 1000),
     event_id: input.eventId,
-    action_source: "system_generated",
+    action_source: input.eventName === "Lead" ? "website" : "system_generated",
+    ...(input.sourceUrl ? { event_source_url: input.sourceUrl } : {}),
     user_data: Object.fromEntries(
       Object.entries(userData).filter(([, value]) => value !== undefined)
     ),
     custom_data: {
       lead_event_source: CRM_EVENT_SOURCE,
-      event_source: "crm",
+      event_source: input.eventName === "Lead" ? "website" : "crm",
+      ...customData,
       ...(input.eventName === "Purchase"
         ? {
             value: input.value,

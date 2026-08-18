@@ -1445,13 +1445,22 @@ const canManageUsers = profile?.role === "admin";
                     Ustawienia
                   </Link>
                   {canManageUsers && (
-                    <Link
-                      href="/admin/users"
-                      className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
-                      Panel administratora
-                    </Link>
+                    <>
+                      <Link
+                        href="/admin/calculator-analytics"
+                        className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                        onClick={() => setProfileMenuOpen(false)}
+                      >
+                        Analityka kalkulatora
+                      </Link>
+                      <Link
+                        href="/admin/users"
+                        className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                        onClick={() => setProfileMenuOpen(false)}
+                      >
+                        Panel administratora
+                      </Link>
+                    </>
                   )}
 
                 </div>
@@ -1716,13 +1725,22 @@ const canManageUsers = profile?.role === "admin";
               Ustawienia
             </Link>
             {canManageUsers && (
-              <Link
-                href="/admin/users"
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
-              >
-                Panel administratora
-              </Link>
+              <>
+                <Link
+                  href="/admin/calculator-analytics"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                >
+                  Analityka kalkulatora
+                </Link>
+                <Link
+                  href="/admin/users"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                >
+                  Panel administratora
+                </Link>
+              </>
             )}
 
             <button
