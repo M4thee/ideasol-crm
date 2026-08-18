@@ -24,7 +24,6 @@ type LeadPayload = {
     phone?: string;
     email?: string | null;
     turnstileToken?: string | null;
-    honeypot?: string | null;
   };
   answers?: {
     hasPv?: "yes" | "no" | null;
@@ -758,11 +757,6 @@ export async function POST(request: Request) {
     const phone = cleanText(contact.phone);
     const postalCode = cleanText(contact.postalCode);
     const turnstileToken = cleanText(contact.turnstileToken);
-    const honeypot = cleanText(contact.honeypot);
-
-    if (honeypot) {
-      return NextResponse.json({ ok: true, skipped: true }, { headers: getCorsHeaders(request) });
-    }
 
     if (!firstName || phone.replace(/\D/g, "").length < 9 || !/^\d{2}-\d{3}$/.test(postalCode)) {
       return NextResponse.json(
