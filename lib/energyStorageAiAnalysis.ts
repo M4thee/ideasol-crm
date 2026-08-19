@@ -137,6 +137,9 @@ type SalesAnalysis = {
 };
 
 type ResponsesApiResponse = {
+  status?: "completed" | "failed" | "in_progress" | "cancelled" | "queued" | "incomplete";
+  error?: { code?: string; message?: string } | null;
+  incomplete_details?: { reason?: string } | null;
   output_text?: string;
   output?: Array<{
     content?: Array<{ type?: string; text?: string }>;
@@ -528,17 +531,21 @@ export async function generateEnergyStorageSalesAnalysis(
 
   const profile = buildSanitizedEnergyProfile(input);
   const fetchImpl = options?.fetchImpl ?? fetch;
-  const response = await fetchImpl("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_ENERGY_STORAGE_MODEL?.trim() || DEFAULT_MODEL,
-      store: false,
-      max_output_tokens: 1_300,
-      input: [
+  const outputTokenLimits = [3_600, 6_000];
+  let lastError: Error | null = null;
+
+  for (const [attemptIndex, maxOutputTokens] of outputTokenLimits.entries()) {
+    const response = await fetchImpl("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_ENERGY_STORAGE_MODEL?.trim() || DEFAULT_MODEL,
+        store: false,
+        max_output_tokens: maxOutputTokens,
+        input: [
         {
           role: "developer",
           content: [
@@ -572,67 +579,103 @@ export async function generateEnergyStorageSalesAnalysis(
             },
           ],
         },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "energy_storage_sales_analysis",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              energyBalanceSummary: { type: "string" },
-              settlementSummary: { type: "string" },
-              tariffSummary: { type: "string" },
-              salesGoal: { type: "string" },
-              suggestedOpening: { type: "string" },
-              rationale: {
-                type: "array",
-                items: { type: "string" },
-                minItems: 2,
-                maxItems: 4,
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "energy_storage_sales_analysis",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                energyBalanceSummary: { type: "string" },
+                settlementSummary: { type: "string" },
+                tariffSummary: { type: "string" },
+                salesGoal: { type: "string" },
+                suggestedOpening: { type: "string" },
+                rationale: {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 2,
+                  maxItems: 4,
+                },
+                visitChecks: {
+                  type: "array",
+                  items: { type: "string" },
+                  maxItems: 4,
+                },
+                recommendation: { type: "string" },
+                cautions: {
+                  type: "array",
+                  items: { type: "string" },
+                  maxItems: 2,
+                },
               },
-              visitChecks: {
-                type: "array",
-                items: { type: "string" },
-                maxItems: 4,
-              },
-              recommendation: { type: "string" },
-              cautions: {
-                type: "array",
-                items: { type: "string" },
-                maxItems: 2,
-              },
+              required: [
+                "energyBalanceSummary",
+                "settlementSummary",
+                "tariffSummary",
+                "salesGoal",
+                "suggestedOpening",
+                "rationale",
+                "visitChecks",
+                "recommendation",
+                "cautions",
+              ],
             },
-            required: [
-              "energyBalanceSummary",
-              "settlementSummary",
-              "tariffSummary",
-              "salesGoal",
-              "suggestedOpening",
-              "rationale",
-              "visitChecks",
-              "recommendation",
-              "cautions",
-            ],
           },
         },
-      },
-    }),
-    signal: AbortSignal.timeout(25_000),
-  });
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
 
-  if (!response.ok) {
-    const errorBody = (await response.text()).slice(0, 800);
-    throw new Error(`OpenAI Responses API returned ${response.status}: ${errorBody}`);
+    if (!response.ok) {
+      const errorBody = (await response.text()).slice(0, 800);
+      const error = new Error(`OpenAI Responses API returned ${response.status}: ${errorBody}`);
+      const isTransient = response.status === 429 || response.status >= 500;
+      if (isTransient && attemptIndex < outputTokenLimits.length - 1) {
+        lastError = error;
+        console.warn("energy-storage-lead AI retrying after API error", {
+          attempt: attemptIndex + 1,
+          status: response.status,
+        });
+        continue;
+      }
+      throw error;
+    }
+
+    const raw = (await response.json()) as ResponsesApiResponse;
+    if (raw.status === "failed") {
+      throw new Error(
+        `OpenAI Responses API failed: ${raw.error?.code || "unknown"} ${raw.error?.message || ""}`.trim()
+      );
+    }
+
+    const outputText = extractOutputText(raw);
+    try {
+      if (raw.status === "incomplete") {
+        throw new Error(
+          `OpenAI Responses API returned incomplete output: ${raw.incomplete_details?.reason || "unknown reason"}`
+        );
+      }
+      if (!outputText) throw new Error("OpenAI Responses API returned no output text.");
+      return parseSalesAnalysis(outputText);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attemptIndex < outputTokenLimits.length - 1) {
+        console.warn("energy-storage-lead AI retrying incomplete output", {
+          attempt: attemptIndex + 1,
+          maxOutputTokens,
+          status: raw.status || "unknown",
+          reason: raw.incomplete_details?.reason || lastError.message,
+        });
+        continue;
+      }
+    }
   }
 
-  const raw = (await response.json()) as ResponsesApiResponse;
-  const outputText = extractOutputText(raw);
-  if (!outputText) throw new Error("OpenAI Responses API returned no output text.");
-
-  return parseSalesAnalysis(outputText);
+  throw lastError || new Error("OpenAI Responses API did not return a complete sales analysis.");
 }
 
 export function formatEnergyStorageAiNote(

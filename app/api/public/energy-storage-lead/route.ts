@@ -20,6 +20,8 @@ import {
   sendTeamsDirectEnergyStorageLeadNotification,
 } from "@/lib/microsoftTeams";
 
+export const maxDuration = 120;
+
 type LeadPayload = {
   source?: string;
   contact?: {
@@ -872,19 +874,19 @@ export async function POST(request: Request) {
     const assignedUser = assignment?.user || null;
     const crmResult = await insertLeadIntoCrm(payload, assignedUser);
 
-    if (crmResult.duplicate) {
-      return NextResponse.json(
-        { ok: true, duplicate: true, clientId: crmResult.clientId },
-        { headers: getCorsHeaders(request) }
-      );
-    }
-
     after(async () => {
       await createEnergyStorageAiNote(crmResult.clientId, {
         answers: payload.answers,
         result: payload.result,
       });
     });
+
+    if (crmResult.duplicate) {
+      return NextResponse.json(
+        { ok: true, duplicate: true, clientId: crmResult.clientId },
+        { headers: getCorsHeaders(request) }
+      );
+    }
 
     if (integration) {
       await attachIntegrationTags(crmResult.clientId, integration.tag_names);
