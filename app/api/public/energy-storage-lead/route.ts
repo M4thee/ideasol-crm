@@ -3,7 +3,10 @@ import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMetaCrmEvent } from "@/lib/metaConversions";
 import { normalizePolishMobilePhone } from "@/lib/polishMobilePhone";
-import { createEnergyStorageAiNote } from "@/lib/energyStorageAiAnalysis";
+import {
+  createEnergyStorageAiNote,
+  type EnergyStorageAiInput,
+} from "@/lib/energyStorageAiAnalysis";
 import {
   assignLead,
   attachIntegrationTags,
@@ -27,65 +30,8 @@ type LeadPayload = {
     email?: string | null;
     turnstileToken?: string | null;
   };
-  answers?: {
-    hasPv?: "yes" | "no" | null;
-    pvPower?: string | null;
-    settlementSystem?: "net_billing" | "net_metering" | "unknown" | null;
-    billMode?: "monthly" | "yearly";
-    billAmount?: string;
-    yearlyBill?: number;
-    yearlyConsumptionKwh?: number;
-    tariff?: string | null;
-    priorities?: string[];
-  };
-  result?: {
-    recommendationType?: "recommended" | "consider" | "not_recommended";
-    recommendationTitle?: string;
-    recommendedStorageKwh?: number;
-    gridPurchaseYearlyKwh?: number;
-    gridPurchaseDailyKwh?: number;
-    suggestedPvKw?: number | null;
-    yearlySavingsLow?: number;
-    yearlySavingsHigh?: number;
-    energySourceSavingsLow?: number;
-    energySourceSavingsHigh?: number;
-    tariffOptimization?: {
-      label?: string;
-      strategy?: string;
-      dailyBenefitMinimum?: number;
-      dailyBenefitMaximum?: number;
-      yearlyBenefitLow?: number;
-      yearlyBenefitHigh?: number;
-      shiftedEnergyMinimumPerActiveDayKwh?: number;
-      shiftedEnergyPerActiveDayKwh?: number;
-      highZonePriceMinimumPerKwh?: number;
-      highZonePricePerKwh?: number;
-      lowZonePricePerKwh?: number;
-      lowZonePriceMaximumPerKwh?: number;
-      activeDaysMinimumPerYear?: number;
-      activeDaysPerYear?: number;
-      isTimeOfUse?: boolean;
-      includesWeekendVariant?: boolean;
-    };
-    alternativeTariffOptimization?: {
-      label?: string;
-      strategy?: string;
-      yearlyBenefitLow?: number;
-      yearlyBenefitHigh?: number;
-      isTimeOfUse?: boolean;
-    };
-    alternativeYearlySavingsLow?: number;
-    alternativeYearlySavingsHigh?: number;
-    alternativePaybackYearsLow?: number;
-    alternativePaybackYearsHigh?: number;
-    priceLow?: number;
-    priceHigh?: number;
-    subsidyEstimate?: number;
-    paybackYearsLow?: number;
-    paybackYearsHigh?: number;
-    paybackYearsWithoutSubsidyLow?: number;
-    paybackYearsWithoutSubsidyHigh?: number;
-  };
+  answers?: EnergyStorageAiInput["answers"];
+  result?: EnergyStorageAiInput["result"];
   meta?: {
     eventId?: string;
     eventSourceUrl?: string;
