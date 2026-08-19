@@ -201,7 +201,9 @@ function buildAnalysisNote(payload: LeadPayload) {
     "Wynik kalkulatora:",
     `Rekomendacja: ${result.recommendationTitle || "brak"}`,
     `Typ rekomendacji: ${result.recommendationType || "brak"}`,
-    `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "nie dotyczy"}`,
+    result.requiresIndividualPvExpansionAnalysis
+      ? `Rozbudowa PV: wymaga indywidualnego porównania opustu 0,8 → 0,7 (wariant testowy: ${result.suggestedPvKw ?? "brak"} kWp, nie jest automatyczną rekomendacją)`
+      : `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "nie dotyczy"}`,
     `Sugerowany magazyn energii: ${result.recommendedStorageKwh ? `${result.recommendedStorageKwh} kWh` : "brak"}`,
     `Energia dokupowana z sieci poza PV: ${Math.round(result.gridPurchaseYearlyKwh ?? 0).toLocaleString("pl-PL")} kWh/rok (${(result.gridPurchaseDailyKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień)`,
     `Szacowana roczna korzyść: ${formatMoney(result.yearlySavingsLow)} - ${formatMoney(result.yearlySavingsHigh)}`,
@@ -228,7 +230,9 @@ function buildCustomerEmailText(payload: LeadPayload) {
     result.recommendationTitle || "Wynik wstępnej analizy magazynu energii",
     `Rekomendowany magazyn: ${result.recommendedStorageKwh ? `${result.recommendedStorageKwh} kWh` : "do potwierdzenia"}`,
     `Energia dokupowana z sieci poza PV: ${Math.round(result.gridPurchaseYearlyKwh ?? 0).toLocaleString("pl-PL")} kWh/rok (${(result.gridPurchaseDailyKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień)`,
-    `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "do potwierdzenia"}`,
+    result.requiresIndividualPvExpansionAnalysis
+      ? "Rozbudowa PV: wymaga osobnego porównania — przekroczenie 10 kWp zmienia opust z 80% na 70%"
+      : `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "do potwierdzenia"}`,
     `Szacowana roczna korzyść: ${formatMoney(result.yearlySavingsLow)}–${formatMoney(result.yearlySavingsHigh)}`,
     `W tym korzyść z pracy taryfowej: ${result.tariffOptimization?.isTimeOfUse ? `${formatMoney(result.tariffOptimization.yearlyBenefitLow)}–${formatMoney(result.tariffOptimization.yearlyBenefitHigh)} rocznie` : "nie doliczono"}`,
     `Po zmianie taryfy na ${result.alternativeTariffOptimization?.label || "wariant alternatywny"}: ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitLow)}–${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitHigh)} rocznie`,
@@ -354,13 +358,18 @@ function buildHtmlEmail(payload: LeadPayload) {
   const recommendedStorage = result.recommendedStorageKwh
     ? `${result.recommendedStorageKwh.toLocaleString("pl-PL")} kWh`
     : "Do potwierdzenia";
-  const suggestedPv = result.suggestedPvKw
-    ? `${result.suggestedPvKw.toLocaleString("pl-PL")} kWp`
-    : answers.hasPv === "yes"
-      ? answers.pvPower
-        ? `${escapeHtml(answers.pvPower)} kWp`
-        : "Instalacja istniejąca"
-      : "Do potwierdzenia";
+  const pvSummaryLabel = result.requiresIndividualPvExpansionAnalysis
+    ? "Rozbudowa PV"
+    : "Sugerowana moc PV";
+  const suggestedPv = result.requiresIndividualPvExpansionAnalysis
+    ? "Do indywidualnego porównania opustu"
+    : result.suggestedPvKw
+      ? `${result.suggestedPvKw.toLocaleString("pl-PL")} kWp`
+      : answers.hasPv === "yes"
+        ? answers.pvPower
+          ? `${escapeHtml(answers.pvPower)} kWp`
+          : "Instalacja istniejąca"
+        : "Do potwierdzenia";
   const yearlySavings = `${formatMoney(result.yearlySavingsLow)}–${formatMoney(result.yearlySavingsHigh)}`;
   const tariffOptimization = result.tariffOptimization;
   const alternativeTariffOptimization = result.alternativeTariffOptimization;
@@ -538,7 +547,7 @@ function buildHtmlEmail(payload: LeadPayload) {
                     <td align="right" style="padding:13px 16px;border-bottom:1px solid #E7EEEC;font-size:13px;font-weight:700;color:#102A2E;">${escapeHtml(formatHasPv(answers.hasPv))}</td>
                   </tr>
                   <tr>
-                    <td style="padding:13px 16px;border-bottom:1px solid #E7EEEC;font-size:13px;color:#617B7F;">Sugerowana moc PV</td>
+                    <td style="padding:13px 16px;border-bottom:1px solid #E7EEEC;font-size:13px;color:#617B7F;">${pvSummaryLabel}</td>
                     <td align="right" style="padding:13px 16px;border-bottom:1px solid #E7EEEC;font-size:13px;font-weight:700;color:#102A2E;">${suggestedPv}</td>
                   </tr>
                   <tr>
