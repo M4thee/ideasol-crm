@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendMetaCrmEvent } from "@/lib/metaConversions";
 import { normalizePolishMobilePhone } from "@/lib/polishMobilePhone";
+import { createEnergyStorageAiNote } from "@/lib/energyStorageAiAnalysis";
 import {
   assignLead,
   attachIntegrationTags,
@@ -41,9 +42,42 @@ type LeadPayload = {
     recommendationType?: "recommended" | "consider" | "not_recommended";
     recommendationTitle?: string;
     recommendedStorageKwh?: number;
+    gridPurchaseYearlyKwh?: number;
+    gridPurchaseDailyKwh?: number;
     suggestedPvKw?: number | null;
     yearlySavingsLow?: number;
     yearlySavingsHigh?: number;
+    energySourceSavingsLow?: number;
+    energySourceSavingsHigh?: number;
+    tariffOptimization?: {
+      label?: string;
+      strategy?: string;
+      dailyBenefitMinimum?: number;
+      dailyBenefitMaximum?: number;
+      yearlyBenefitLow?: number;
+      yearlyBenefitHigh?: number;
+      shiftedEnergyMinimumPerActiveDayKwh?: number;
+      shiftedEnergyPerActiveDayKwh?: number;
+      highZonePriceMinimumPerKwh?: number;
+      highZonePricePerKwh?: number;
+      lowZonePricePerKwh?: number;
+      lowZonePriceMaximumPerKwh?: number;
+      activeDaysMinimumPerYear?: number;
+      activeDaysPerYear?: number;
+      isTimeOfUse?: boolean;
+      includesWeekendVariant?: boolean;
+    };
+    alternativeTariffOptimization?: {
+      label?: string;
+      strategy?: string;
+      yearlyBenefitLow?: number;
+      yearlyBenefitHigh?: number;
+      isTimeOfUse?: boolean;
+    };
+    alternativeYearlySavingsLow?: number;
+    alternativeYearlySavingsHigh?: number;
+    alternativePaybackYearsLow?: number;
+    alternativePaybackYearsHigh?: number;
     priceLow?: number;
     priceHigh?: number;
     subsidyEstimate?: number;
@@ -113,6 +147,14 @@ function escapeHtml(value: unknown) {
 function formatMoney(value: unknown) {
   const numberValue = typeof value === "number" ? value : 0;
   return `${Math.round(numberValue).toLocaleString("pl-PL")} zł`;
+}
+
+function formatMoneyWithDecimals(value: unknown) {
+  const numberValue = typeof value === "number" ? value : 0;
+  return `${numberValue.toLocaleString("pl-PL", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} zł`;
 }
 
 function formatPaybackYears(low: unknown, high: unknown) {
@@ -200,7 +242,11 @@ function buildAnalysisNote(payload: LeadPayload) {
     `Typ rekomendacji: ${result.recommendationType || "brak"}`,
     `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "nie dotyczy"}`,
     `Sugerowany magazyn energii: ${result.recommendedStorageKwh ? `${result.recommendedStorageKwh} kWh` : "brak"}`,
+    `Energia dokupowana z sieci poza PV: ${Math.round(result.gridPurchaseYearlyKwh ?? 0).toLocaleString("pl-PL")} kWh/rok (${(result.gridPurchaseDailyKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień)`,
     `Szacowana roczna korzyść: ${formatMoney(result.yearlySavingsLow)} - ${formatMoney(result.yearlySavingsHigh)}`,
+    `Korzyść z PV / systemu: ${formatMoney(result.energySourceSavingsLow)} - ${formatMoney(result.energySourceSavingsHigh)}`,
+    `Korzyść z taryfy: ${result.tariffOptimization?.isTimeOfUse ? `${formatMoney(result.tariffOptimization.yearlyBenefitLow)} - ${formatMoney(result.tariffOptimization.yearlyBenefitHigh)} rocznie` : "nie doliczono"}`,
+    `Po zmianie taryfy na ${result.alternativeTariffOptimization?.label || "wariant alternatywny"}: ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitLow)} - ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitHigh)} rocznie`,
     `Orientacyjny koszt inwestycji: ${formatMoney(result.priceLow)} - ${formatMoney(result.priceHigh)}`,
     `Możliwa dotacja: do ${formatMoney(result.subsidyEstimate)}`,
     `Szacowany okres zwrotu: ${formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh)}`,
@@ -220,8 +266,11 @@ function buildCustomerEmailText(payload: LeadPayload) {
     "",
     result.recommendationTitle || "Wynik wstępnej analizy magazynu energii",
     `Rekomendowany magazyn: ${result.recommendedStorageKwh ? `${result.recommendedStorageKwh} kWh` : "do potwierdzenia"}`,
+    `Energia dokupowana z sieci poza PV: ${Math.round(result.gridPurchaseYearlyKwh ?? 0).toLocaleString("pl-PL")} kWh/rok (${(result.gridPurchaseDailyKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień)`,
     `Sugerowana moc PV: ${result.suggestedPvKw ? `${result.suggestedPvKw} kWp` : "do potwierdzenia"}`,
     `Szacowana roczna korzyść: ${formatMoney(result.yearlySavingsLow)}–${formatMoney(result.yearlySavingsHigh)}`,
+    `W tym korzyść z pracy taryfowej: ${result.tariffOptimization?.isTimeOfUse ? `${formatMoney(result.tariffOptimization.yearlyBenefitLow)}–${formatMoney(result.tariffOptimization.yearlyBenefitHigh)} rocznie` : "nie doliczono"}`,
+    `Po zmianie taryfy na ${result.alternativeTariffOptimization?.label || "wariant alternatywny"}: ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitLow)}–${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitHigh)} rocznie`,
     `Orientacyjny koszt: ${formatMoney(result.priceLow)}–${formatMoney(result.priceHigh)}`,
     `Możliwa dotacja: ${result.subsidyEstimate ? `do ${formatMoney(result.subsidyEstimate)}` : "do weryfikacji"}`,
     `Szacowany okres zwrotu: ${formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh)}`,
@@ -322,13 +371,25 @@ function buildHtmlEmail(payload: LeadPayload) {
   const recommendation = result.recommendationType ?? "consider";
   const recommendationLabel =
     recommendation === "recommended"
-      ? "Rekomendujemy magazyn energii"
+      ? "Rekomendowany"
       : recommendation === "not_recommended"
-        ? "Na ten moment nie rekomendujemy"
-        : "Warto rozważyć magazyn energii";
-  const recommendationColor = recommendation === "not_recommended" ? "#B42318" : "#067647";
-  const recommendationBackground = recommendation === "not_recommended" ? "#FEF3F2" : "#ECFDF3";
-  const recommendationBorder = recommendation === "not_recommended" ? "#FECDCA" : "#ABEFC6";
+        ? "Nie rekomendujemy"
+        : "Wymagana indywidualna analiza";
+  const recommendationColor = recommendation === "not_recommended"
+    ? "#B42318"
+    : recommendation === "consider"
+      ? "#B54708"
+      : "#067647";
+  const recommendationBackground = recommendation === "not_recommended"
+    ? "#FEF3F2"
+    : recommendation === "consider"
+      ? "#FFFAEB"
+      : "#ECFDF3";
+  const recommendationBorder = recommendation === "not_recommended"
+    ? "#FECDCA"
+    : recommendation === "consider"
+      ? "#FEDF89"
+      : "#ABEFC6";
   const recommendedStorage = result.recommendedStorageKwh
     ? `${result.recommendedStorageKwh.toLocaleString("pl-PL")} kWh`
     : "Do potwierdzenia";
@@ -340,6 +401,25 @@ function buildHtmlEmail(payload: LeadPayload) {
         : "Instalacja istniejąca"
       : "Do potwierdzenia";
   const yearlySavings = `${formatMoney(result.yearlySavingsLow)}–${formatMoney(result.yearlySavingsHigh)}`;
+  const tariffOptimization = result.tariffOptimization;
+  const alternativeTariffOptimization = result.alternativeTariffOptimization;
+  const gridPurchase = `${Math.round(result.gridPurchaseYearlyKwh ?? 0).toLocaleString("pl-PL")} kWh/rok · ${(result.gridPurchaseDailyKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień`;
+  const tariffYearlyBenefit = tariffOptimization?.isTimeOfUse
+    ? `${formatMoney(tariffOptimization.yearlyBenefitLow)}–${formatMoney(tariffOptimization.yearlyBenefitHigh)}`
+    : "Nie doliczono";
+  const tariffDailyBenefit = tariffOptimization?.isTimeOfUse
+    ? `${formatMoneyWithDecimals(tariffOptimization.dailyBenefitMinimum)}–${formatMoneyWithDecimals(tariffOptimization.dailyBenefitMaximum)}`
+    : "Nie dotyczy";
+  const tariffShiftedEnergy = tariffOptimization?.isTimeOfUse
+    ? `${(tariffOptimization.shiftedEnergyMinimumPerActiveDayKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })}–${(tariffOptimization.shiftedEnergyPerActiveDayKwh ?? 0).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} kWh/dzień`
+    : "Nie dotyczy";
+  const alternativeTariffYearlyBenefit = alternativeTariffOptimization?.isTimeOfUse
+    ? `${formatMoney(alternativeTariffOptimization.yearlyBenefitLow)}–${formatMoney(alternativeTariffOptimization.yearlyBenefitHigh)}`
+    : "Nie doliczono";
+  const alternativeTariffPayback = formatPaybackYears(
+    result.alternativePaybackYearsLow,
+    result.alternativePaybackYearsHigh
+  );
   const investmentCost = `${formatMoney(result.priceLow)}–${formatMoney(result.priceHigh)}`;
   const subsidy = result.subsidyEstimate ? `do ${formatMoney(result.subsidyEstimate)}` : "Do weryfikacji";
   const payback = formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh);
@@ -443,6 +523,42 @@ function buildHtmlEmail(payload: LeadPayload) {
                     <td class="stack-column" width="50%" valign="top" style="width:50%;padding:18px;background:#F1FCE5;border:1px solid #D5EFB4;border-radius:14px;">
                       <div style="font-size:12px;line-height:1.4;color:#55713A;">Możliwa dotacja</div>
                       <div style="margin-top:7px;font-size:23px;font-weight:800;line-height:1.2;color:#315B16;">${subsidy}</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-padding" style="padding:32px 36px 0 36px;">
+                <p style="margin:0 0 14px 0;font-size:12px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;color:#557176;">Wpływ taryfy na wynik</p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F8F7;border:1px solid #DDE7E5;border-radius:14px;">
+                  <tr>
+                    <td style="padding:20px;">
+                      <div style="font-size:18px;font-weight:800;line-height:1.3;color:#073B3A;">${escapeHtml(tariffOptimization?.label || answers.tariff || "Taryfa nieznana")}</div>
+                      <div style="margin-top:8px;font-size:13px;line-height:1.6;color:#617B7F;">${escapeHtml(tariffOptimization?.strategy || "Bez potwierdzonego podziału stref nie doliczamy korzyści taryfowej.")}</div>
+                      <div style="margin-top:12px;padding:12px;background:#E9F7FA;border:1px solid #C8E9EF;font-size:12px;line-height:1.5;color:#315D66;">Energia dokupowana z sieci poza własną produkcją PV: <strong style="color:#073B3A;">${gridPurchase}</strong></div>
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;">
+                        <tr>
+                          <td width="50%" valign="top" style="padding:12px;background:#FFFFFF;border:1px solid #E2EBE9;">
+                            <div style="font-size:11px;color:#617B7F;">Korzyść z taryfy rocznie</div>
+                            <div style="margin-top:5px;font-size:17px;font-weight:800;color:#073B3A;">${tariffYearlyBenefit}</div>
+                          </td>
+                          <td width="50%" valign="top" style="padding:12px;background:#FFFFFF;border:1px solid #E2EBE9;">
+                            <div style="font-size:11px;color:#617B7F;">Korzyść dziennie</div>
+                            <div style="margin-top:5px;font-size:17px;font-weight:800;color:#073B3A;">${tariffDailyBenefit}</div>
+                          </td>
+                        </tr>
+                      </table>
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;background:#FFFFFF;border:1px solid #E2EBE9;">
+                        <tr>
+                          <td style="padding:12px;">
+                            <div style="font-size:11px;color:#617B7F;">Po zmianie na ${escapeHtml(alternativeTariffOptimization?.label || "taryfę alternatywną")}</div>
+                            <div style="margin-top:5px;font-size:17px;font-weight:800;color:#073B3A;">${alternativeTariffYearlyBenefit} rocznie</div>
+                            <div style="margin-top:5px;font-size:11px;color:#617B7F;">Szacowany okres zwrotu całego wariantu: ${escapeHtml(alternativeTariffPayback)}</div>
+                          </td>
+                        </tr>
+                      </table>
+                      <div style="margin-top:10px;font-size:12px;line-height:1.5;color:#617B7F;">Energia przesuwana między strefami: <strong style="color:#102A2E;">${tariffShiftedEnergy}</strong>. Dokładny wariant G12/G12w i udział zużycia w strefach potwierdzi doradca na podstawie rachunku.</div>
                     </td>
                   </tr>
                 </table>
@@ -799,6 +915,13 @@ export async function POST(request: Request) {
         { headers: getCorsHeaders(request) }
       );
     }
+
+    after(async () => {
+      await createEnergyStorageAiNote(crmResult.clientId, {
+        answers: payload.answers,
+        result: payload.result,
+      });
+    });
 
     if (integration) {
       await attachIntegrationTags(crmResult.clientId, integration.tag_names);
