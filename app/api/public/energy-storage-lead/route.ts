@@ -95,6 +95,19 @@ function formatMoney(value: unknown) {
   return `${Math.round(numberValue).toLocaleString("pl-PL")} zł`;
 }
 
+function formatMoneyRange(low: unknown, high: unknown, fallback?: unknown) {
+  const fallbackValue = typeof fallback === "number" ? fallback : null;
+  const lowValue = typeof low === "number" ? low : fallbackValue;
+  const highValue = typeof high === "number" ? high : fallbackValue;
+
+  if (lowValue === null && highValue === null) return "Do weryfikacji";
+  if (lowValue !== null && highValue !== null && lowValue !== highValue) {
+    return `${formatMoney(lowValue)}–${formatMoney(highValue)}`;
+  }
+
+  return formatMoney(lowValue ?? highValue);
+}
+
 function formatMoneyWithDecimals(value: unknown) {
   const numberValue = typeof value === "number" ? value : 0;
   return `${numberValue.toLocaleString("pl-PL", {
@@ -194,7 +207,7 @@ function buildAnalysisNote(payload: LeadPayload) {
     `Korzyść z taryfy: ${result.tariffOptimization?.isTimeOfUse ? `${formatMoney(result.tariffOptimization.yearlyBenefitLow)} - ${formatMoney(result.tariffOptimization.yearlyBenefitHigh)} rocznie` : "nie doliczono"}`,
     `Po zmianie taryfy na ${result.alternativeTariffOptimization?.label || "wariant alternatywny"}: ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitLow)} - ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitHigh)} rocznie`,
     `Orientacyjny koszt inwestycji: ${formatMoney(result.priceLow)} - ${formatMoney(result.priceHigh)}`,
-    `Możliwa dotacja: do ${formatMoney(result.subsidyEstimate)}`,
+    `Możliwa dotacja: ${formatMoneyRange(result.subsidyEstimateLow, result.subsidyEstimateHigh, result.subsidyEstimate)}`,
     `Szacowany okres zwrotu: ${formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh)}`,
   ].join("\n");
 }
@@ -218,7 +231,7 @@ function buildCustomerEmailText(payload: LeadPayload) {
     `W tym korzyść z pracy taryfowej: ${result.tariffOptimization?.isTimeOfUse ? `${formatMoney(result.tariffOptimization.yearlyBenefitLow)}–${formatMoney(result.tariffOptimization.yearlyBenefitHigh)} rocznie` : "nie doliczono"}`,
     `Po zmianie taryfy na ${result.alternativeTariffOptimization?.label || "wariant alternatywny"}: ${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitLow)}–${formatMoney(result.alternativeTariffOptimization?.yearlyBenefitHigh)} rocznie`,
     `Orientacyjny koszt: ${formatMoney(result.priceLow)}–${formatMoney(result.priceHigh)}`,
-    `Możliwa dotacja: ${result.subsidyEstimate ? `do ${formatMoney(result.subsidyEstimate)}` : "do weryfikacji"}`,
+    `Możliwa dotacja: ${formatMoneyRange(result.subsidyEstimateLow, result.subsidyEstimateHigh, result.subsidyEstimate)}`,
     `Szacowany okres zwrotu: ${formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh)}`,
     "",
     `Rachunek za energię: ${answers.billAmount || "brak danych"} zł ${answers.billMode === "yearly" ? "rocznie" : "miesięcznie"}`,
@@ -367,7 +380,11 @@ function buildHtmlEmail(payload: LeadPayload) {
     result.alternativePaybackYearsHigh
   );
   const investmentCost = `${formatMoney(result.priceLow)}–${formatMoney(result.priceHigh)}`;
-  const subsidy = result.subsidyEstimate ? `do ${formatMoney(result.subsidyEstimate)}` : "Do weryfikacji";
+  const subsidy = formatMoneyRange(
+    result.subsidyEstimateLow,
+    result.subsidyEstimateHigh,
+    result.subsidyEstimate
+  );
   const payback = formatPaybackYears(result.paybackYearsLow, result.paybackYearsHigh);
   const yearlyConsumption = answers.yearlyConsumptionKwh
     ? `${Math.round(answers.yearlyConsumptionKwh).toLocaleString("pl-PL")} kWh`

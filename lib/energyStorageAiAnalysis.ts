@@ -105,8 +105,14 @@ type EnergyStorageResult = {
   priceHigh?: number;
   purchasePricePerKwh?: number;
   subsidyEstimate?: number;
+  subsidyEstimateLow?: number;
+  subsidyEstimateHigh?: number;
   subsidyStorage?: number;
+  subsidyStorageLow?: number;
+  subsidyStorageHigh?: number;
   subsidyEuBonus?: number;
+  subsidyEuBonusLow?: number;
+  subsidyEuBonusHigh?: number;
   paybackYearsLow?: number;
   paybackYearsHigh?: number;
   paybackYearsWithoutSubsidyLow?: number;
@@ -427,8 +433,32 @@ export function buildSanitizedEnergyProfile(input: EnergyStorageAiInput) {
         },
         subsidyPln: {
           total: finiteNumber(result.subsidyEstimate),
+          low: firstFiniteNumber(
+            result.subsidyEstimateLow,
+            result.subsidyEstimate
+          ),
+          high: firstFiniteNumber(
+            result.subsidyEstimateHigh,
+            result.subsidyEstimate
+          ),
           storage: finiteNumber(result.subsidyStorage),
+          storageLow: firstFiniteNumber(
+            result.subsidyStorageLow,
+            result.subsidyStorage
+          ),
+          storageHigh: firstFiniteNumber(
+            result.subsidyStorageHigh,
+            result.subsidyStorage
+          ),
           euEquipmentBonus: finiteNumber(result.subsidyEuBonus),
+          euEquipmentBonusLow: firstFiniteNumber(
+            result.subsidyEuBonusLow,
+            result.subsidyEuBonus
+          ),
+          euEquipmentBonusHigh: firstFiniteNumber(
+            result.subsidyEuBonusHigh,
+            result.subsidyEuBonus
+          ),
         },
         paybackYears: {
           low: finiteNumber(result.paybackYearsLow),
