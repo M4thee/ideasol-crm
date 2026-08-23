@@ -902,34 +902,49 @@ export default function ClientPage() {
 
   function renderNoteContentWithMentions(content: string) {
     if (!content) return null;
+    const lines = content.split("\n");
 
     const mentionNames = mentionableUsers
       .map((mentionableUser) => getMentionDisplayName(mentionableUser))
       .filter((name) => name && name !== "Użytkownik")
       .sort((firstName, secondName) => secondName.length - firstName.length);
 
-    if (mentionNames.length === 0) return content;
-
     const escapedMentionNames = mentionNames.map((name) =>
       name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     );
-    const mentionRegex = new RegExp(`@(${escapedMentionNames.join("|")})`, "g");
-    const parts = content.split(mentionRegex);
+    const mentionRegex = escapedMentionNames.length
+      ? new RegExp(`@(${escapedMentionNames.join("|")})`, "g")
+      : null;
 
-    return parts.map((part, index) => {
-      const isMention = mentionNames.includes(part);
+    const renderLine = (line: string, lineIndex: number) => {
+      const parts = mentionRegex ? line.split(mentionRegex) : [line];
+      const rendered = parts.map((part, partIndex) => {
+        const isMention = mentionNames.includes(part);
+        if (!isMention) return <span key={`${lineIndex}-${partIndex}`}>{part}</span>;
 
-      if (!isMention) return <span key={`${part}-${index}`}>{part}</span>;
+        return (
+          <span
+            key={`${lineIndex}-${partIndex}`}
+            className="rounded-md bg-[#119182]/10 px-1.5 py-0.5 font-bold text-[#0f7f72]"
+          >
+            @{part}
+          </span>
+        );
+      });
 
+      const isAiAlert = line.startsWith("🔴 UWAGA wg. Pomagiera AI");
       return (
         <span
-          key={`${part}-${index}`}
-          className="rounded-md bg-[#119182]/10 px-1.5 py-0.5 font-bold text-[#0f7f72]"
+          key={`line-${lineIndex}`}
+          className={isAiAlert ? "font-bold text-rose-700 dark:text-rose-400" : undefined}
         >
-          @{part}
+          {rendered}
+          {lineIndex < lines.length - 1 ? "\n" : null}
         </span>
       );
-    });
+    };
+
+    return lines.map(renderLine);
   }
 
   function findMentionedUsers(noteContent: string, currentAuthorId?: string | null) {
