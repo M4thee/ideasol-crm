@@ -529,6 +529,13 @@ function buildIndependentAudit(input: EnergyStorageAiInput) {
     const currentTotalHigh = settlementHigh + tariffs[currentTariffKey].high;
     const alternativeTotalLow = settlementLow + bestAlternative.low;
     const alternativeTotalHigh = settlementHigh + bestAlternative.high;
+    const alternativeImprovementLow = alternativeTotalLow - currentTotalLow;
+    const alternativeImprovementHigh = alternativeTotalHigh - currentTotalHigh;
+    const alternativeImprovementShare = currentTotalHigh > 0
+      ? alternativeImprovementHigh / currentTotalHigh
+      : alternativeImprovementHigh > 0
+        ? 1
+        : 0;
     const price = STORAGE_PRICES[storageKwh];
     const subsidy = auditSubsidy(storageKwh, settlement);
     const netCostLow = Math.max(0, price.low - subsidy.low);
@@ -557,6 +564,12 @@ function buildIndependentAudit(input: EnergyStorageAiInput) {
         tariff: bestAlternative.tariff,
         arbitrageSavingsPln: { low: bestAlternative.low, high: bestAlternative.high },
         combinedSavingsPln: { low: alternativeTotalLow, high: alternativeTotalHigh },
+        improvementVersusCurrentPln: {
+          low: alternativeImprovementLow,
+          high: alternativeImprovementHigh,
+        },
+        isMateriallyBetter:
+          alternativeImprovementHigh >= 100 && alternativeImprovementShare >= 0.05,
       },
       pricePln: price,
       subsidyPln: subsidy,
@@ -596,8 +609,24 @@ function buildIndependentAudit(input: EnergyStorageAiInput) {
   const auditPaybackMid = hasPv === "no" && calculatorPaybackLow !== null && calculatorPaybackHigh !== null
     ? (calculatorPaybackLow + calculatorPaybackHigh) / 2
     : bestMid;
-  const auditStatus: NonNullable<EnergyStorageResult["recommendationType"]> =
+  let auditStatus: NonNullable<EnergyStorageResult["recommendationType"]> =
     auditPaybackMid <= 12 ? "recommended" : auditPaybackMid <= 18 ? "consider" : "not_recommended";
+  const yearlyBill = finiteNumber(answers.yearlyBill) ?? 0;
+  const pvCoverage = yearlyConsumptionKwh > 0 ? pvProductionKwh / yearlyConsumptionKwh : 0;
+  const crossesNetMeteringThreshold =
+    settlement === "net_metering" &&
+    currentPvPowerKwp > 0 &&
+    currentPvPowerKwp <= 10 &&
+    suggestedPvPowerKwp > 10;
+  const needsComplexSystemAnalysis = hasPv === "yes" && (
+    (pvCoverage < 0.65 && yearlyBill >= 3_600) ||
+    (result.shouldRecommendPvExpansion === true && yearlyBill >= 3_600) ||
+    result.requiresIndividualPvExpansionAnalysis === true ||
+    crossesNetMeteringThreshold
+  );
+  if (auditStatus === "recommended" && needsComplexSystemAnalysis) {
+    auditStatus = "consider";
+  }
   const calculatorStatus = validRecommendationType(result.recommendationType);
   const statusRank = { not_recommended: 0, consider: 1, recommended: 2 } as const;
   const comparison = statusRank[auditStatus] === statusRank[calculatorStatus]
@@ -625,6 +654,14 @@ function buildIndependentAudit(input: EnergyStorageAiInput) {
     calculatorStorageKwh: selected.storageKwh,
     calculatorStatus,
     auditStatus,
+    complexity: {
+      pvCoveragePercent: pvCoverage * 100,
+      needsIndividualSystemAnalysis: needsComplexSystemAnalysis,
+      crossesNetMeteringTenKwpThreshold: crossesNetMeteringThreshold,
+      reason: needsComplexSystemAnalysis
+        ? "Nawet przy dobrym zwrocie nie oznaczaj jako zielony prostego magazynu: niskie pokrycie przez obecne PV, potrzeba rozbudowy albo próg 10 kWp wymagają analizy całego systemu."
+        : null,
+    },
     comparison,
     selectedStorageAudit: selected,
     materialAlternativeStorage: materialAlternative,
@@ -974,7 +1011,7 @@ export async function generateEnergyStorageSalesAnalysis(
                 "Dla net-meteringu policz produkcję, eksport, energię wracającą po współczynniku 0,8 do 10 kWp albo 0,7 powyżej 10 kWp oraz stratę na opuście. Pisz „strata na opuście”, nigdy „energia oddana w opuście”, gdy podajesz różnicę eksport minus zwrot. Wyjaśnij, ile magazyn odzyskuje dzięki większej autokonsumpcji.",
                 "Dla net-billingu pokaż eksport sprzedawany po średniej RCEm z podanego okresu oraz efektywną wartość depozytu z mnożnikiem 1,23. Korzyść magazynu to uniknięty zakup pomniejszony o utraconą wartość depozytu.",
                 "Nie licz tej samej energii dwa razy. independentAudit najpierw odejmuje pracę PV i magazynu, a arbitraż liczy tylko na zakupie z sieci, który pozostał.",
-                "Dla taryf pokaż wyłącznie jedną najlepszą alternatywę względem obecnej taryfy, o ile rzeczywiście poprawia wynik. G12 obejmuje przedział G12–G12w; G12w nie jest osobną odpowiedzią klienta. Nie rozpisuj wszystkich taryf.",
+                "Dla taryf pokaż wyłącznie jedną najlepszą alternatywę względem obecnej taryfy i tylko wtedy, gdy selectedStorageAudit.bestAlternativeTariff.isMateriallyBetter=true. Jeśli false, napisz krótko, że zmiana taryfy nie daje istotnej poprawy. G12 obejmuje przedział G12–G12w; G12w nie jest osobną odpowiedzią klienta. Nie rozpisuj wszystkich taryf.",
                 "Warianty 10, 15, 20 i 30 kWh przeanalizuj wewnętrznie. Inną pojemność pokaż tylko wtedy, gdy independentAudit.materialAlternativeStorage nie jest null. Wtedy podaj jedną alternatywę, różnicę korzyści lub zwrotu i jej przyczynę. W przeciwnym razie omawiaj tylko magazyn wskazany przez kalkulator.",
                 "Podaj okres zwrotu po dotacji przy wzroście cen energii o 9% rocznie. Nie obiecuj oszczędności większych niż rachunek klienta.",
                 "Podaj orientacyjny czas backupu wybranego magazynu dla średniego całodobowego zużycia klienta. Zaznacz krótko, że wydzielone obwody krytyczne mogą działać dłużej.",
@@ -982,7 +1019,7 @@ export async function generateEnergyStorageSalesAnalysis(
                 "Jeśli pvExpansion.requiresIndividualAnalysis=true, nie rekomenduj rozbudowy PV. Wyjaśnij, że przekroczenie 10 kWp zmienia opust z 0,8 na 0,7 i trzeba porównać oba warianty; rekomendacja magazynu pozostaje osobną decyzją.",
                 "Jeśli pvExpansion.shouldCheckExpansion=true i requiresIndividualAnalysis=false, możesz wskazać sprawdzenie technicznej możliwości rozbudowy PV jako ważny krok na wizycie.",
                 "Dla net-meteringu nigdy nie nazywaj rozbudowy powyżej 10 kWp opłacalną wyłącznie na podstawie większej produkcji lub niskiego pokrycia zużycia. Korzystaj z netMeteringThresholdComparison, a brak kosztu rozbudowy oznacza brak podstaw do deklarowania jej okresu zwrotu.",
-                "Jeśli klient nie ma PV, analizuj kompletny system PV + magazyn w net-billingu. Nie opisuj magazynu tak, jakby klient miał już nadwyżki. Magazyn bez PV ma zwykle sens przede wszystkim jako backup lub w wyjątkowo korzystnym profilu taryfowym.",
+                "Jeśli klient nie ma PV, analizuj kompletny system PV + magazyn w net-billingu. Nie opisuj magazynu tak, jakby klient miał już nadwyżki ani nie używaj sformułowania „praca samego magazynu” w podsumowaniu taryfy. Magazyn bez PV ma zwykle sens przede wszystkim jako część kompletnego systemu, backup lub w wyjątkowo korzystnym profilu taryfowym.",
                 "Jeśli rozbudowa PV jest rozważana, porównaj obecne PV + magazyn z rozbudową + magazyn. W net-meteringu przekroczenie 10 kWp zmienia opust z 0,8 na 0,7 i nigdy nie może być automatyczną rekomendacją bez porównania korzyści i kosztu. Pokaż tylko wariant lepszy.",
                 "Sposób prowadzenia leada zależy od statusu audytu: 🔴 — uczciwie przedstaw wynik; jeśli klient nadal chce, umów wizytę, a przy odmowie spotkania przygotuj ofertę telefonicznie lub mailowo. 🟡 — przedstaw plusy i minusy, spróbuj umówić spotkanie, a przy zdecydowanej odmowie podaj ofertę telefonicznie lub mailowo. 🟢 — priorytetem jest spotkanie; unikaj wysyłki oferty mailem poza ostatecznością i uzasadnij wizytę koniecznością obejrzenia miejsca instalacji oraz potwierdzenia potrzeb i kosztów.",
                 "Nie każ klientowi wykonywać analizy. Rachunek i dane techniczne weryfikuje handlowiec podczas rozmowy lub spotkania. visitChecks ma zawierać maksymalnie 4 konkretne rzeczy do sprawdzenia po umówieniu wizyty.",
