@@ -947,13 +947,15 @@ export async function generateEnergyStorageSalesAnalysis(
   let lastError: Error | null = null;
 
   for (const [attemptIndex, maxOutputTokens] of outputTokenLimits.entries()) {
-    const response = await fetchImpl("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    let response: Response;
+    try {
+      response = await fetchImpl("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
         model: process.env.OPENAI_ENERGY_STORAGE_MODEL?.trim() || DEFAULT_MODEL,
         store: false,
         max_output_tokens: maxOutputTokens,
@@ -1058,9 +1060,20 @@ export async function generateEnergyStorageSalesAnalysis(
             },
           },
         },
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attemptIndex < outputTokenLimits.length - 1) {
+        console.warn("energy-storage-lead AI retrying after network error", {
+          attempt: attemptIndex + 1,
+          error: lastError.message,
+        });
+        continue;
+      }
+      throw lastError;
+    }
 
     if (!response.ok) {
       const errorBody = (await response.text()).slice(0, 800);
