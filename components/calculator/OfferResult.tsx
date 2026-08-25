@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
+import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
 
 type Result = {
   pvPowerKw: number;
@@ -111,6 +112,7 @@ type OfferResultProps = {
   panelPowerWp: number;
   panelName: string;
   identicalSetCount?: number;
+  customPaymentSchedule?: CustomPaymentSchedule;
   copied: boolean;
   copyOffer: () => void;
   resetForm: () => void;
@@ -206,6 +208,7 @@ export default function OfferResult({
   panelPowerWp,
   panelName,
   identicalSetCount = 1,
+  customPaymentSchedule,
   copied,
   copyOffer,
   resetForm,
@@ -440,6 +443,7 @@ export default function OfferResult({
       advisorName,
       advisorPhone,
       advisorEmail,
+      customPaymentSchedule,
     };
   }
 

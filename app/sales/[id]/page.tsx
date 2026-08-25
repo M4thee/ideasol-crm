@@ -12,6 +12,10 @@ import {
   getSaleDocumentGroupKey,
   type DocumentGroupKey,
 } from "@/lib/saleDocumentGrouping";
+import {
+  formatCustomPaymentInstallment,
+  getCustomPaymentScheduleFromSale,
+} from "@/lib/customPaymentSchedule";
 
 type Sale = {
   id: string;
@@ -1618,6 +1622,8 @@ export default function SalePage() {
   const installationOrderItems = getInstallationOrderItems(sale);
 
   const saleCustomerData = sale.customer_data || {};
+  const customPaymentSchedule = getCustomPaymentScheduleFromSale(sale);
+  const hasCustomPaymentSchedule = customPaymentSchedule.enabled;
   const contractPriceRows = getContractPriceRows(saleCustomerData);
 
   const contractNumber =
@@ -1983,9 +1989,11 @@ export default function SalePage() {
                             <p>
                               <span className="font-bold">Podpis:</span> {saleCustomerData.contract_place || "Brak"}, {formatDateOnly(saleCustomerData.contract_date)}
                             </p>
-                            <p className="mt-1">
-                              <span className="font-bold">Zaliczka do:</span> {formatDateOnly(saleCustomerData.deposit_due_date)}
-                            </p>
+                            {!hasCustomPaymentSchedule ? (
+                              <p className="mt-1">
+                                <span className="font-bold">Zaliczka do:</span> {formatDateOnly(saleCustomerData.deposit_due_date)}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
 
@@ -2013,13 +2021,31 @@ export default function SalePage() {
 
                           <div>
                             <p className="text-xs uppercase font-semibold text-emerald-700/70 mb-1">
-                              Zaliczka
+                              {hasCustomPaymentSchedule ? "Płatność" : "Zaliczka"}
                             </p>
                             <p className="font-semibold text-emerald-950">
-                              {formatMoney(sale.deposit_amount)}
+                              {hasCustomPaymentSchedule
+                                ? `Harmonogram niestandardowy · ${customPaymentSchedule.installments.length} transz`
+                                : formatMoney(sale.deposit_amount)}
                             </p>
                           </div>
                         </div>
+
+                        {hasCustomPaymentSchedule ? (
+                          <div className="mt-5 rounded-xl border border-violet-200 bg-white/80 p-4">
+                            <p className="text-xs font-black uppercase tracking-wide text-violet-700">
+                              Harmonogram płatności
+                            </p>
+                            <ol className="mt-3 space-y-2 text-sm text-violet-950">
+                              {customPaymentSchedule.installments.map((installment, index) => (
+                                <li key={installment.id}>
+                                  <span className="mr-2 font-black">{index + 1}.</span>
+                                  {formatCustomPaymentInstallment(installment)}
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        ) : null}
 
                         {saleCustomerData.ownership_type === "co_owner" && (
                           <div className="mt-5 rounded-xl border border-emerald-200 bg-white/70 p-4">
@@ -2567,10 +2593,12 @@ export default function SalePage() {
 
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                       <p className="text-xs font-black uppercase tracking-wide text-slate-400">
-                        Zaliczka
+                        {hasCustomPaymentSchedule ? "Płatność" : "Zaliczka"}
                       </p>
                       <p className="mt-2 text-xl font-black text-slate-950">
-                        {formatMoney(sale.deposit_amount)}
+                        {hasCustomPaymentSchedule
+                          ? `${customPaymentSchedule.installments.length} transz`
+                          : formatMoney(sale.deposit_amount)}
                       </p>
                     </div>
                   </div>

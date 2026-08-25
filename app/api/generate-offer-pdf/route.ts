@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+
+import {
+  formatCustomPaymentInstallment,
+  hasCustomPaymentDeposit,
+  normalizeCustomPaymentSchedule,
+} from "@/lib/customPaymentSchedule";
 
 export const runtime = "nodejs";
 
@@ -51,6 +57,7 @@ type OfferPdfData = {
   advisorPhone?: string;
   advisorEmail?: string;
   pdfQuantity?: number;
+  customPaymentSchedule?: unknown;
 };
 
 function formatMoney(value: unknown) {
@@ -85,7 +92,7 @@ function hexToRgb(hex: string) {
   return rgb(r, g, b);
 }
 
-function wrapText(text: string, font: any, size: number, maxWidth: number) {
+function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
   const words = String(text || "").split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let currentLine = "";
@@ -115,7 +122,7 @@ function drawWrappedText(
     maxWidth: number;
     size: number;
     lineHeight: number;
-    font: any;
+    font: PDFFont;
     color: ReturnType<typeof rgb>;
   }
 ) {
@@ -216,7 +223,7 @@ function getStorageDescription(data: OfferPdfData) {
   return `Magazyn energii ${data.energyStorage} wraz z montażem`;
 }
 
-function getEmsDescription(data: OfferPdfData) {
+function getEmsDescription() {
   return "Moduł EMS Zeronest Świetlik D300 wraz z montażem";
 }
 
@@ -229,7 +236,7 @@ function getBackupDescription(data: OfferPdfData) {
 function getOfferRows(data: OfferPdfData) {
   const pvDescription = getPvDescription(data);
   const inverterDescription = getInverterDescription(data);
-  const emsDescription = getEmsDescription(data);
+  const emsDescription = getEmsDescription();
   const backupDescription = getBackupDescription(data);
   const storageDescription = getStorageDescription(data);
   const pdfQuantity = Math.max(Number(data.pdfQuantity || 1), 1);
@@ -248,17 +255,15 @@ function getOfferRows(data: OfferPdfData) {
   const rawEmsNet = data.withEms ? Number(data.emsNet || 0) : 0;
   const symbolicGross = 1;
   const symbolicNet = symbolicGross / (1 + vatPercent / 100);
-  const backupUnitGross = data.withBackup ? symbolicGross : 0;
   const backupUnitNet = data.withBackup ? symbolicNet : 0;
-  const pvMinimumGross = pvDescription ? symbolicGross : 0;
   const pvMinimumNet = pvDescription ? symbolicNet : 0;
   const inverterSubsidyNet = hasSubsidyMode && inverterDescription ? symbolicNet : rawInverterNet;
 
   let pvUnitNet = 0;
-  let inverterUnitNet = inverterSubsidyNet;
+  const inverterUnitNet = inverterSubsidyNet;
   let storageUnitNet = 0;
   let emsUnitNet = 0;
-  let backupNet = backupUnitNet;
+  const backupNet = backupUnitNet;
 
   if (hasSubsidyMode) {
     const fixedNet = inverterUnitNet + backupNet + additionalUnitNetTotal;
@@ -765,42 +770,100 @@ async function createOfferPdf(data: OfferPdfData) {
 
   y -= 88;
 
+  const customPaymentSchedule = normalizeCustomPaymentSchedule(data.customPaymentSchedule);
   const depositGross = summaryGross * 0.25;
   const remainingGross = Math.max(summaryGross - depositGross, 0);
+  const customPaymentLines = customPaymentSchedule.enabled
+    ? customPaymentSchedule.installments.flatMap((installment, index) =>
+        wrapText(
+          `${index + 1}. ${formatCustomPaymentInstallment(installment)}`,
+          font,
+          7,
+          cardWidth - 36
+        )
+      )
+    : [];
+  const customPaymentNoteLines =
+    customPaymentSchedule.enabled && hasCustomPaymentDeposit(customPaymentSchedule)
+      ? wrapText(
+          "Tylko transze oznaczone słowem „zadatek” mają charakter zadatku w rozumieniu art. 394 Kodeksu cywilnego.",
+          font,
+          6.4,
+          cardWidth - 36
+        )
+      : [];
+  const paymentCardHeight = customPaymentSchedule.enabled
+    ? Math.max(
+        58,
+        34 + customPaymentLines.length * 9 + customPaymentNoteLines.length * 8 +
+          (customPaymentNoteLines.length > 0 ? 7 : 0)
+      )
+    : 58;
 
   page.drawRectangle({
     x: marginX,
-    y: y - 58,
+    y: y - paymentCardHeight,
     width: cardWidth,
-    height: 58,
+    height: paymentCardHeight,
     color: hexToRgb("#FFFFFF"),
     borderColor: hexToRgb("#E2E8F0"),
     borderWidth: 0.7,
   });
 
-  page.drawText("Forma rozliczenia", {
-    x: marginX + 18,
-    y: y - 18,
-    size: 9,
-    font: headingFont,
-    color: hexToRgb("#0F172A"),
-  });
-
-  drawWrappedText(
-    page,
-    `Zaliczka: ${formatMoney(depositGross)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji.\n\nPozostała kwota: ${formatMoney(remainingGross)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
+  page.drawText(
+    customPaymentSchedule.enabled ? "Indywidualny harmonogram płatności" : "Forma rozliczenia",
     {
       x: marginX + 18,
-      y: y - 34,
-      maxWidth: cardWidth - 36,
-      size: 7,
-      lineHeight: 9,
-      font,
-      color: hexToRgb("#475569"),
+      y: y - 18,
+      size: 9,
+      font: headingFont,
+      color: hexToRgb("#0F172A"),
     }
   );
 
-  y -= 70;
+  if (customPaymentSchedule.enabled) {
+    let paymentY = y - 34;
+    customPaymentLines.forEach((line) => {
+      page.drawText(line, {
+        x: marginX + 18,
+        y: paymentY,
+        size: 7,
+        font,
+        color: hexToRgb("#475569"),
+      });
+      paymentY -= 9;
+    });
+
+    if (customPaymentNoteLines.length > 0) {
+      paymentY -= 3;
+      customPaymentNoteLines.forEach((line) => {
+        page.drawText(line, {
+          x: marginX + 18,
+          y: paymentY,
+          size: 6.4,
+          font: headingFont,
+          color: hexToRgb("#7C3AED"),
+        });
+        paymentY -= 8;
+      });
+    }
+  } else {
+    drawWrappedText(
+      page,
+      `Zaliczka: ${formatMoney(depositGross)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji. Pozostała kwota: ${formatMoney(remainingGross)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
+      {
+        x: marginX + 18,
+        y: y - 34,
+        maxWidth: cardWidth - 36,
+        size: 7,
+        lineHeight: 9,
+        font,
+        color: hexToRgb("#475569"),
+      }
+    );
+  }
+
+  y -= paymentCardHeight + 12;
 
   const subsidyTotal = data.subsidyAllocation?.enabled ? getSubsidyTotal(data) : 0;
   const storageSubsidy = Number(data.subsidyAllocation?.storageSubsidy || 0);
@@ -929,6 +992,7 @@ export async function POST(request: Request) {
       advisorPhone: body.advisorPhone,
       advisorEmail: body.advisorEmail,
       pdfQuantity: body.pdfQuantity,
+      customPaymentSchedule: body.customPaymentSchedule,
     });
 
     return new NextResponse(new Uint8Array(pdfBuffer), {

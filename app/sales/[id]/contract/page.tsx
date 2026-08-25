@@ -5,6 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
 import { getSaleInstallationCount } from "@/lib/installationCount";
+import {
+  createEmptyCustomPaymentSchedule,
+  formatCustomPaymentInstallment,
+  getCustomPaymentScheduleFromSale,
+} from "@/lib/customPaymentSchedule";
 
 type ContractForm = {
   clientName: string;
@@ -108,6 +113,9 @@ export default function SaleContractPage() {
   const [error, setError] = useState("");
   const [saleNumber, setSaleNumber] = useState("");
   const [installationCount, setInstallationCount] = useState(1);
+  const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
+    createEmptyCustomPaymentSchedule
+  );
   const [form, setForm] = useState<ContractForm>({
     clientName: "",
     pesel: "",
@@ -224,6 +232,7 @@ export default function SaleContractPage() {
 
     setSaleNumber(contractNumber);
     setInstallationCount(getSaleInstallationCount(sale));
+    setCustomPaymentSchedule(getCustomPaymentScheduleFromSale(sale));
     setForm({
       clientName:
         customerData.full_name ||
@@ -730,15 +739,32 @@ export default function SaleContractPage() {
                 />
               </label>
 
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">Termin płatności zaliczki</span>
-                <input
-                  type="date"
-                  value={form.depositDueDate}
-                  onChange={(event) => updateField("depositDueDate", event.target.value)}
-                  className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
-                />
-              </label>
+              {customPaymentSchedule.enabled ? (
+                <div className="md:col-span-2 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                  <p className="text-sm font-black text-violet-950">Niestandardowy harmonogram płatności</p>
+                  <p className="mt-1 text-xs font-medium text-violet-700">
+                    Te transze zostaną umieszczone w paragrafie płatności umowy.
+                  </p>
+                  <ol className="mt-3 space-y-2 text-sm text-violet-950">
+                    {customPaymentSchedule.installments.map((installment, index) => (
+                      <li key={installment.id} className="rounded-xl bg-white px-3 py-2 ring-1 ring-violet-100">
+                        <span className="mr-2 font-black">{index + 1}.</span>
+                        {formatCustomPaymentInstallment(installment)}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Termin płatności zaliczki</span>
+                  <input
+                    type="date"
+                    value={form.depositDueDate}
+                    onChange={(event) => updateField("depositDueDate", event.target.value)}
+                    className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                  />
+                </label>
+              )}
 
               <label className="block md:col-span-2">
                 <span className="text-sm font-bold text-slate-700">Gdzie podpisano umowę</span>
@@ -820,11 +846,15 @@ export default function SaleContractPage() {
                     Termin odstąpienia: {form.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14} dni
                   </p>
                   <p className="mt-1 text-xs font-medium">
-                    Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki.
+                    {customPaymentSchedule.enabled
+                      ? "Termin realizacji instalacji wynosi do 30 dni od zaksięgowania ostatniej transzy wymaganej przed rozpoczęciem montażu, a jeżeli harmonogram jej nie przewiduje — od podpisania umowy."
+                      : "Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki."}
                   </p>
                   {form.contractSigningLocation === "unscheduled_home_visit" && (
                     <p className="mt-1 text-xs font-bold text-amber-800">
-                      Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia.
+                      {customPaymentSchedule.enabled
+                        ? "Przy wizycie nieumówionej żadna płatność nie może zostać pobrana przed upływem terminu odstąpienia."
+                        : "Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia."}
                     </p>
                   )}
                 </div>
@@ -897,15 +927,17 @@ export default function SaleContractPage() {
                 )}
               </div>
 
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">Zaliczka</span>
-                <input
-                  readOnly
-                  value={form.depositAmount}
-                  onChange={(event) => updateField("depositAmount", event.target.value)}
-                  className="mt-2 h-11 w-full rounded-xl border border-slate-300 bg-slate-100 px-4 text-sm text-slate-500 outline-none"
-                />
-              </label>
+              {!customPaymentSchedule.enabled ? (
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Zaliczka</span>
+                  <input
+                    readOnly
+                    value={form.depositAmount}
+                    onChange={(event) => updateField("depositAmount", event.target.value)}
+                    className="mt-2 h-11 w-full rounded-xl border border-slate-300 bg-slate-100 px-4 text-sm text-slate-500 outline-none"
+                  />
+                </label>
+              ) : null}
 
               <label className="block">
                 <span className="text-sm font-bold text-slate-700">Całkowita wartość brutto</span>

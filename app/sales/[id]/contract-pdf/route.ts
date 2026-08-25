@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { createClient } from "@supabase/supabase-js";
 import { readFile } from "fs/promises";
@@ -7,6 +7,14 @@ import path from "path";
 import { makeContractWarrantyRow } from "@/lib/contractWarranty";
 import { formatInstallationItemQuantity, getSaleInstallationCount } from "@/lib/installationCount";
 import { reconcileContractPriceLines } from "@/lib/contractFinancialReconciliation";
+import {
+  getCustomPaymentScheduleFromSale,
+  validateCustomPaymentSchedule,
+} from "@/lib/customPaymentSchedule";
+import {
+  drawCustomPaymentScheduleContractPages,
+  sanitizeCustomPaymentTemplatePages,
+} from "@/lib/customPaymentSchedulePdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1291,6 +1299,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
 
+  const customPaymentSchedule = getCustomPaymentScheduleFromSale(sale);
+
   let client: Record<string, any> | null = null;
 
   if (sale.client_id) {
@@ -1321,6 +1331,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const templateBytes = await readFile(templatePath);
   const pdfDoc = await PDFDocument.load(templateBytes);
   pdfDoc.registerFontkit(fontkit);
+
+  if (customPaymentSchedule.enabled) {
+    sanitizeCustomPaymentTemplatePages(pdfDoc.getPage(3), pdfDoc.getPage(4));
+  }
+
   const { width: contractPageWidth, height: contractPageHeight } =
     pdfDoc.getPage(0).getSize();
 
@@ -1363,6 +1378,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const regularFont = await pdfDoc.embedFont(regularFontBytes, { subset: false });
   const boldFont = await pdfDoc.embedFont(boldFontBytes, { subset: false });
+  const contractBodyLayoutFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   const customerFromDb = getCustomerData(sale, client);
   const customer = {
@@ -1512,6 +1528,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
     additionalServicesGrossBeforeDiscount: getQueryValue(request, "additionalServicesGrossBeforeDiscount"),
     additionalServicesGrossAfterDiscount: getQueryValue(request, "additionalServicesGrossAfterDiscount"),
   });
+  const customPaymentError = validateCustomPaymentSchedule(
+    customPaymentSchedule,
+    financialData.totalGross
+  );
+
+  if (customPaymentError) {
+    return NextResponse.json(
+      { error: `Nieprawidłowy harmonogram płatności: ${customPaymentError}` },
+      { status: 400 }
+    );
+  }
   const contractPlace = customer.contractPlace || "";
   const today = formatDateFromInput(customer.contractDate || null);
   const salesRepresentativeName =
@@ -1573,6 +1600,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       color: rgb(0.08, 0.1, 0.14),
     });
   }
+
 
   function drawCheck(
     pageIndex: number,
@@ -2202,75 +2230,88 @@ if (hasOptimizers) {
     2
   );
 
-  const paymentMethod = String(
-    getQueryValue(request, "paymentMethod") || customerFromDb.paymentMethod || "gotówka"
-  ).toLowerCase();
-  const isCreditPayment = paymentMethod.includes("kredyt") || paymentMethod.includes("finans");
-  const ownContributionGross = toNumber(
-    getQueryValue(request, "ownContributionAmount") || customerFromDb.ownContributionAmount || 0
-  );
-  const hasCreditDeposit = isCreditPayment && ownContributionGross > 0 && financialData.depositGross > 0;
-
-  if (isCreditPayment) {
-    drawCheck(3, contractPdfPositions.page4.creditPaymentCheck.x, contractPdfPositions.page4.creditPaymentCheck.y);
+  if (customPaymentSchedule.enabled) {
+    const paymentPage = pages[3];
+    const realizationPage = pages[4];
+    if (paymentPage && realizationPage) {
+      drawCustomPaymentScheduleContractPages({
+        paymentPage,
+        realizationPage,
+        layoutFont: contractBodyLayoutFont,
+        schedule: customPaymentSchedule,
+      });
+    }
   } else {
-    drawCheck(3, contractPdfPositions.page4.cashPaymentCheck.x, contractPdfPositions.page4.cashPaymentCheck.y);
-  }
-
-  if (isCreditPayment) {
-    drawMoneyOnPage(
-      3,
-      ownContributionGross,
-      contractPdfPositions.page4.creditOwnContribution.x,
-      contractPdfPositions.page4.creditOwnContribution.y,
-      { size: contractPdfPositions.page4.creditOwnContribution.size, bold: true }
+    const paymentMethod = String(
+      getQueryValue(request, "paymentMethod") || customerFromDb.paymentMethod || "gotówka"
+    ).toLowerCase();
+    const isCreditPayment = paymentMethod.includes("kredyt") || paymentMethod.includes("finans");
+    const ownContributionGross = toNumber(
+      getQueryValue(request, "ownContributionAmount") || customerFromDb.ownContributionAmount || 0
     );
+    const hasCreditDeposit = isCreditPayment && ownContributionGross > 0 && financialData.depositGross > 0;
 
-    if (hasCreditDeposit) {
+    if (isCreditPayment) {
+      drawCheck(3, contractPdfPositions.page4.creditPaymentCheck.x, contractPdfPositions.page4.creditPaymentCheck.y);
+    } else {
+      drawCheck(3, contractPdfPositions.page4.cashPaymentCheck.x, contractPdfPositions.page4.cashPaymentCheck.y);
+    }
+
+    if (isCreditPayment) {
+      drawMoneyOnPage(
+        3,
+        ownContributionGross,
+        contractPdfPositions.page4.creditOwnContribution.x,
+        contractPdfPositions.page4.creditOwnContribution.y,
+        { size: contractPdfPositions.page4.creditOwnContribution.size, bold: true }
+      );
+
+      if (hasCreditDeposit) {
+        drawMoneyOnPage(
+          3,
+          financialData.depositGross,
+          contractPdfPositions.page4.creditDeposit.x,
+          contractPdfPositions.page4.creditDeposit.y,
+          { size: contractPdfPositions.page4.creditDeposit.size, bold: true }
+        );
+
+        if (customer.depositDueDate) {
+          drawOnPage(
+            3,
+            formatDateFromInput(customer.depositDueDate),
+            contractPdfPositions.page4.creditDepositDueDate.x,
+            contractPdfPositions.page4.creditDepositDueDate.y,
+            { size: contractPdfPositions.page4.creditDepositDueDate.size, bold: true }
+          );
+        }
+      }
+    } else {
       drawMoneyOnPage(
         3,
         financialData.depositGross,
-        contractPdfPositions.page4.creditDeposit.x,
-        contractPdfPositions.page4.creditDeposit.y,
-        { size: contractPdfPositions.page4.creditDeposit.size, bold: true }
+        contractPdfPositions.page4.deposit.x,
+        contractPdfPositions.page4.deposit.y,
+        { size: contractPdfPositions.page4.deposit.size, bold: true }
       );
 
       if (customer.depositDueDate) {
         drawOnPage(
           3,
           formatDateFromInput(customer.depositDueDate),
-          contractPdfPositions.page4.creditDepositDueDate.x,
-          contractPdfPositions.page4.creditDepositDueDate.y,
-          { size: contractPdfPositions.page4.creditDepositDueDate.size, bold: true }
+          contractPdfPositions.page4.depositDueDate.x,
+          contractPdfPositions.page4.depositDueDate.y,
+          { size: contractPdfPositions.page4.depositDueDate.size, bold: true }
         );
       }
-    }
-  } else {
-    drawMoneyOnPage(
-      3,
-      financialData.depositGross,
-      contractPdfPositions.page4.deposit.x,
-      contractPdfPositions.page4.deposit.y,
-      { size: contractPdfPositions.page4.deposit.size, bold: true }
-    );
 
-    if (customer.depositDueDate) {
-      drawOnPage(
+      drawMoneyOnPage(
         3,
-        formatDateFromInput(customer.depositDueDate),
-        contractPdfPositions.page4.depositDueDate.x,
-        contractPdfPositions.page4.depositDueDate.y,
-        { size: contractPdfPositions.page4.depositDueDate.size, bold: true }
+        financialData.finalPaymentGross,
+        contractPdfPositions.page4.finalPayment.x,
+        contractPdfPositions.page4.finalPayment.y,
+        { size: contractPdfPositions.page4.finalPayment.size, bold: true }
       );
     }
-
-    drawMoneyOnPage(
-      3,
-      financialData.finalPaymentGross,
-      contractPdfPositions.page4.finalPayment.x,
-      contractPdfPositions.page4.finalPayment.y,
-      { size: contractPdfPositions.page4.finalPayment.size, bold: true }
-    );
   }
   drawRightAlignedOnPage(
     3,

@@ -12,6 +12,8 @@ import {
   CUSTOM_STORAGE_CODE,
   type CustomEquipment,
 } from "@/lib/calculator/customEquipment";
+import CustomPaymentScheduleFields from "@/components/calculator/CustomPaymentScheduleFields";
+import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
 
 function isOfferFormOnline() {
   if (typeof navigator === "undefined") return true;
@@ -187,6 +189,9 @@ type OfferFormProps = {
   setCustomMode: (value: boolean) => void;
   customEquipment: CustomEquipment;
   setCustomEquipment: Dispatch<SetStateAction<CustomEquipment>>;
+  customPaymentSchedule: CustomPaymentSchedule;
+  setCustomPaymentSchedule: Dispatch<SetStateAction<CustomPaymentSchedule>>;
+  customPaymentTotalGross: number;
 };
 
 export default function OfferForm({
@@ -243,6 +248,9 @@ export default function OfferForm({
   setCustomMode,
   customEquipment,
   setCustomEquipment,
+  customPaymentSchedule,
+  setCustomPaymentSchedule,
+  customPaymentTotalGross,
 }: OfferFormProps) {
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
@@ -1237,6 +1245,7 @@ export default function OfferForm({
               <div className="font-semibold text-slate-900 dark:text-slate-100">Opcje zaawansowane</div>
               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Ilość identycznych zestawów: {identicalSetCount || 1}
+                {customPaymentSchedule.enabled ? " · płatność niestandardowa" : ""}
               </div>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
@@ -1272,6 +1281,14 @@ export default function OfferForm({
                   umowy i sprzedaży w CRM, a wartości łączne zostaną odpowiednio przemnożone.
                 </p>
               </label>
+
+              {customModeAvailable ? (
+                <CustomPaymentScheduleFields
+                  value={customPaymentSchedule}
+                  onChange={setCustomPaymentSchedule}
+                  totalGross={customPaymentTotalGross}
+                />
+              ) : null}
             </div>
           )}
         </div>

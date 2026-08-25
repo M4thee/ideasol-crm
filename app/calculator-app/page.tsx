@@ -13,6 +13,11 @@ import {
   createDefaultCustomEquipment,
   type CustomEquipment,
 } from "@/lib/calculator/customEquipment";
+import {
+  createEmptyCustomPaymentSchedule,
+  normalizeCustomPaymentSchedule,
+  validateCustomPaymentSchedule,
+} from "@/lib/customPaymentSchedule";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
 import {
@@ -658,6 +663,9 @@ export default function Home() {
   const [selectedAdditionalServices, setSelectedAdditionalServices] = useState<SelectedAdditionalService[]>([]);
   const [identicalSetCount, setIdenticalSetCount] = useState(1);
   const [customMode, setCustomMode] = useState(false);
+  const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
+    createEmptyCustomPaymentSchedule
+  );
   const [customEquipment, setCustomEquipment] = useState<CustomEquipment>(
     createDefaultCustomEquipment
   );
@@ -1852,6 +1860,7 @@ export default function Home() {
     setSelectedInverterName("auto");
     setSelectedAdditionalServices([]);
     setIdenticalSetCount(1);
+    setCustomPaymentSchedule(createEmptyCustomPaymentSchedule());
     const defaultMargin = userProfile?.default_seller_markup;
 
     if (defaultMargin !== null && defaultMargin !== undefined) {
@@ -1890,6 +1899,21 @@ export default function Home() {
       return;
     }
 
+    const installationCount = normalizeInstallationCount(identicalSetCount);
+    const customPaymentScheduleForSave = normalizeCustomPaymentSchedule({
+      ...customPaymentSchedule,
+      enabled: customModeAvailable && customPaymentSchedule.enabled,
+    });
+    const customPaymentError = validateCustomPaymentSchedule(
+      customPaymentScheduleForSave,
+      Number(result.finalGross || 0) * installationCount
+    );
+
+    if (customPaymentError) {
+      setSaveOfferStatus(customPaymentError);
+      return null;
+    }
+
     setSavingOffer(true);
     setSaveOfferStatus("Zapisywanie oferty w CRM...");
 
@@ -1908,7 +1932,6 @@ export default function Home() {
     const inverterForSave = customModeActive
       ? customEquipment.inverter.displayName.trim()
       : selectedInverterName;
-    const installationCount = normalizeInstallationCount(identicalSetCount);
     const resultForSave = {
       ...result,
       installationCount,
@@ -1949,6 +1972,7 @@ export default function Home() {
         pdfQuantity: installationCount,
         customMode: customModeActive,
         customEquipment: customModeActive ? customEquipment : null,
+        customPaymentSchedule: customPaymentScheduleForSave,
         result: resultForSave,
         contractBreakdown: result.contractBreakdown || null,
         additionalServices: selectedAdditionalServices,
@@ -1958,6 +1982,7 @@ export default function Home() {
           identicalSetCount: installationCount,
           customMode: customModeActive,
           customEquipment: customModeActive ? customEquipment : null,
+          customPaymentSchedule: customPaymentScheduleForSave,
           offerType,
           panelModel: panelModelForSave,
           panelCount,
@@ -2177,6 +2202,10 @@ IdeaSol`;
           typedClientEmail,
           customMode: customModeActive,
           customEquipment: customModeActive ? customEquipment : null,
+          customPaymentSchedule: normalizeCustomPaymentSchedule({
+            ...customPaymentSchedule,
+            enabled: customModeAvailable && customPaymentSchedule.enabled,
+          }),
           offerType,
           panelModel: getPanelDisplayName(panelModel),
           panelCount,
@@ -2429,6 +2458,9 @@ IdeaSol`;
 
         const selectedAdditionalServicesSnapshot =
           (snapshot.selectedAdditionalServices as SelectedAdditionalService[] | undefined) || [];
+        const customPaymentScheduleSnapshot = normalizeCustomPaymentSchedule(
+          snapshot.customPaymentSchedule
+        );
         const installationCountSnapshot = normalizeInstallationCount(
           snapshot.installationCount ?? snapshot.identicalSetCount
         );
@@ -2486,6 +2518,7 @@ IdeaSol`;
             pdfQuantity: installationCountSnapshot,
             customMode: Boolean(snapshot.customMode),
             customEquipment: snapshot.customEquipment || null,
+            customPaymentSchedule: customPaymentScheduleSnapshot,
             result: {
               ...queuedResult,
               installationCount: installationCountSnapshot,
@@ -2499,6 +2532,7 @@ IdeaSol`;
               identicalSetCount: installationCountSnapshot,
               customMode: Boolean(snapshot.customMode),
               customEquipment: snapshot.customEquipment || null,
+              customPaymentSchedule: customPaymentScheduleSnapshot,
               offerType: snapshot.offerType || queuedResult.offerType,
               panelModel: snapshot.panelModel || null,
               panelCount: Number(snapshot.panelCount || 0),
@@ -2844,6 +2878,11 @@ IdeaSol`;
               setCustomMode={setCustomMode}
               customEquipment={customEquipment}
               setCustomEquipment={setCustomEquipment}
+              customPaymentSchedule={customPaymentSchedule}
+              setCustomPaymentSchedule={setCustomPaymentSchedule}
+              customPaymentTotalGross={
+                Number(result?.finalGross || 0) * normalizeInstallationCount(identicalSetCount)
+              }
             />
 
             {result && (
@@ -2857,6 +2896,7 @@ IdeaSol`;
                   panelPowerWp={getPanelPowerWp(panelModel)}
                   panelName={getPanelDisplayName(panelModel)}
                   identicalSetCount={identicalSetCount}
+                  customPaymentSchedule={customPaymentSchedule}
                   copied={copied}
                   copyOffer={copyOffer}
                   resetForm={resetForm}

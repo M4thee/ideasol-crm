@@ -14,6 +14,11 @@ import {
   multiplyFinancialRecord,
 } from "@/lib/installationCount";
 import { reconcileStoredContractFinancialBreakdown } from "@/lib/contractFinancialReconciliation";
+import {
+  formatCustomPaymentInstallment,
+  getCustomPaymentScheduleFromOffer,
+  validateCustomPaymentSchedule,
+} from "@/lib/customPaymentSchedule";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
@@ -972,6 +977,11 @@ export default function OfferDetailsPage() {
     () => currentUserRole === "manager",
     [currentUserRole]
   );
+  const customPaymentSchedule = useMemo(
+    () => getCustomPaymentScheduleFromOffer(offer),
+    [offer]
+  );
+  const hasCustomPaymentSchedule = customPaymentSchedule.enabled;
   async function loadVisibleUserIds(
     userId: string,
     role: UserRole
@@ -1466,58 +1476,71 @@ export default function OfferDetailsPage() {
       return "Uzupełnij adres email.";
     }
 
-    if (!saleForm.paymentMethod) {
-      errors.push("paymentMethod");
-      setInvalidFields(errors);
-      return "Wybierz formę płatności.";
-    }
+    if (hasCustomPaymentSchedule) {
+      const installationCount = getOfferInstallationCount(offer);
+      const customPaymentError = validateCustomPaymentSchedule(
+        customPaymentSchedule,
+        Number(offer?.sale_price_gross || 0) * installationCount
+      );
 
-    const parsedOwnContribution = Number(
-      String(saleForm.ownContributionAmount || "0").replace(",", ".")
-    );
-
-    if (saleForm.paymentMethod === "kredyt") {
-      if (!Number.isFinite(parsedOwnContribution) || parsedOwnContribution < 0) {
-        errors.push("ownContributionAmount");
+      if (customPaymentError) {
         setInvalidFields(errors);
-        return "Wkład własny musi być liczbą większą lub równą 0.";
+        return customPaymentError;
       }
-    }
+    } else {
+      if (!saleForm.paymentMethod) {
+        errors.push("paymentMethod");
+        setInvalidFields(errors);
+        return "Wybierz formę płatności.";
+      }
 
-    const shouldRequireDeposit =
-      saleForm.paymentMethod === "gotówka" ||
-      (saleForm.paymentMethod === "kredyt" && parsedOwnContribution > 0);
+      const parsedOwnContribution = Number(
+        String(saleForm.ownContributionAmount || "0").replace(",", ".")
+      );
 
-    if (shouldRequireDeposit && !saleForm.depositAmount.trim()) {
-      errors.push("depositAmount");
-      setInvalidFields(errors);
-      return "Uzupełnij wysokość zaliczki.";
-    }
+      if (saleForm.paymentMethod === "kredyt") {
+        if (!Number.isFinite(parsedOwnContribution) || parsedOwnContribution < 0) {
+          errors.push("ownContributionAmount");
+          setInvalidFields(errors);
+          return "Wkład własny musi być liczbą większą lub równą 0.";
+        }
+      }
 
-    const parsedDeposit = Number(String(saleForm.depositAmount || "0").replace(",", "."));
+      const shouldRequireDeposit =
+        saleForm.paymentMethod === "gotówka" ||
+        (saleForm.paymentMethod === "kredyt" && parsedOwnContribution > 0);
 
-    if (shouldRequireDeposit && !Number.isFinite(parsedDeposit)) {
-      errors.push("depositAmount");
-      setInvalidFields(errors);
-      return "Wysokość zaliczki musi być liczbą.";
-    }
+      if (shouldRequireDeposit && !saleForm.depositAmount.trim()) {
+        errors.push("depositAmount");
+        setInvalidFields(errors);
+        return "Uzupełnij wysokość zaliczki.";
+      }
 
-    if (shouldRequireDeposit && parsedDeposit < 0) {
-      errors.push("depositAmount");
-      setInvalidFields(errors);
-      return "Wysokość zaliczki nie może być ujemna.";
-    }
+      const parsedDeposit = Number(String(saleForm.depositAmount || "0").replace(",", "."));
 
-    if (saleForm.paymentMethod === "kredyt" && parsedDeposit > parsedOwnContribution) {
-      errors.push("depositAmount");
-      setInvalidFields(errors);
-      return "Zaliczka nie może być większa niż wkład własny.";
-    }
+      if (shouldRequireDeposit && !Number.isFinite(parsedDeposit)) {
+        errors.push("depositAmount");
+        setInvalidFields(errors);
+        return "Wysokość zaliczki musi być liczbą.";
+      }
 
-    if (shouldRequireDeposit && !saleForm.depositDueDate.trim()) {
-      errors.push("depositDueDate");
-      setInvalidFields(errors);
-      return "Uzupełnij termin płatności zaliczki.";
+      if (shouldRequireDeposit && parsedDeposit < 0) {
+        errors.push("depositAmount");
+        setInvalidFields(errors);
+        return "Wysokość zaliczki nie może być ujemna.";
+      }
+
+      if (saleForm.paymentMethod === "kredyt" && parsedDeposit > parsedOwnContribution) {
+        errors.push("depositAmount");
+        setInvalidFields(errors);
+        return "Zaliczka nie może być większa niż wkład własny.";
+      }
+
+      if (shouldRequireDeposit && !saleForm.depositDueDate.trim()) {
+        errors.push("depositDueDate");
+        setInvalidFields(errors);
+        return "Uzupełnij termin płatności zaliczki.";
+      }
     }
 
     setInvalidFields([]);
@@ -1765,8 +1788,15 @@ export default function OfferDetailsPage() {
           city: "",
         };
 
-    const ownContributionAmount = Number(String(saleForm.ownContributionAmount || "0").replace(",", "."));
-    const depositAmount = Number(String(saleForm.depositAmount || "0").replace(",", "."));
+    const effectivePaymentMethod = hasCustomPaymentSchedule
+      ? "niestandardowa"
+      : saleForm.paymentMethod;
+    const ownContributionAmount = hasCustomPaymentSchedule
+      ? 0
+      : Number(String(saleForm.ownContributionAmount || "0").replace(",", "."));
+    const depositAmount = hasCustomPaymentSchedule
+      ? 0
+      : Number(String(saleForm.depositAmount || "0").replace(",", "."));
     const installationCount = getOfferInstallationCount(offer);
     const saleOfferSnapshot = createSaleOfferSnapshot(offer, installationCount);
     const multipliedContractFinancialBreakdown = multiplyFinancialRecord(
@@ -1905,7 +1935,7 @@ export default function OfferDetailsPage() {
         meeting_agreed_date: saleForm.meetingAgreedDate,
         contract_number: contractNumber,
         contract_sequence: saleForm.contractSequence,
-        deposit_due_date: saleForm.depositDueDate,
+        deposit_due_date: hasCustomPaymentSchedule ? null : saleForm.depositDueDate,
         visit_previously_scheduled:
           saleForm.contractSigningLocation === "scheduled_home_visit"
             ? true
@@ -1915,7 +1945,8 @@ export default function OfferDetailsPage() {
         realization_variant: saleForm.realizationVariant,
         deposit_amount: depositAmount,
         own_contribution_amount: ownContributionAmount,
-        payment_method: saleForm.paymentMethod,
+        payment_method: effectivePaymentMethod,
+        custom_payment_schedule: customPaymentSchedule,
         client1_marketing_email: saleForm.client1MarketingEmail,
         client1_marketing_phone: saleForm.client1MarketingPhone,
         client1_photo_consent: saleForm.client1PhotoConsent,
@@ -1940,7 +1971,7 @@ export default function OfferDetailsPage() {
       },
       offer_snapshot: saleOfferSnapshot,
       source_event_id: sourceEventId || null,
-      payment_method: saleForm.paymentMethod,
+      payment_method: effectivePaymentMethod,
       deposit_amount: depositAmount,
       // own_contribution_amount: ownContributionAmount, // Removed as requested
     };
@@ -2533,86 +2564,105 @@ if (updateClientStatusError) {
                 </>
               )}
 
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Forma płatności</span>
-                <select
-                  value={saleForm.paymentMethod}
-                  onChange={(event) => {
-                    const paymentMethod = event.target.value;
-                    updateSaleForm("paymentMethod", paymentMethod);
+              {hasCustomPaymentSchedule ? (
+                <div className="md:col-span-2 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                  <p className="text-sm font-black text-violet-950">Niestandardowa płatność</p>
+                  <p className="mt-1 text-xs font-medium text-violet-700">
+                    Harmonogram został ustalony w kalkulatorze i zastąpi standardową zaliczkę oraz płatność końcową w umowie.
+                  </p>
+                  <ol className="mt-3 space-y-2 text-sm text-violet-950">
+                    {customPaymentSchedule.installments.map((installment, index) => (
+                      <li key={installment.id} className="rounded-xl bg-white px-3 py-2 ring-1 ring-violet-100">
+                        <span className="mr-2 font-black">{index + 1}.</span>
+                        {formatCustomPaymentInstallment(installment)}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Forma płatności</span>
+                    <select
+                      value={saleForm.paymentMethod}
+                      onChange={(event) => {
+                        const paymentMethod = event.target.value;
+                        updateSaleForm("paymentMethod", paymentMethod);
 
-                    if (paymentMethod === "kredyt") {
-                      updateSaleForm("ownContributionAmount", "0");
-                      updateSaleForm("depositAmount", "");
-                      updateSaleForm("depositDueDate", "");
-                    }
+                        if (paymentMethod === "kredyt") {
+                          updateSaleForm("ownContributionAmount", "0");
+                          updateSaleForm("depositAmount", "");
+                          updateSaleForm("depositDueDate", "");
+                        }
 
-                    if (paymentMethod === "gotówka") {
-                      updateSaleForm("ownContributionAmount", "");
-                      updateSaleForm("depositAmount", calculateDefaultDepositAmount(totalOfferGross));
-                      updateSaleForm(
-                        "depositDueDate",
-                        addDaysLocalDate(
-                          saleForm.contractDate,
-                          saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14
-                        )
-                      );
-                    }
-                  }}
-                  className={inputClass("paymentMethod")}
-                >
-                  <option value="gotówka">Gotówka</option>
-                  <option value="kredyt">Kredyt</option>
-                  {saleForm.customerType === "b2b" && <option value="leasing">Leasing</option>}
-                </select>
-              </label>
+                        if (paymentMethod === "gotówka") {
+                          updateSaleForm("ownContributionAmount", "");
+                          updateSaleForm("depositAmount", calculateDefaultDepositAmount(totalOfferGross));
+                          updateSaleForm(
+                            "depositDueDate",
+                            addDaysLocalDate(
+                              saleForm.contractDate,
+                              saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14
+                            )
+                          );
+                        }
+                      }}
+                      className={inputClass("paymentMethod")}
+                    >
+                      <option value="gotówka">Gotówka</option>
+                      <option value="kredyt">Kredyt</option>
+                      {saleForm.customerType === "b2b" && <option value="leasing">Leasing</option>}
+                    </select>
+                  </label>
 
-              {saleForm.paymentMethod === "kredyt" && (
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">Wkład własny</span>
-                  <span className="mt-1 block text-xs font-medium text-slate-400">
-                    Wpisz 0, jeżeli całość finansowana jest kredytem.
-                  </span>
-                  <input
-                    value={saleForm.ownContributionAmount}
-                    onChange={(event) => {
-                      updateSaleForm("ownContributionAmount", event.target.value);
+                  {saleForm.paymentMethod === "kredyt" && (
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Wkład własny</span>
+                      <span className="mt-1 block text-xs font-medium text-slate-400">
+                        Wpisz 0, jeżeli całość finansowana jest kredytem.
+                      </span>
+                      <input
+                        value={saleForm.ownContributionAmount}
+                        onChange={(event) => {
+                          updateSaleForm("ownContributionAmount", event.target.value);
 
-                      const ownContribution = Number(String(event.target.value || "0").replace(",", "."));
+                          const ownContribution = Number(String(event.target.value || "0").replace(",", "."));
 
-                      if (Number.isFinite(ownContribution) && ownContribution <= 0) {
-                        updateSaleForm("depositAmount", "");
-                        updateSaleForm("depositDueDate", "");
-                      }
-                    }}
-                    placeholder="np. 0 albo 30000"
-                    className={inputClass("ownContributionAmount")}
-                  />
-                </label>
+                          if (Number.isFinite(ownContribution) && ownContribution <= 0) {
+                            updateSaleForm("depositAmount", "");
+                            updateSaleForm("depositDueDate", "");
+                          }
+                        }}
+                        placeholder="np. 0 albo 30000"
+                        className={inputClass("ownContributionAmount")}
+                      />
+                    </label>
+                  )}
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Wysokość zaliczki</span>
+                    <span className="mt-1 block text-xs font-medium text-slate-400">
+                      Przy gotówce domyślnie 25% wartości brutto. Przy kredycie zaliczka jest częścią wkładu własnego.
+                    </span>
+                    <input
+                      value={saleForm.depositAmount}
+                      onChange={(event) => updateSaleForm("depositAmount", event.target.value)}
+                      placeholder="np. 5000"
+                      className={inputClass("depositAmount")}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">Termin płatności zaliczki</span>
+                    <input
+                      type="date"
+                      value={saleForm.depositDueDate}
+                      onChange={(event) => updateSaleForm("depositDueDate", event.target.value)}
+                      className={inputClass("depositDueDate")}
+                    />
+                  </label>
+                </>
               )}
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Wysokość zaliczki</span>
-                <span className="mt-1 block text-xs font-medium text-slate-400">
-                  Przy gotówce domyślnie 25% wartości brutto. Przy kredycie zaliczka jest częścią wkładu własnego.
-                </span>
-                <input
-                  value={saleForm.depositAmount}
-                  onChange={(event) => updateSaleForm("depositAmount", event.target.value)}
-                  placeholder="np. 5000"
-                  className={inputClass("depositAmount")}
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">Termin płatności zaliczki</span>
-                <input
-                  type="date"
-                  value={saleForm.depositDueDate}
-                  onChange={(event) => updateSaleForm("depositDueDate", event.target.value)}
-                  className={inputClass("depositDueDate")}
-                />
-              </label>
 
               <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-black text-slate-900">Dane umowy</p>
@@ -2757,11 +2807,15 @@ if (updateClientStatusError) {
                         Termin odstąpienia: {saleForm.contractSigningLocation === "unscheduled_home_visit" ? 30 : 14} dni
                       </p>
                       <p className="mt-1 text-xs font-medium">
-                        Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki.
+                        {hasCustomPaymentSchedule
+                          ? "Termin realizacji instalacji wynosi do 30 dni od zaksięgowania ostatniej transzy wymaganej przed rozpoczęciem montażu, a jeżeli harmonogram jej nie przewiduje — od podpisania umowy."
+                          : "Termin realizacji instalacji jest odrębny: do 30 dni od zaksięgowania prawidłowo należnej zaliczki."}
                       </p>
                       {saleForm.contractSigningLocation === "unscheduled_home_visit" && (
                         <p className="mt-1 text-xs font-bold text-amber-800">
-                          Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia.
+                          {hasCustomPaymentSchedule
+                            ? "Przy wizycie nieumówionej żadna płatność nie może zostać pobrana przed upływem terminu odstąpienia."
+                            : "Przy wizycie nieumówionej zaliczka nie może zostać pobrana przed upływem terminu odstąpienia."}
                         </p>
                       )}
                     </div>
