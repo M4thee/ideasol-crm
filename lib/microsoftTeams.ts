@@ -36,6 +36,7 @@ export type TeamsChannelNotificationPayload = {
 
 export type TeamsSaleNotificationPayload = {
   productsSummary: string;
+  totalSummary?: string | null;
   sellerName: string;
   saleUrl?: string | null;
 };
@@ -214,9 +215,16 @@ export function buildTeamsSaleChannelMessage(payload: TeamsSaleNotificationPaylo
   const lines = [
     "<strong>🔥 Nowa sprzedaż pojawiła się w CRM! 🔥</strong>",
     `Produkt: <strong>${displayValue(payload.productsSummary)}</strong>`,
-    `Sprzedawca: <strong>${displayValue(payload.sellerName)}</strong>`,
-    "Gratulacje! 👏",
   ];
+
+  if (payload.totalSummary?.trim()) {
+    lines.push(`Łącznie: <strong>${displayValue(payload.totalSummary)}</strong>`);
+  }
+
+  lines.push(
+    `Sprzedawca: <strong>${displayValue(payload.sellerName)}</strong>`,
+    "Gratulacje! 👏"
+  );
 
   return lines.join("\n");
 }

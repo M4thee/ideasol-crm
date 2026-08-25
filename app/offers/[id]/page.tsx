@@ -8,6 +8,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
+import {
+  createSaleOfferSnapshot,
+  getOfferInstallationCount,
+  multiplyFinancialRecord,
+} from "@/lib/installationCount";
+import { reconcileStoredContractFinancialBreakdown } from "@/lib/contractFinancialReconciliation";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
@@ -1207,7 +1213,9 @@ export default function OfferDetailsPage() {
     const email = getClientField(sourceClient, ["email", "contact_email", "mail"]);
     const correspondenceAddress = getClientField(sourceClient, ["correspondence_address", "adres_korespondencyjny"]);
     const installationAddress = getClientField(sourceClient, ["installation_address", "adres_montazu", "mounting_address"]);
-    const defaultDepositAmount = calculateDefaultDepositAmount(offer.sale_price_gross);
+    const defaultDepositAmount = calculateDefaultDepositAmount(
+      Number(offer.sale_price_gross || 0) * getOfferInstallationCount(offer)
+    );
     const contractDate = todayLocalDate();
     const defaultContractPlace = address.city || "";
 
@@ -1416,7 +1424,11 @@ export default function OfferDetailsPage() {
         return "Wybierz operatora OSD.";
       }
 
-      const ppeError = validatePpe(saleForm.ppeNumber, saleForm.osdOperator);
+      const ppeIsRequired = getOfferInstallationCount(offer) <= 1;
+      const ppeError =
+        ppeIsRequired || saleForm.ppeNumber.trim()
+          ? validatePpe(saleForm.ppeNumber, saleForm.osdOperator)
+          : "";
 
       if (ppeError) {
         errors.push("ppeNumber");
@@ -1514,12 +1526,21 @@ export default function OfferDetailsPage() {
   }
 
   function buildSoldItemsFromOffer() {
+    const installationCount = getOfferInstallationCount(offer);
+    const quantityPrefix = installationCount > 1 ? `${installationCount}x ` : "";
+
     return [
-      offer?.pv_power_kw ? `Instalacja PV ${offer.pv_power_kw} kWp` : null,
-      offer?.energy_storage && offer.energy_storage !== "Brak"
-        ? `Magazyn energii ${offer.energy_storage}`
+      offer?.pv_power_kw
+        ? installationCount > 1
+          ? `${quantityPrefix}Instalacja PV ${offer.pv_power_kw} kWp (łącznie ${formatSalePower(Number(offer.pv_power_kw) * installationCount)} kWp)`
+          : `Instalacja PV ${offer.pv_power_kw} kWp`
         : null,
-      offer?.inverter && offer.inverter !== "Brak" ? `Falownik ${offer.inverter}` : null,
+      offer?.energy_storage && offer.energy_storage !== "Brak"
+        ? `${quantityPrefix}Magazyn energii ${offer.energy_storage}`
+        : null,
+      offer?.inverter && offer.inverter !== "Brak"
+        ? `${quantityPrefix}Falownik ${offer.inverter}`
+        : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -1587,20 +1608,49 @@ export default function OfferDetailsPage() {
     const pvPower = Number(offer.pv_power_kw || 0);
     const storageCapacity = getOfferStorageCapacityKwh();
     const hasStorage = Boolean(offer.energy_storage && offer.energy_storage !== "Brak");
+    const installationCount = getOfferInstallationCount(offer);
+    const quantityPrefix = installationCount > 1 ? `${installationCount}x ` : "";
 
     if (Number.isFinite(pvPower) && pvPower > 0) {
-      parts.push(`PV ${formatSalePower(pvPower)} kWp`);
+      parts.push(`${quantityPrefix}PV ${formatSalePower(pvPower)} kWp`);
     }
 
     if (hasStorage) {
       parts.push(
         storageCapacity > 0
-          ? `ME ${formatSalePower(storageCapacity)} kWh`
-          : `ME ${offer.energy_storage}`
+          ? `${quantityPrefix}ME ${formatSalePower(storageCapacity)} kWh`
+          : `${quantityPrefix}ME ${offer.energy_storage}`
       );
     }
 
     return parts.length ? parts.join(" + ") : getOfferTypeLabel(offer.offer_type);
+  }
+
+  function buildTeamsSaleTotalsSummary() {
+    if (!offer) return "";
+
+    const installationCount = getOfferInstallationCount(offer);
+
+    if (installationCount <= 1) return "";
+
+    const parts: string[] = [];
+    const pvPower = Number(offer.pv_power_kw || 0);
+    const storageCapacity = getOfferStorageCapacityKwh();
+    const hasStorage = Boolean(offer.energy_storage && offer.energy_storage !== "Brak");
+
+    if (Number.isFinite(pvPower) && pvPower > 0) {
+      parts.push(`PV ${formatSalePower(pvPower * installationCount)} kWp`);
+    }
+
+    if (hasStorage) {
+      parts.push(
+        storageCapacity > 0
+          ? `ME ${formatSalePower(storageCapacity * installationCount)} kWh`
+          : `ME ${installationCount} instalacje`
+      );
+    }
+
+    return parts.join(" + ");
   }
 
   function getTeamsSaleSellerName() {
@@ -1625,6 +1675,7 @@ export default function OfferDetailsPage() {
         body: JSON.stringify({
           saleId,
           productsSummary: buildTeamsSaleProductsSummary(),
+          totalSummary: buildTeamsSaleTotalsSummary(),
           sellerName: getTeamsSaleSellerName(),
           saleUrl,
         }),
@@ -1716,7 +1767,18 @@ export default function OfferDetailsPage() {
 
     const ownContributionAmount = Number(String(saleForm.ownContributionAmount || "0").replace(",", "."));
     const depositAmount = Number(String(saleForm.depositAmount || "0").replace(",", "."));
-    const contractFinancialBreakdown = getOfferFinancialBreakdownForContract(offer);
+    const installationCount = getOfferInstallationCount(offer);
+    const saleOfferSnapshot = createSaleOfferSnapshot(offer, installationCount);
+    const multipliedContractFinancialBreakdown = multiplyFinancialRecord(
+      getOfferFinancialBreakdownForContract(offer),
+      installationCount
+    );
+    const contractFinancialBreakdown = reconcileStoredContractFinancialBreakdown(
+      multipliedContractFinancialBreakdown,
+      offer.vat_rate,
+      Number(offer.pv_power_kw || 0) > 0
+    );
+    const saleResult = (saleOfferSnapshot.offer_data?.result || {}) as Record<string, any>;
 
     // --- Contract number generation ---
     const userNumberRaw =
@@ -1799,12 +1861,13 @@ export default function OfferDetailsPage() {
       source_offer_id: offer.id,
       contract_number: contractNumber,
       sale_date: new Date().toISOString(),
-      contract_value: offer.sale_price_gross || 0,
-      margin_value: offer.seller_margin || 0,
+      contract_value: saleOfferSnapshot.sale_price_gross || 0,
+      margin_value: saleOfferSnapshot.seller_margin || 0,
       sold_items: buildSoldItemsFromOffer() || getOfferTypeLabel(offer.offer_type),
       status: "Oczekuje na sprawdzenie dokumentów",
       customer_type: saleForm.customerType,
       customer_data: {
+        installation_count: installationCount,
         customer_type: saleForm.customerType,
         full_name: saleForm.fullName,
         company_name: saleForm.companyName,
@@ -1859,15 +1922,15 @@ export default function OfferDetailsPage() {
         client2_marketing_email: saleForm.client2MarketingEmail,
         client2_marketing_phone: saleForm.client2MarketingPhone,
         client2_photo_consent: saleForm.client2PhotoConsent,
-        subsidy_allocation: offer.offer_data?.result?.subsidyAllocation || null,
+        subsidy_allocation: saleResult.subsidyAllocation || null,
         subsidy_total: Number(
-          offer.offer_data?.result?.subsidyAllocation?.total || 0
+          saleResult.subsidyAllocation?.total || 0
         ),
         subsidy_storage_subsidy: Number(
-          offer.offer_data?.result?.subsidyAllocation?.storageSubsidy || 0
+          saleResult.subsidyAllocation?.storageSubsidy || 0
         ),
         subsidy_eu_bonus: Number(
-          offer.offer_data?.result?.subsidyAllocation?.euBonus || 0
+          saleResult.subsidyAllocation?.euBonus || 0
         ),
         client_has_own_hybrid_inverter: Boolean(
           offer.offer_data?.form?.clientHasOwnHybridInverter ||
@@ -1875,7 +1938,7 @@ export default function OfferDetailsPage() {
         ),
         ...contractFinancialBreakdown,
       },
-      offer_snapshot: offer,
+      offer_snapshot: saleOfferSnapshot,
       source_event_id: sourceEventId || null,
       payment_method: saleForm.paymentMethod,
       deposit_amount: depositAmount,
@@ -2064,6 +2127,15 @@ if (updateClientStatusError) {
     );
   }
 
+  const installationCount = getOfferInstallationCount(offer);
+  const isMultiInstallation = installationCount > 1;
+  const totalOfferGross = Number(offer.sale_price_gross || 0) * installationCount;
+  const totalOfferNet = Number(offer.sale_price_net || 0) * installationCount;
+  const totalCompanyMargin = Number(offer.company_margin || 0) * installationCount;
+  const totalSellerMargin = Number(offer.seller_margin || 0) * installationCount;
+  const totalPvPower = Number(offer.pv_power_kw || 0) * installationCount;
+  const totalPanelCount = Number(offer.panel_count || 0) * installationCount;
+  const storageCapacityPerInstallation = getOfferStorageCapacityKwh();
   const result = (offer.offer_data?.result || null) as Record<string, any> | null;
   const advisor = offer.offer_data?.advisor || null;
   const technicalRows = getTechnicalRows(result);
@@ -2133,6 +2205,12 @@ if (updateClientStatusError) {
                 <p className="mt-1 text-sm text-slate-500">
                   Uzupełnij wymagane dane do umowy. Część danych została pobrana z karty klienta.
                 </p>
+                {isMultiInstallation && (
+                  <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">
+                    Umowa zbiorcza: {installationCount} identyczne instalacje. Sprzęt, koszty,
+                    marże i wartości umowy zostaną zapisane łącznie.
+                  </div>
+                )}
               </div>
 
             </div>
@@ -2312,7 +2390,9 @@ if (updateClientStatusError) {
                         className={inputClass("ppeNumber")}
                       />
                       <span className="mt-1 block text-xs text-slate-500">
-                        Sprawdzamy operatora, prefiks, długość i cyfrę kontrolną GS1.
+                        {isMultiInstallation
+                          ? "Dla umowy wieloinstalacyjnej numer PPE i numer licznika są opcjonalne. Jeśli wpiszesz PPE, nadal sprawdzimy jego poprawność."
+                          : "Sprawdzamy operatora, prefiks, długość i cyfrę kontrolną GS1."}
                       </span>
                     </label>
                   </div>
@@ -2469,7 +2549,7 @@ if (updateClientStatusError) {
 
                     if (paymentMethod === "gotówka") {
                       updateSaleForm("ownContributionAmount", "");
-                      updateSaleForm("depositAmount", calculateDefaultDepositAmount(offer.sale_price_gross));
+                      updateSaleForm("depositAmount", calculateDefaultDepositAmount(totalOfferGross));
                       updateSaleForm(
                         "depositDueDate",
                         addDaysLocalDate(
@@ -2966,6 +3046,12 @@ if (updateClientStatusError) {
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
                 {offer.status || "draft"}
               </span>
+
+              {isMultiInstallation && (
+                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">
+                  {installationCount} identyczne instalacje
+                </span>
+              )}
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -3002,10 +3088,18 @@ if (updateClientStatusError) {
               <div className="rounded-2xl bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">Parametry</p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">
-                  PV: {numberValue(offer.pv_power_kw, "kWp")}
+                  PV: {isMultiInstallation
+                    ? `${numberValue(offer.pv_power_kw, "kWp")} × ${installationCount} = ${numberValue(totalPvPower, "kWp")}`
+                    : numberValue(offer.pv_power_kw, "kWp")}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">
-                  Magazyn: {offer.energy_storage || "Brak"}
+                  Magazyn: {isMultiInstallation && offer.energy_storage && offer.energy_storage !== "Brak"
+                    ? `${installationCount} szt. · ${offer.energy_storage}${
+                        storageCapacityPerInstallation > 0
+                          ? ` (łącznie ${formatSalePower(storageCapacityPerInstallation * installationCount)} kWh)`
+                          : ""
+                      }`
+                    : offer.energy_storage || "Brak"}
                 </p>
               </div>
             </div>
@@ -3016,16 +3110,25 @@ if (updateClientStatusError) {
 
             <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase text-slate-400">Cena brutto</p>
-                <p className="mt-1 text-2xl font-black text-slate-950">
-                  {money(offer.sale_price_gross)}
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  {isMultiInstallation ? "Cena brutto łącznie" : "Cena brutto"}
                 </p>
+                <p className="mt-1 text-2xl font-black text-slate-950">
+                  {money(isMultiInstallation ? totalOfferGross : offer.sale_price_gross)}
+                </p>
+                {isMultiInstallation && (
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    {money(offer.sale_price_gross)} × {installationCount}
+                  </p>
+                )}
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase text-slate-400">Cena netto</p>
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  {isMultiInstallation ? "Cena netto łącznie" : "Cena netto"}
+                </p>
                 <p className="mt-1 text-xl font-black text-slate-950">
-                  {money(offer.sale_price_net)}
+                  {money(isMultiInstallation ? totalOfferNet : offer.sale_price_net)}
                 </p>
               </div>
 
@@ -3038,7 +3141,11 @@ if (updateClientStatusError) {
                       : "Moja marża"}
                 </p>
                 <p className="mt-1 text-xl font-black text-emerald-950">
-                  {money(canSeeFullFinancials ? offer.company_margin : offer.seller_margin)}
+                  {money(
+                    canSeeFullFinancials
+                      ? isMultiInstallation ? totalCompanyMargin : offer.company_margin
+                      : isMultiInstallation ? totalSellerMargin : offer.seller_margin
+                  )}
                 </p>
               </div>
 
@@ -3046,7 +3153,7 @@ if (updateClientStatusError) {
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase text-slate-400">Marża doradcy</p>
                   <p className="mt-1 text-lg font-black text-slate-950">
-                    {money(offer.seller_margin)}
+                    {money(isMultiInstallation ? totalSellerMargin : offer.seller_margin)}
                   </p>
                 </div>
               )}
@@ -3063,14 +3170,16 @@ if (updateClientStatusError) {
                 <p className="text-xs font-semibold uppercase text-slate-400">Panele</p>
                 <p className="mt-1 font-semibold text-slate-900">{offer.panel_model || "Brak"}</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  {offer.panel_count || "Brak"} szt. · {numberValue(offer.panel_power_wp, "Wp")}
+                  {isMultiInstallation ? totalPanelCount : offer.panel_count || "Brak"} szt. · {numberValue(offer.panel_power_wp, "Wp")}
                 </p>
               </div>
 
               {offer.inverter && offer.inverter !== "Brak" && (
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-xs font-semibold uppercase text-slate-400">Falownik</p>
-                  <p className="mt-1 font-semibold text-slate-900">{offer.inverter}</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {isMultiInstallation ? `${installationCount} szt. · ${offer.inverter}` : offer.inverter}
+                  </p>
                 </div>
               )}
 
@@ -3137,7 +3246,11 @@ if (updateClientStatusError) {
                         Realna marża firmy
                       </p>
                       <p className="shrink-0 text-base font-black text-emerald-700">
-                        {money(result?.companyMargin ?? offer.company_margin)}
+                        {money(
+                          isMultiInstallation
+                            ? Number(result?.companyMargin ?? offer.company_margin ?? 0) * installationCount
+                            : result?.companyMargin ?? offer.company_margin
+                        )}
                       </p>
                     </div>
 
@@ -3152,7 +3265,7 @@ if (updateClientStatusError) {
                           {item.label}
                         </p>
                         <p className="shrink-0 text-sm font-semibold text-slate-900">
-                          {money(item.value)}
+                          {money(isMultiInstallation ? item.value * installationCount : item.value)}
                         </p>
                       </div>
                     ))}

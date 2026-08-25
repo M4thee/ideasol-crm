@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 type SaleCreatedNotificationBody = {
   saleId?: string;
   productsSummary?: string;
+  totalSummary?: string | null;
   sellerName?: string;
   saleUrl?: string | null;
 };
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SaleCreatedNotificationBody;
     const productsSummary = String(body.productsSummary || "").trim();
+    const totalSummary = String(body.totalSummary || "").trim();
     const sellerName = String(body.sellerName || "").trim();
     const saleUrl = body.saleUrl ? String(body.saleUrl).trim() : null;
 
@@ -36,8 +38,21 @@ export async function POST(request: Request) {
       );
     }
 
+    const isProductionEnvironment = process.env.VERCEL_ENV
+      ? process.env.VERCEL_ENV === "production"
+      : process.env.NODE_ENV === "production";
+
+    if (!isProductionEnvironment) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "Powiadomienia Teams są wyłączone poza produkcją",
+      });
+    }
+
     const message = buildTeamsSaleChannelMessage({
       productsSummary,
+      totalSummary,
       sellerName,
       saleUrl,
     });

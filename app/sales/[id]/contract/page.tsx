@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
+import { getSaleInstallationCount } from "@/lib/installationCount";
 
 type ContractForm = {
   clientName: string;
@@ -106,6 +107,7 @@ export default function SaleContractPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saleNumber, setSaleNumber] = useState("");
+  const [installationCount, setInstallationCount] = useState(1);
   const [form, setForm] = useState<ContractForm>({
     clientName: "",
     pesel: "",
@@ -221,6 +223,7 @@ export default function SaleContractPage() {
     );
 
     setSaleNumber(contractNumber);
+    setInstallationCount(getSaleInstallationCount(sale));
     setForm({
       clientName:
         customerData.full_name ||
@@ -355,7 +358,10 @@ export default function SaleContractPage() {
       return;
     }
 
-    const ppeError = validatePpe(form.ppeNumber, form.osdOperator);
+    const ppeError =
+      installationCount <= 1 || form.ppeNumber.trim()
+        ? validatePpe(form.ppeNumber, form.osdOperator)
+        : "";
 
     if (ppeError) {
       setError(ppeError);
@@ -584,7 +590,9 @@ export default function SaleContractPage() {
                     className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                   />
                   <span className="mt-1 block text-xs text-slate-500">
-                    Sprawdzamy operatora, prefiks, długość i cyfrę kontrolną GS1.
+                    {installationCount > 1
+                      ? "Dla umowy wieloinstalacyjnej numer PPE i numer licznika są opcjonalne. Jeśli wpiszesz PPE, nadal sprawdzimy jego poprawność."
+                      : "Sprawdzamy operatora, prefiks, długość i cyfrę kontrolną GS1."}
                   </span>
                 </label>
               </div>

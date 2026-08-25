@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import SaleSmsPanel from "@/components/sms/SaleSmsPanel";
 import { getInstallationOrderScope } from "@/lib/installationOrderScope";
+import { getSaleInstallationCount } from "@/lib/installationCount";
 import {
   DOCUMENT_GROUPS,
   getPhotoGalleryDocuments,
@@ -180,6 +181,8 @@ function getInstallationOrderItems(sale: Sale) {
   const offerData = snapshot.offer_data || {};
   const form = offerData.form || {};
   const result = offerData.result || {};
+  const installationCount = getSaleInstallationCount(sale);
+  const panelCount = Number(snapshot.panel_count || form.panelCount || result.panelCount || 0);
   const panel = installationEquipmentLabel(
     firstInstallationValue(
       snapshot.panel_model,
@@ -218,21 +221,41 @@ function getInstallationOrderItems(sale: Sale) {
   }> = [];
 
   if (scope.hasPv) {
-    items.push({ key: "panels", label: "Panele fotowoltaiczne", detail: panel });
+    items.push({
+      key: "panels",
+      label: "Panele fotowoltaiczne",
+      detail: panelCount > 0 ? `${panelCount} szt. · ${panel}` : panel,
+    });
   }
   if (inverter !== "Brak / nie dotyczy") {
-    items.push({ key: "inverter", label: "Falownik", detail: inverter });
+    items.push({
+      key: "inverter",
+      label: "Falownik",
+      detail: installationCount > 1 ? `${installationCount} szt. · ${inverter}` : inverter,
+    });
   }
   if (scope.hasStorage || storage !== "Brak / nie dotyczy") {
-    items.push({ key: "energy_storage", label: "Magazyn energii", detail: storage });
+    items.push({
+      key: "energy_storage",
+      label: "Magazyn energii",
+      detail: installationCount > 1 ? `${installationCount} szt. · ${storage}` : storage,
+    });
   }
   if (scope.hasPv) {
-    items.push({ key: "construction", label: "Konstrukcja", detail: mountingType });
+    items.push({
+      key: "construction",
+      label: "Konstrukcja",
+      detail: installationCount > 1
+        ? `${installationCount} zest. · ${mountingType}`
+        : mountingType,
+    });
   }
   items.push({
     key: "materials",
     label: "Materiały",
-    detail: "Materiały montażowe i instalacyjne",
+    detail: installationCount > 1
+      ? `${installationCount} kpl. · Materiały montażowe i instalacyjne`
+      : "Materiały montażowe i instalacyjne",
   });
 
   return items;

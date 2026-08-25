@@ -1254,16 +1254,22 @@ export default function OfferForm({
                   className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/20"
                   type="number"
                   min="1"
+                  max="100"
                   step="1"
                   value={identicalSetCount || 1}
                   onChange={(e) => {
                     const nextValue = Number(e.target.value);
-                    setIdenticalSetCount(Number.isFinite(nextValue) && nextValue > 0 ? nextValue : 1);
+                    setIdenticalSetCount(
+                      Number.isFinite(nextValue) && nextValue > 0
+                        ? Math.min(Math.floor(nextValue), 100)
+                        : 1
+                    );
                     setResult(null);
                   }}
                 />
                 <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                  Użyj, gdy klient kupuje kilka identycznych zestawów. Docelowo ta ilość trafi do tabeli oferty PDF i przemnoży wartości zestawu.
+                  Użyj, gdy klient kupuje kilka identycznych instalacji. Liczba trafi do oferty PDF,
+                  umowy i sprzedaży w CRM, a wartości łączne zostaną odpowiednio przemnożone.
                 </p>
               </label>
             </div>

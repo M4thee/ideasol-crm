@@ -6,6 +6,7 @@ import OfferResult, { type OfferEmailOptions } from "@/components/calculator/Off
 import OfferForm from "@/components/calculator/OfferForm";
 import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
 import { recordCrmAuditEvent } from "@/lib/crmAudit";
+import { normalizeInstallationCount } from "@/lib/installationCount";
 import {
   CUSTOM_PANEL_CODE,
   CUSTOM_STORAGE_CODE,
@@ -1466,6 +1467,12 @@ export default function Home() {
     const inverterForSave = customModeActive
       ? customEquipment.inverter.displayName.trim()
       : selectedInverterName;
+    const installationCount = normalizeInstallationCount(identicalSetCount);
+    const resultForSave = {
+      ...result,
+      installationCount,
+      identicalSetCount: installationCount,
+    };
 
     const offerPayload = {
       client_id: clientIdForSave,
@@ -1496,13 +1503,18 @@ export default function Home() {
       energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
       offer_data: {
+        installationCount,
+        identicalSetCount: installationCount,
+        pdfQuantity: installationCount,
         customMode: customModeActive,
         customEquipment: customModeActive ? customEquipment : null,
-        result,
+        result: resultForSave,
         contractBreakdown: result.contractBreakdown || null,
         additionalServices: selectedAdditionalServices,
         additional_services: selectedAdditionalServices,
         form: {
+          installationCount,
+          identicalSetCount: installationCount,
           customMode: customModeActive,
           customEquipment: customModeActive ? customEquipment : null,
           offerType,
@@ -1709,6 +1721,8 @@ IdeaSol`;
           sellerMarkup,
           vatRate,
           selectedAdditionalServices,
+          installationCount: normalizeInstallationCount(identicalSetCount),
+          identicalSetCount: normalizeInstallationCount(identicalSetCount),
           pricingOverrides,
           advisor: {
             id: userProfile?.id || null,
@@ -1944,6 +1958,9 @@ IdeaSol`;
 
         const selectedAdditionalServicesSnapshot =
           (snapshot.selectedAdditionalServices as SelectedAdditionalService[] | undefined) || [];
+        const installationCountSnapshot = normalizeInstallationCount(
+          snapshot.installationCount ?? snapshot.identicalSetCount
+        );
         const pricingOverridesSnapshot = snapshot.pricingOverrides || pricingOverrides;
         const advisorSnapshot =
           (snapshot.advisor as Record<string, unknown> | undefined) || {};
@@ -1996,13 +2013,22 @@ IdeaSol`;
           energy_storage: getResultStorageDisplayName(queuedResult),
           roof_type: snapshot.roofType || null,
           offer_data: {
+            installationCount: installationCountSnapshot,
+            identicalSetCount: installationCountSnapshot,
+            pdfQuantity: installationCountSnapshot,
             customMode: Boolean(snapshot.customMode),
             customEquipment: snapshot.customEquipment || null,
-            result: queuedResult,
+            result: {
+              ...queuedResult,
+              installationCount: installationCountSnapshot,
+              identicalSetCount: installationCountSnapshot,
+            },
             contractBreakdown: queuedResult.contractBreakdown || null,
             additionalServices: selectedAdditionalServicesSnapshot,
             additional_services: selectedAdditionalServicesSnapshot,
             form: {
+              installationCount: installationCountSnapshot,
+              identicalSetCount: installationCountSnapshot,
               customMode: Boolean(snapshot.customMode),
               customEquipment: snapshot.customEquipment || null,
               offerType: snapshot.offerType || queuedResult.offerType,

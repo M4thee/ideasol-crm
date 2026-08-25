@@ -5,6 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import { readFile } from "fs/promises";
 import path from "path";
 import { makeContractWarrantyRow } from "@/lib/contractWarranty";
+import { formatInstallationItemQuantity, getSaleInstallationCount } from "@/lib/installationCount";
+import { reconcileContractPriceLines } from "@/lib/contractFinancialReconciliation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -484,6 +486,7 @@ function getFinancialData(
   };
 
   const totalGross =
+    toNumber(totalGrossFallback) ||
     getFirstNumber(source, [
       "totalGross",
       "finalGross",
@@ -492,9 +495,10 @@ function getFinancialData(
       "resultData.totalGross",
       "resultData.finalGross",
       "customerData.totalGross",
-    ]) || toNumber(totalGrossFallback);
+    ]);
 
   const depositGross =
+    toNumber(depositGrossFallback) ||
     getFirstNumber(source, [
       "depositAmount",
       "depositGross",
@@ -502,7 +506,7 @@ function getFinancialData(
       "deposit_amount",
       "customerData.deposit_amount",
       "customerData.depositAmount",
-    ]) || toNumber(depositGrossFallback);
+    ]);
 
   const pvGross =
     toNumber(breakdownFallback?.pvGross) ||
@@ -629,11 +633,22 @@ function getFinancialData(
 
   const knownBreakdownGross = pvGross + storageGross + inverterGross + emsGross + backupGross + additionalServicesGross;
   const shouldFallbackToSingleLine = knownBreakdownGross <= 0 && totalGross > 0;
+  const offerType = String(
+    offerSnapshot.offer_type || offerData.offerType || formData.offerType || ""
+  ).toLowerCase();
+  const hasPvProduct =
+    getFirstNumber(source, ["pv_power_kw", "pvPowerKw", "resultData.pvPowerKw"]) > 0 ||
+    offerType === "pv" ||
+    offerType.includes("pv_") ||
+    offerType.includes("fotowolta");
 
   const legacyFeaturesGrossAfterDiscount = emsGrossAfterDiscount + backupGrossAfterDiscount;
   const legacyFeaturesGrossBeforeDiscount = emsGrossBeforeDiscount + backupGrossBeforeDiscount;
-  const basePvGrossAfterDiscount = pvGrossAfterDiscount || (shouldFallbackToSingleLine ? totalGross : pvGross);
-  const baseStorageGrossAfterDiscount = storageGrossAfterDiscount || storageGross;
+  const basePvGrossAfterDiscount =
+    pvGrossAfterDiscount || (shouldFallbackToSingleLine && hasPvProduct ? totalGross : pvGross);
+  const baseStorageGrossAfterDiscount =
+    storageGrossAfterDiscount ||
+    (shouldFallbackToSingleLine && !hasPvProduct ? totalGross : storageGross);
   const baseInverterGrossAfterDiscount = inverterGrossAfterDiscount || inverterGross;
   const baseAdditionalServicesGrossAfterDiscount = additionalServicesGrossAfterDiscount || additionalServicesGross;
   const hasPvPriceLine = basePvGrossAfterDiscount > 0;
@@ -659,27 +674,64 @@ function getFinancialData(
     storageGrossBeforeDiscount + (!hasPvPriceLine ? legacyFeaturesGrossBeforeDiscount : 0) ||
     (effectiveStorageGrossAfterDiscount > 0 ? beforeDiscountFromAfterDiscountGross(effectiveStorageGrossAfterDiscount) : 0);
 
+  const adjustmentOrder: Array<"pv" | "storage" | "inverter" | "additionalServices"> =
+    hasPvProduct
+      ? ["pv", "storage", "additionalServices", "inverter"]
+      : ["storage", "additionalServices", "inverter", "pv"];
+  const reconciledAfterDiscount = reconcileContractPriceLines(
+    totalGross,
+    {
+      pv: effectivePvGrossAfterDiscount,
+      storage: effectiveStorageGrossAfterDiscount,
+      inverter: baseInverterGrossAfterDiscount,
+      additionalServices: baseAdditionalServicesGrossAfterDiscount,
+    },
+    adjustmentOrder
+  );
+  const totalGrossBeforeDiscount =
+    getFirstNumber(source, [
+      "contract_total_gross_before_discount",
+      "customerData.contract_total_gross_before_discount",
+      "resultData.contractBreakdown.total.grossBeforeDiscount",
+    ]) || beforeDiscountFromAfterDiscountGross(totalGross);
+  const reconciledBeforeDiscount = reconcileContractPriceLines(
+    totalGrossBeforeDiscount,
+    {
+      pv: effectivePvGrossBeforeDiscount,
+      storage: effectiveStorageGrossBeforeDiscount,
+      inverter:
+        inverterGrossBeforeDiscount ||
+        (baseInverterGrossAfterDiscount > 0
+          ? beforeDiscountFromAfterDiscountGross(baseInverterGrossAfterDiscount)
+          : 0),
+      additionalServices:
+        additionalServicesGrossBeforeDiscount ||
+        (baseAdditionalServicesGrossAfterDiscount > 0
+          ? beforeDiscountFromAfterDiscountGross(baseAdditionalServicesGrossAfterDiscount)
+          : 0),
+    },
+    adjustmentOrder
+  );
+
   return {
-    pvGross: effectivePvGrossAfterDiscount,
-    storageGross: effectiveStorageGrossAfterDiscount,
-    inverterGross: baseInverterGrossAfterDiscount,
+    pvGross: reconciledAfterDiscount.pv,
+    storageGross: reconciledAfterDiscount.storage,
+    inverterGross: reconciledAfterDiscount.inverter,
     emsGross: 0,
     backupGross: 0,
-    additionalServicesGross,
-    pvGrossBeforeDiscount: effectivePvGrossBeforeDiscount,
-    pvGrossAfterDiscount: effectivePvGrossAfterDiscount,
-    storageGrossBeforeDiscount: effectiveStorageGrossBeforeDiscount,
-    storageGrossAfterDiscount: effectiveStorageGrossAfterDiscount,
-    inverterGrossBeforeDiscount:
-      inverterGrossBeforeDiscount ||
-      (baseInverterGrossAfterDiscount > 0 ? beforeDiscountFromAfterDiscountGross(baseInverterGrossAfterDiscount) : 0),
-    inverterGrossAfterDiscount: baseInverterGrossAfterDiscount,
+    additionalServicesGross: reconciledAfterDiscount.additionalServices,
+    pvGrossBeforeDiscount: reconciledBeforeDiscount.pv,
+    pvGrossAfterDiscount: reconciledAfterDiscount.pv,
+    storageGrossBeforeDiscount: reconciledBeforeDiscount.storage,
+    storageGrossAfterDiscount: reconciledAfterDiscount.storage,
+    inverterGrossBeforeDiscount: reconciledBeforeDiscount.inverter,
+    inverterGrossAfterDiscount: reconciledAfterDiscount.inverter,
     emsGrossBeforeDiscount: 0,
     emsGrossAfterDiscount: 0,
     backupGrossBeforeDiscount: 0,
     backupGrossAfterDiscount: 0,
-    additionalServicesGrossBeforeDiscount,
-    additionalServicesGrossAfterDiscount: additionalServicesGrossAfterDiscount || additionalServicesGross,
+    additionalServicesGrossBeforeDiscount: reconciledBeforeDiscount.additionalServices,
+    additionalServicesGrossAfterDiscount: reconciledAfterDiscount.additionalServices,
     totalGross,
     depositGross,
     finalPaymentGross: Math.max(totalGross - depositGross, 0),
@@ -1357,6 +1409,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const additionalProductsData = getAdditionalProductsData(sale);
   const technicalData = getTechnicalData(sale);
+  const installationCount = getSaleInstallationCount(sale);
   const storageDetails = parseStorageDetails(technicalData);
   const offerSnapshot = (sale.offer_snapshot || {}) as Record<string, any>;
   const customOfferData = (offerSnapshot.offer_data || {}) as Record<string, any>;
@@ -1843,11 +1896,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       contractPdfPositions.page2.pvPower.y,
       { size: contractPdfPositions.page2.pvPower.size, bold: true }
     );
-    drawOnPage(
+    drawFittedOnPage(
       1,
-      humanizeEquipmentName(technicalData.panelModel),
+      Number(technicalData.panelCount || 0) > 1
+        ? `${technicalData.panelCount} szt. · ${humanizeEquipmentName(technicalData.panelModel)}`
+        : humanizeEquipmentName(technicalData.panelModel),
       contractPdfPositions.page2.panelModel.x,
       contractPdfPositions.page2.panelModel.y,
+      150,
       { size: contractPdfPositions.page2.panelModel.size }
     );
     drawOnPage(
@@ -1883,18 +1939,24 @@ export async function GET(request: NextRequest, context: RouteContext) {
       contractPdfPositions.page2.inverterType.y,
       { size: contractPdfPositions.page2.inverterType.size, bold: true }
     );
-    drawOnPage(
+    drawFittedOnPage(
       1,
-      humanizeEquipmentName(technicalData.inverterModel),
+      formatInstallationItemQuantity(
+        humanizeEquipmentName(technicalData.inverterModel),
+        installationCount
+      ),
       contractPdfPositions.page2.inverterModel.x,
       contractPdfPositions.page2.inverterModel.y,
+      300,
       { size: contractPdfPositions.page2.inverterModel.size }
     );
     const inverterPowerKw =
       technicalData.inverterPowerKw || inferInverterPowerKwFromModel(technicalData.inverterModel);
     drawOnPage(
       1,
-      asPrintable(inverterPowerKw, " kW"),
+      installationCount > 1 && inverterPowerKw
+        ? `${installationCount} × ${asPrintable(inverterPowerKw, " kW")}`
+        : asPrintable(inverterPowerKw, " kW"),
       contractPdfPositions.page2.inverterPower.x,
       contractPdfPositions.page2.inverterPower.y,
       { size: contractPdfPositions.page2.inverterPower.size }
@@ -1911,11 +1973,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
   if (storageDetails.model) {
-    drawOnPage(
+    drawFittedOnPage(
       1,
-      storageDetails.model,
+      formatInstallationItemQuantity(storageDetails.model, installationCount),
       contractPdfPositions.page2.storageModel.x,
       contractPdfPositions.page2.storageModel.y,
+      210,
       { size: contractPdfPositions.page2.storageModel.size }
     );
   }
