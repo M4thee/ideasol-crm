@@ -132,6 +132,8 @@ const reminderUnitMilliseconds: Record<ReminderUnit, number> = {
   weeks: 604_800_000,
 };
 
+const REMINDERS_ENABLED = false;
+
 const noteRotations = ["md:-rotate-[0.6deg]", "md:rotate-[0.5deg]", "md:-rotate-[0.2deg]"];
 const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
 const minuteOptions = ["00", "15", "30", "45"];
@@ -833,6 +835,7 @@ export default function StickyNotesBoard({
 
   async function addNote() {
     const trimmedContent = content.trim();
+    const shouldScheduleReminder = REMINDERS_ENABLED && reminderEnabled;
 
     if (!trimmedContent) {
       setFormError("Wpisz treść notatki.");
@@ -849,7 +852,7 @@ export default function StickyNotesBoard({
     let reminderAtTimestamp: number | null = null;
 
     if (
-      reminderEnabled &&
+      shouldScheduleReminder &&
       reminderMode !== "scheduled" &&
       (!Number.isInteger(parsedReminderAmount) || parsedReminderAmount < 1)
     ) {
@@ -857,7 +860,7 @@ export default function StickyNotesBoard({
       return;
     }
 
-    if (reminderEnabled && reminderMode === "relative") {
+    if (shouldScheduleReminder && reminderMode === "relative") {
       if (expiresAtTimestamp === null) {
         setFormError("Wybierz konkretną datę przypomnienia albo tryb cykliczny.");
         return;
@@ -867,7 +870,7 @@ export default function StickyNotesBoard({
         expiresAtTimestamp - parsedReminderAmount * reminderUnitMilliseconds[reminderUnit];
     }
 
-    if (reminderEnabled && reminderMode !== "relative") {
+    if (shouldScheduleReminder && reminderMode !== "relative") {
       if (!reminderStartsAt) {
         setFormError(
           reminderMode === "recurring"
@@ -880,13 +883,13 @@ export default function StickyNotesBoard({
       reminderAtTimestamp = new Date(reminderStartsAt).getTime();
     }
 
-    if (reminderEnabled && reminderAtTimestamp !== null && reminderAtTimestamp <= currentTimestamp) {
+    if (shouldScheduleReminder && reminderAtTimestamp !== null && reminderAtTimestamp <= currentTimestamp) {
       setFormError("Termin przypomnienia musi przypadać w przyszłości.");
       return;
     }
 
     if (
-      reminderEnabled &&
+      shouldScheduleReminder &&
       reminderMode === "recurring" &&
       expiresAtTimestamp !== null &&
       reminderAtTimestamp !== null &&
@@ -912,14 +915,14 @@ export default function StickyNotesBoard({
       authorName,
       createdAt: new Date().toISOString(),
       expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-      reminderEnabled,
-      reminderMode: reminderEnabled ? reminderMode : undefined,
+      reminderEnabled: shouldScheduleReminder,
+      reminderMode: shouldScheduleReminder ? reminderMode : undefined,
       reminderAmount:
-        reminderEnabled && reminderMode !== "scheduled" ? parsedReminderAmount : null,
+        shouldScheduleReminder && reminderMode !== "scheduled" ? parsedReminderAmount : null,
       reminderUnit:
-        reminderEnabled && reminderMode !== "scheduled" ? reminderUnit : null,
+        shouldScheduleReminder && reminderMode !== "scheduled" ? reminderUnit : null,
       reminderAt:
-        reminderEnabled && reminderAtTimestamp !== null
+        shouldScheduleReminder && reminderAtTimestamp !== null
           ? new Date(reminderAtTimestamp).toISOString()
           : null,
       comments: [],
@@ -943,7 +946,7 @@ export default function StickyNotesBoard({
           recipientIds: newNote.recipientIds,
           mentionedUserIds: composerMentionIds,
           expiresAt: newNote.expiresAt,
-          reminderEnabled,
+          reminderEnabled: shouldScheduleReminder,
           reminderMode: newNote.reminderMode,
           reminderAmount: newNote.reminderAmount,
           reminderUnit: newNote.reminderUnit,
@@ -1370,7 +1373,7 @@ export default function StickyNotesBoard({
                     ) : (
                       <p className="font-semibold text-slate-700">Bez terminu</p>
                     )}
-                    {note.reminderEnabled && !isCompleted && noteReminderSummary && (
+                    {REMINDERS_ENABLED && note.reminderEnabled && !isCompleted && noteReminderSummary && (
                       <p className="sticky-note-chip inline-flex items-center gap-1.5 rounded-full bg-white/60 px-2.5 py-1 font-bold text-slate-700">
                         <svg
                           viewBox="0 0 24 24"
@@ -1713,6 +1716,7 @@ export default function StickyNotesBoard({
                 </fieldset>
               )}
 
+              {REMINDERS_ENABLED && (
               <fieldset className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950/70">
                 <legend className="sr-only">Ustawienia przypomnienia</legend>
                 <label className="flex cursor-pointer items-start gap-3">
@@ -1917,6 +1921,7 @@ export default function StickyNotesBoard({
                   </div>
                 )}
               </fieldset>
+              )}
 
               {formError && (
                 <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200" aria-live="polite">
