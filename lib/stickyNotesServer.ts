@@ -274,7 +274,14 @@ async function sendTeamsForStickyEvent(params: {
   message: string;
   includeAuthorDirect?: boolean;
 }) {
-  if (process.env.STICKY_NOTES_TEAMS_ENABLED !== "true") return [];
+  if (process.env.STICKY_NOTES_TEAMS_ENABLED !== "true") {
+    console.warn("[sticky-notes] Pominięto powiadomienie Teams", {
+      noteId: params.note.id,
+      visibility: params.note.visibility,
+      reason: "STICKY_NOTES_TEAMS_ENABLED nie ma wartości true",
+    });
+    return ["Powiadomienia Teams dla tablicy zadań są wyłączone w konfiguracji serwera."];
+  }
 
   const viewerIds = getStickyViewerIds(params.note, params.profiles);
   const directIds = new Set<string>();
@@ -290,29 +297,53 @@ async function sendTeamsForStickyEvent(params: {
     .forEach((userId) => directIds.add(userId));
   directIds.delete(params.actorId);
 
-  const deliveries: Array<Promise<unknown>> = [];
+  const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [];
 
   if (params.note.visibility === "management" || params.note.visibility === "shared") {
-    deliveries.push(sendTeamsStickyManagementNotification(params.message));
+    deliveries.push({
+      target: "management-chat",
+      promise: sendTeamsStickyManagementNotification(params.message),
+    });
   }
 
   if (params.note.visibility === "public") {
-    deliveries.push(sendTeamsStickyGeneralNotification(params.message));
+    deliveries.push({
+      target: "general-chat",
+      promise: sendTeamsStickyGeneralNotification(params.message),
+    });
   }
 
   const profileById = new Map(params.profiles.map((profile) => [profile.id, profile]));
   directIds.forEach((userId) => {
     const email = profileById.get(userId)?.email?.trim();
     if (!email) return;
-    deliveries.push(sendTeamsStickyDirectNotification({ userEmail: email, message: params.message }));
+    deliveries.push({
+      target: `direct:${userId}`,
+      promise: sendTeamsStickyDirectNotification({ userEmail: email, message: params.message }),
+    });
   });
 
-  const settled = await Promise.allSettled(deliveries);
-  return settled.flatMap((result) =>
-    result.status === "rejected"
-      ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
-      : []
-  );
+  const settled = await Promise.allSettled(deliveries.map((delivery) => delivery.promise));
+  const errors = settled.flatMap((result, index) => {
+    if (result.status === "fulfilled") return [];
+    const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    return [`${deliveries[index]?.target || "unknown"}: ${reason}`];
+  });
+
+  const deliverySummary = {
+    noteId: params.note.id,
+    visibility: params.note.visibility,
+    deliveryCount: deliveries.length,
+    failedCount: errors.length,
+  };
+
+  if (errors.length > 0) {
+    console.error("[sticky-notes] Błąd wysyłki powiadomienia Teams", deliverySummary, errors);
+  } else {
+    console.info("[sticky-notes] Wysłano powiadomienie Teams", deliverySummary);
+  }
+
+  return errors;
 }
 
 export async function notifyStickyReminder(params: {
