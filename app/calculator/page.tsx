@@ -4,6 +4,10 @@ import { supabase } from "@/lib/supabase";
 import { useEffect, useRef, useState } from "react";
 import OfferResult, { type OfferEmailOptions } from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
+import CreditCalculator from "@/components/calculator/CreditCalculator";
+import ResultOverviewBar from "@/components/calculator/ResultOverviewBar";
+import ResultPanelFocusToggle from "@/components/calculator/ResultPanelFocusToggle";
+import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
 import { recordCrmAuditEvent } from "@/lib/crmAudit";
 import { normalizeInstallationCount } from "@/lib/installationCount";
@@ -20,7 +24,6 @@ import {
 } from "@/lib/customPaymentSchedule";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
-import GrantCalculator from "@/components/calculator/GrantCalculator";
 import {
   calculateOffer,
   type CalculatorCatalog,
@@ -35,6 +38,7 @@ type Result = {
   inverterBatteryVoltageLabel?: string;
   energyStorage: string;
   storage?: string;
+  storageCapacityKwh?: number;
   storageVoltageType?: "low_voltage" | "high_voltage";
   storageVoltageLabel?: string;
   offerType: string;
@@ -167,6 +171,10 @@ type CatalogInverter = {
   hasEms?: boolean;
 };
 
+function getCatalogStorageVoltageType(storageItem?: CatalogStorage) {
+  return storageItem?.voltage_type || storageItem?.voltageType || "low_voltage";
+}
+
 type CatalogCardEmailAttachment = {
   title: string;
   fileName: string;
@@ -215,7 +223,7 @@ type CrmClientOption = {
 
 const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
-const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v1";
+const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v2";
 const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
 
 
@@ -342,14 +350,8 @@ const DEFAULT_PRICING_OVERRIDES = {
   subsidy: {
     qualifyVat: false,
   },
-  panels: {
-    AMERISOLAR_450_FB: { priceNet: 230 },
-    HORAY_435_BIFACIAL: { priceNet: 240 },
-  },
-  storages: {
-    ZBPOWER_10: { priceNet: 4394.5, installationNet: 1500 },
-    ZBPOWER_16: { priceNet: 5372, installationNet: 1500 },
-  },
+  panels: {},
+  storages: {},
   installation: {
     pvPerKwNet: 500,
     storageWithPvNet: 1500,
@@ -466,9 +468,6 @@ function writeCachedPricingOverrides(pricing: typeof DEFAULT_PRICING_OVERRIDES) 
   }
 }
 export default function Home() {
-  const [calculatorMode, setCalculatorMode] = useState<"standard" | "grant">(
-    "standard"
-  );
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
@@ -483,7 +482,7 @@ export default function Home() {
   const [saveOfferStatus, setSaveOfferStatus] = useState("");
   const [savedOfferId, setSavedOfferId] = useState<string | null>(null);
   const [offerType, setOfferType] = useState("none");
-  const [panelModel, setPanelModel] = useState("AMERISOLAR_450_FB");
+  const [panelModel, setPanelModel] = useState("");
   const [panelCount, setPanelCount] = useState(16);
   const [manualPowerKw, setManualPowerKw] = useState("");
   const [panels, setPanels] = useState<CatalogPanel[]>([]);
@@ -514,11 +513,15 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [vatRate, setVatRate] = useState(8);
   const [result, setResult] = useState<Result | null>(null);
+  const [resultIsDirty, setResultIsDirty] = useState(false);
+  const [resultPanelTab, setResultPanelTab] = useState<"summary" | "subsidy" | "credit">("summary");
+  const [isResultFocusMode, setIsResultFocusMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [clientEmail, setClientEmail] = useState("");
   const [clientName, setClientName] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailStatus, setEmailStatus] = useState("");
+  const [catalogError, setCatalogError] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
   const calculationAuditIdRef = useRef<string | null>(null);
@@ -533,6 +536,7 @@ export default function Home() {
   const canSeePricingPanel = currentUserRole.includes("admin");
   const customModeAvailable = userProfile?.custom_mode_access === true;
   const customModeActive = customMode && customModeAvailable;
+
   useEffect(() => {
     function updateOnlineStatus() {
       setIsOffline(!isCalculatorOnline());
@@ -560,8 +564,7 @@ export default function Home() {
       return Number(selectedPanel.power_wp);
     }
 
-    if (model === "HORAY_435_BIFACIAL") return 435;
-    return 450;
+    return 0;
   }
 
   function getPanelDisplayName(model: string) {
@@ -962,14 +965,33 @@ export default function Home() {
 
       if (!isCalculatorOnline()) {
         console.warn("Kalkulator offline — używam katalogu zapisanego w cache");
+        if (!cachedCatalog) {
+          setCatalogError("Brak połączenia i brak katalogu sprzętu pobranego wcześniej z bazy.");
+        }
         return;
       }
-      const catalogResponse = await fetch("/api/calculate", {
-        method: "GET",
-      });
+      let catalogResponse: Response;
+
+      try {
+        catalogResponse = await fetch("/api/calculate", {
+          method: "GET",
+          cache: "no-store",
+        });
+      } catch (error) {
+        console.warn("Nie udało się pobrać katalogu kalkulatora z API — blokuję kalkulację online", error);
+        setPanels([]);
+        setStorages([]);
+        setInverters([]);
+        setCatalogError("Nie udało się połączyć z bazą sprzętu. Kalkulacja została zablokowana, aby nie użyć nieaktualnych danych.");
+        return;
+      }
 
       if (!catalogResponse.ok) {
-        console.warn("Nie udało się pobrać katalogu kalkulatora z API — zostawiam dane z cache/stanu");
+        console.warn("Nie udało się pobrać katalogu kalkulatora z API — blokuję kalkulację online");
+        setPanels([]);
+        setStorages([]);
+        setInverters([]);
+        setCatalogError("Baza sprzętu nie odpowiedziała poprawnie. Kalkulacja została zablokowana.");
         return;
       }
 
@@ -977,7 +999,11 @@ export default function Home() {
       const apiCatalog = catalogPayload?.catalog as CalculatorCatalog | undefined;
 
       if (!apiCatalog) {
-        console.warn("API kalkulatora nie zwróciło katalogu — zostawiam dane z cache/stanu");
+        console.warn("API kalkulatora nie zwróciło katalogu — blokuję kalkulację online");
+        setPanels([]);
+        setStorages([]);
+        setInverters([]);
+        setCatalogError("Baza nie zwróciła katalogu sprzętu. Kalkulacja została zablokowana.");
         return;
       }
 
@@ -1047,12 +1073,17 @@ export default function Home() {
           storages: loadedStorages.length,
           inverters: loadedInverters.length,
         });
+        setPanels([]);
+        setStorages([]);
+        setInverters([]);
+        setCatalogError("W bazie brakuje aktywnych paneli, falowników lub magazynów energii.");
         return;
       }
 
       setPanels(loadedPanels);
       setStorages(loadedStorages);
       setInverters(loadedInverters);
+      setCatalogError("");
 
       writeCachedCalculatorCatalog({
         panels: loadedPanels,
@@ -1192,12 +1223,14 @@ export default function Home() {
 
     setAdminStatus("Zapisano ustawienia cen");
     setResult(null);
+    setIsResultFocusMode(false);
   }
 
   function resetPricingOverrides() {
     setPricingOverrides(DEFAULT_PRICING_OVERRIDES);
     setAdminStatus("Przywrócono wartości domyślne — zapisz, żeby utrwalić w bazie");
     setResult(null);
+    setIsResultFocusMode(false);
   }
 
   function buildCalculatorCatalogFromState(): CalculatorCatalog {
@@ -1358,6 +1391,8 @@ export default function Home() {
       }
 
       setResult(data);
+      setResultIsDirty(false);
+      setResultPanelTab("summary");
       const calculationId = crypto.randomUUID();
       calculationAuditIdRef.current = calculationId;
       void recordCrmAuditEvent({
@@ -1387,12 +1422,6 @@ export default function Home() {
       setEmailStatus("");
       setSaveOfferStatus("");
       setSavedOfferId(null);
-      window.setTimeout(() => {
-        resultSectionRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 100);
     } catch (error) {
       console.error("Błąd kalkulacji", error);
       setEmailStatus(
@@ -1405,7 +1434,7 @@ export default function Home() {
     setCustomMode(false);
     setCustomEquipment(createDefaultCustomEquipment());
     setOfferType("none");
-    setPanelModel("AMERISOLAR_450_FB");
+    setPanelModel(panels[0]?.code || "");
     setPanelCount(16);
     setManualPowerKw("");
     setRoofType("blacha");
@@ -1430,6 +1459,9 @@ export default function Home() {
     }
     setVatRate(8);
     setResult(null);
+    setIsResultFocusMode(false);
+    setResultIsDirty(false);
+    setResultPanelTab("summary");
     setCopied(false);
     setClientEmail("");
     setClientName("");
@@ -2216,56 +2248,33 @@ IdeaSol`;
     void syncOfflineOfferQueue();
   }, [isOffline, queuedOfferCount, userProfile?.id]);
 
+  const quickEditStorageVoltageType = getCatalogStorageVoltageType(
+    storages.find((storageItem) => storageItem.code === storage)
+  );
+  const quickEditInverters = inverters
+    .filter((inverterItem) => {
+      if (result?.energyStorage !== "Brak") {
+        const inverterVoltageType =
+          inverterItem.battery_voltage_type || inverterItem.batteryVoltageType || "low_voltage";
+
+        return inverterItem.type === "hybrid" && inverterVoltageType === quickEditStorageVoltageType;
+      }
+
+      return inverterItem.type !== "hybrid";
+    })
+    .filter((inverterItem, index, compatibleInverters) => (
+      compatibleInverters.findIndex((candidate) => candidate.name === inverterItem.name) === index
+    ));
+
+  function markResultForRecalculation() {
+    if (result) setResultIsDirty(true);
+  }
+
 
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-
-        <div className="flex w-full flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit sm:flex-row">
-          <button
-            type="button"
-            onClick={() => setCalculatorMode("standard")}
-            className={
-              calculatorMode === "standard"
-                ? "rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm"
-                : "rounded-xl px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            }
-          >
-            Standardowy
-          </button>
-          <button
-            type="button"
-            onClick={() => setCalculatorMode("grant")}
-            className={
-              calculatorMode === "grant"
-                ? "rounded-xl bg-[#5300EB] px-5 py-3 text-sm font-semibold text-white shadow-sm ring-2 ring-[#00C0EB] outline-none focus-visible:ring-2 focus-visible:ring-[#00C0EB]"
-                : "rounded-xl px-5 py-3 text-sm font-semibold text-slate-600 outline-none transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[#00C0EB] dark:text-slate-300 dark:hover:bg-slate-800"
-            }
-          >
-            Grant OZE — Radzionków
-          </button>
-        </div>
-
-        {calculatorMode === "grant" ? (
-          <GrantCalculator
-            canSeeInternalCosts={canSeeTechnicalView}
-            currentUserId={userProfile?.id || null}
-            advisorName={advisorName}
-            advisorPhone={advisorPhone}
-            advisorEmail={advisorEmail}
-            advisorRole={currentUserRole}
-            crmClients={crmClients}
-            selectedClientId={selectedClientId}
-            onSelectedClientIdChange={setSelectedClientId}
-            onClientEmailSaved={(clientId, email) => {
-              setCrmClients((currentClients) => currentClients.map((client) => (
-                client.id === clientId ? { ...client, email } : client
-              )));
-            }}
-          />
-        ) : (
-          <>
+      <div className="mx-auto max-w-[1600px] space-y-6">
 
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -2285,6 +2294,12 @@ IdeaSol`;
           </div>
         )}
 
+        {catalogError && (
+          <div className="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-800 shadow-sm dark:border-red-900 dark:bg-red-950/40 dark:text-red-100" role="alert">
+            Katalog sprzętu: {catalogError}
+          </div>
+        )}
+
         {canSeePricingPanel && showAdminPanel && (
           <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
             <AdminPanel
@@ -2297,9 +2312,12 @@ IdeaSol`;
           </section>
         )}
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
-          <div className="space-y-8">
-            <OfferForm
+        <section>
+          <div
+            className={`${isResultFocusMode ? "gap-0 xl:grid-cols-[0fr_minmax(0,1fr)]" : "gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"} grid items-start transition-[grid-template-columns,gap] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none`}
+          >
+            <div className={`${isResultFocusMode ? "pointer-events-none max-h-0 opacity-0" : "max-h-[4000px] opacity-100"} min-w-0 overflow-hidden transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none`}>
+              <OfferForm
               offerType={offerType}
               setOfferType={setOfferType}
               panelModel={panelModel}
@@ -2338,7 +2356,13 @@ IdeaSol`;
               vatRate={vatRate}
               setVatRate={setVatRate}
               calculate={calculate}
-              setResult={setResult}
+              setResult={(nextResult) => {
+                if (nextResult === null) {
+                  if (result) setResultIsDirty(true);
+                  return;
+                }
+                setResult(nextResult);
+              }}
               setEmailStatus={setEmailStatus}
               showSettings={showSettings}
               setShowSettings={setShowSettings}
@@ -2356,14 +2380,72 @@ IdeaSol`;
               customPaymentTotalGross={
                 Number(result?.finalGross || 0) * normalizeInstallationCount(identicalSetCount)
               }
+              hasStaleResult={resultIsDirty}
             />
+            </div>
 
-            {result && (
-              <div
-                ref={resultSectionRef}
-                className="scroll-mt-6 animate-in fade-in slide-in-from-bottom-3 duration-500"
-              >
-                <OfferResult
+            <aside
+              ref={resultSectionRef}
+              className={
+                isResultFocusMode
+                  ? "relative mx-auto w-full max-w-6xl transition-[max-width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                  : "relative min-w-0 transition-[max-width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none xl:sticky xl:top-4"
+              }
+            >
+              {result && (
+                <ResultPanelFocusToggle
+                  expanded={isResultFocusMode}
+                  onToggle={() => setIsResultFocusMode((current) => !current)}
+                />
+              )}
+              <div className={`${isResultFocusMode ? "p-3" : "p-2"} overflow-hidden rounded-[26px] border border-slate-200 bg-slate-100/70 shadow-xl shadow-slate-200/50 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/20`}>
+                <div className={`${isResultFocusMode ? "p-6" : "p-4"} rounded-[20px] bg-slate-950 text-white dark:border dark:border-slate-700 dark:bg-black`}>
+                  <div className={`${isResultFocusMode ? "mb-5" : "mb-3"} flex items-center justify-between gap-3`}>
+                    <div>
+                      <p className={`${isResultFocusMode ? "text-xs" : "text-[10px]"} font-black uppercase tracking-[0.18em] text-emerald-400`}>Pulpit oferty</p>
+                      <h2 className={`${isResultFocusMode ? "mt-2 text-3xl" : "mt-1"} font-bold text-white`}>Wynik kalkulacji</h2>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black ${resultIsDirty ? "border-amber-400/40 bg-amber-400/10 text-amber-300" : result ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/5 text-white/40"}`}>
+                      {resultIsDirty ? "DO PRZELICZENIA" : result ? "AKTUALNY" : "BRAK WYNIKU"}
+                    </span>
+                  </div>
+                  {result && (
+                    <ResultOverviewBar
+                      priceGross={result.finalGross * normalizeInstallationCount(identicalSetCount)}
+                      pvPowerKw={result.pvPowerKw}
+                      storageCapacityKwh={result.storageCapacityKwh}
+                      expanded={isResultFocusMode}
+                    />
+                  )}
+                  <div className={`${isResultFocusMode ? "gap-2 p-1.5" : "gap-1 p-1"} grid grid-cols-3 rounded-xl bg-white/10`}>
+                    {[
+                      { value: "summary", label: "Wycena" },
+                      { value: "subsidy", label: "Dotacja" },
+                      { value: "credit", label: "Raty" },
+                    ].map((tab) => (
+                      <button key={tab.value} type="button" disabled={!result} onClick={() => setResultPanelTab(tab.value as "summary" | "subsidy" | "credit")} className={`${isResultFocusMode ? "py-3 text-sm" : "py-2 text-xs"} rounded-lg px-2 font-bold transition ${resultPanelTab === tab.value && result ? "bg-white text-slate-950 shadow-sm" : "text-white/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"}`}>
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {resultIsDirty && (
+                  <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                    Konfiguracja została zmieniona. Ostatni wynik pozostaje widoczny, ale zapis i dokumenty są zablokowane do ponownego przeliczenia.
+                  </div>
+                )}
+
+                {!result ? (
+                  <div className="p-7 text-center">
+                    <div className="mx-auto h-12 w-px bg-gradient-to-b from-emerald-400 to-transparent" />
+                    <p className="mt-3 font-bold text-slate-900 dark:text-white">Czekam na przeliczenie</p>
+                    <p className="mx-auto mt-1 max-w-56 text-xs leading-5 text-slate-500">Tutaj pojawi się cena, konfiguracja, dotacja i finansowanie.</p>
+                  </div>
+                ) : (
+                  <div className={`${isResultFocusMode ? "w-full px-5 pb-5 pt-5" : "max-h-[calc(100vh-13rem)] overflow-y-auto px-1 pb-1 pt-2"} ${resultIsDirty ? "pointer-events-none opacity-65" : ""}`}>
+                    {resultPanelTab === "summary" && (
+                      <OfferResult
                   result={result}
                   panelCount={panelCount}
                   panelPowerWp={getPanelPowerWp(panelModel)}
@@ -2373,7 +2455,10 @@ IdeaSol`;
                   copied={copied}
                   copyOffer={copyOffer}
                   resetForm={resetForm}
-                  setResult={setResult}
+                  setResult={(nextResult) => {
+                    setResult(nextResult);
+                    if (nextResult === null) setIsResultFocusMode(false);
+                  }}
                   setCopied={setCopied}
                   setEmailStatus={setEmailStatus}
                   catalogCards={buildCatalogCardRequests(result)}
@@ -2397,13 +2482,72 @@ IdeaSol`;
                   advisorName={advisorName}
                   advisorPhone={advisorPhone}
                   advisorEmail={advisorEmail}
+                  compact
+                  wide={isResultFocusMode}
+                  hideSubsidy
+                  equipmentQuickEdit={customModeActive ? undefined : {
+                    panel: result.offerType === "storage" ? undefined : {
+                      value: panelModel,
+                      options: panels.map((panel) => ({
+                        value: panel.code,
+                        label: `${panel.display_name || panel.name} · ${panel.power_wp} Wp`,
+                      })),
+                      onChange: (value) => {
+                        setPanelModel(value);
+                        markResultForRecalculation();
+                      },
+                    },
+                    storage: result.energyStorage === "Brak" ? undefined : {
+                      value: storage,
+                      options: storages.map((storageItem) => ({
+                        value: storageItem.code,
+                        label: `${storageItem.display_name || storageItem.name} · ${storageItem.capacity_kwh.toLocaleString("pl-PL")} kWh · ${getCatalogStorageVoltageType(storageItem) === "high_voltage" ? "HV" : "LV"}`,
+                      })),
+                      onChange: (value) => {
+                        setStorage(value);
+                        setSelectedInverterName("auto");
+                        markResultForRecalculation();
+                      },
+                    },
+                    inverter: result.inverter === "Brak" || clientHasOwnHybridInverter ? undefined : {
+                      value: selectedInverterName,
+                      options: [
+                        { value: "auto", label: "Dobierz automatycznie" },
+                        ...quickEditInverters.map((inverterItem) => ({
+                          value: inverterItem.name,
+                          label: `${inverterItem.display_name || inverterItem.name} · do ${Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp`,
+                        })),
+                      ],
+                      onChange: (value) => {
+                        setSelectedInverterName(value);
+                        markResultForRecalculation();
+                      },
+                    },
+                  }}
                 />
+                    )}
+                    {resultPanelTab === "subsidy" && (
+                      result.energyStorage !== "Brak" && (result.includeSubsidy || result.subsidyAllocation?.requested) ? (
+                        <SubsidyOptimizer
+                          totalOfferNetPrice={result.finalNet}
+                          totalOfferGrossPrice={result.finalGross * normalizeInstallationCount(identicalSetCount)}
+                          allocation={result.subsidyAllocation}
+                          compact
+                          expanded={isResultFocusMode}
+                        />
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">Dotacja nie została uwzględniona w tej kalkulacji.</div>
+                      )
+                    )}
+                    {resultPanelTab === "credit" && (
+                      <CreditCalculator installationPrice={result.finalGross * normalizeInstallationCount(identicalSetCount)} compact expanded={isResultFocusMode} />
+                    )}
+                  </div>
+                )}
               </div>
-            )}
+            </aside>
           </div>
         </section>
-          </>
-        )}
       </div>
     </main>
   );

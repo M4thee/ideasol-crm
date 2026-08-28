@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import ClientsTable from "@/app/clients/ClientsTable";
 import { Client } from "@/app/clients/types";
 import {
   canViewCompanySales,
@@ -14,6 +13,7 @@ import MeetingConfirmationReminderFields, {
   validateMeetingConfirmationReminder,
 } from "@/components/MeetingConfirmationReminderFields";
 import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
+import StickyNotesBoard from "@/app/components/StickyNotesBoard";
 
 type AuthUser = {
   id: string;
@@ -491,8 +491,6 @@ export default function Home() {
   useEffect(() => {
     if (!currentUser || visibleUserIds === undefined) return;
 
-    loadClients();
-    loadFollowUps();
     loadMeetings();
     if (currentUserRole === "cc") {
       loadCcSummary();
@@ -511,8 +509,6 @@ export default function Home() {
     if (!currentUser || visibleUserIds === undefined) return;
 
     await Promise.all([
-      loadClients(),
-      loadFollowUps(),
       loadMeetings(),
       currentUserRole === "cc" ? loadCcSummary() : loadSalesSummary(),
     ]);
@@ -2271,223 +2267,12 @@ export default function Home() {
             </div>
           </div>
 
-          <div ref={followUpsRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold">Przypomnienia</h2>
-
-                <p className="text-slate-500 text-sm mt-1">
-                  Kontakty, które wymagają ponownego działania.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {!followUpsCollapsed && (
-                  <button
-                    type="button"
-                    onClick={loadFollowUps}
-                    className="bg-white border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm"
-                  >
-                    Odśwież
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setFollowUpsCollapsed((value) => !value)}
-                  className="bg-white border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm"
-                >
-                  {followUpsCollapsed ? "Rozwiń" : "Zwiń"}
-                </button>
-              </div>
-            </div>
-
-            {followUpsCollapsed ? null : loadingFollowUps ? (
-              <p className="text-sm text-slate-400"> Ładowanie przypomnień...</p>
-            ) : followUps.length === 0 ? (
-              <p className="text-sm text-slate-400">Brak aktywnych przypomnień.</p>
-            ) : (
-              <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
-                {["Zaległe", "Dzisiaj", "Jutro", "Później"].map((group) => {
-                  const groupItems = visibleFollowUps.filter(
-                    (followUp) => getFollowUpGroup(followUp.follow_up_at) === group
-                  );
-                  const isEmptyOverdueGroup = group === "Zaległe" && groupItems.length === 0;
-
-                  return (
-                    <div
-                      key={group}
-                      className={`rounded-2xl border p-4 ${
-                        group === "Zaległe" && !isEmptyOverdueGroup
-                          ? "border-red-200 bg-red-50"
-                          : "border-slate-200 bg-slate-50"
-                      }`}
-                    >
-                      <h3 className="font-bold mb-4">
-                        {group} ({groupItems.length})
-                      </h3>
-
-                      {groupItems.length === 0 ? (
-                        <p className="text-sm text-slate-400">
-                          {group === "Zaległe"
-                            ? "Brak zaległych zadań, Kasia byłaby dumna 🙂"
-                            : "Brak zadań."}
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {groupItems.map((followUp) => (
-                            <div
-                              key={followUp.id}
-                              className={`rounded-xl border p-3 ${
-                                group === "Zaległe"
-                                  ? "border-red-200 bg-white"
-                                  : "border-slate-200 bg-white"
-                              }`}
-                            >
-                              <p className="font-semibold text-sm">
-                                {followUp.client_name}
-                              </p>
-
-                              <p className="text-xs text-slate-400 mt-1">
-                                {new Date(followUp.follow_up_at).toLocaleString(
-                                  "pl-PL"
-                                )}
-                              </p>
-
-                              <p className="text-sm text-slate-700 mt-3">
-                                {followUp.title}
-                              </p>
-
-                              {followUp.description && (
-                                <p className="text-xs text-slate-500 mt-2 line-clamp-3">
-                                  {followUp.description}
-                                </p>
-                              )}
-
-                              <div className="flex flex-wrap gap-2 mt-4">
-                                <button
-                                  type="button"
-                                  onClick={() => openClientFromFollowUp(followUp.client_id)}
-                                  className="text-xs px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
-                                >
-                                  Otwórz klienta
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => startResolvingFollowUp(followUp)}
-                                  className="text-xs px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-medium"
-                                >
-                                  Wykonano
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {!followUpsCollapsed && followUps.length > 8 && (
-              <div className="flex justify-center gap-2 mt-4">
-                {visibleFollowUpsCount < followUps.length && (
-                  <button
-                    type="button"
-                    onClick={() => setVisibleFollowUpsCount((count) => count + 8)}
-                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm"
-                  >
-                    Pokaż kolejne przypomnienia
-                  </button>
-                )}
-
-                {visibleFollowUpsCount > 8 && (
-                  <button
-                    type="button"
-                   onClick={() => {
-  setVisibleFollowUpsCount(3);
-  scrollToWidget(followUpsRef);
-}}
-                    className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm"
-                  >
-                    Pokaż mniej
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          <div ref={clientsRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold">Klienci CRM</h2>
-
-                <p className="text-slate-500 text-sm mt-1">
-                  Lista klientów przypisanych do użytkownika.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {!clientsCollapsed && (
-                  <button
-                    type="button"
-                    onClick={() => router.push("/clients?addClient=1")}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold rounded-xl px-4 py-2 shadow-sm text-sm"
-                  >
-                    + Dodaj klienta
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setClientsCollapsed((value) => !value)}
-                  className="bg-white border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm"
-                >
-                  {clientsCollapsed ? "Rozwiń" : "Zwiń"}
-                </button>
-              </div>
-            </div>
-
-            {clientsCollapsed ? null : (
-              <>
-                <ClientsTable
-                  clients={visibleClients}
-                  loadingClients={loadingClients}
-                  selectedClient={selectedClient}
-                  onSelectClient={setSelectedClient}
-                  onCloseClient={() => setSelectedClient(null)}
-                />
-                
-
-                {clients.length > 10 && (
-                  <div className="flex justify-center gap-2 mt-4">
-                    {visibleClientsCount < clients.length && (
-                      <button
-                        type="button"
-                        onClick={() => setVisibleClientsCount((count) => count + 10)}
-                        className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm"
-                      >
-                        Pokaż kolejnych klientów
-                      </button>
-                    )}
-
-                    {visibleClientsCount > 10 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVisibleClientsCount(10);
-                          scrollToWidget(clientsRef);
-                        }}
-                        className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm"
-                      >
-                        Pokaż mniej
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <StickyNotesBoard
+            currentUserId={currentUser.id}
+            currentUserEmail={currentUser.email}
+            currentUserName={currentUser.user_metadata?.display_name}
+            currentUserRole={currentUserRole}
+          />
 
         </section>
       </div>

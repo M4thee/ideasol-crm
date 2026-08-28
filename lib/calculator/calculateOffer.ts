@@ -92,69 +92,6 @@ type AdditionalServiceInput = {
   quantity?: number;
 };
 
-const FALLBACK_PANELS: Record<string, PanelItem> = {
-  AMERISOLAR_450_FB: {
-    name: "AMERISOLAR 450 FB",
-    displayName: "AMERISOLAR 450 FB",
-    powerWp: 450,
-    priceNet: 230,
-  },
-  HORAY_435_BIFACIAL: {
-    name: "HORAY 435 BIFACIAL",
-    displayName: "HORAY 435 BIFACIAL",
-    powerWp: 435,
-    priceNet: 240,
-  },
-};
-
-const FALLBACK_INVERTERS: InverterItem[] = [
-  { maxPvKw: 5.5, name: "Deye SUN-5K-SG04LP3-EU", displayName: "Deye SUN-5K-SG04LP3-EU", type: "hybrid", priceNet: 5223.25 },
-  { maxPvKw: 6.8, name: "Deye SUN-6K-SG04LP3-EU", displayName: "Deye SUN-6K-SG04LP3-EU", type: "hybrid", priceNet: 5359.25 },
-  { maxPvKw: 8.8, name: "Deye SUN-8K-SG04LP3-EU", displayName: "Deye SUN-8K-SG04LP3-EU", type: "hybrid", priceNet: 5478.25 },
-  { maxPvKw: 10.8, name: "Deye SUN-10K-SG05LP3-EU", displayName: "Deye SUN-10K-SG05LP3-EU", type: "hybrid", priceNet: 5631.25 },
-  { maxPvKw: 12.8, name: "Deye SUN-12K-SG05LP3-EU", displayName: "Deye SUN-12K-SG05LP3-EU", type: "hybrid", priceNet: 5780 },
-  { maxPvKw: 14.8, name: "Deye SUN-14K-SG05LP3-EU-SM2", displayName: "Deye SUN-14K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 7089 },
-  { maxPvKw: 15.8, name: "Deye SUN-15K-SG05LP3-EU-SM2", displayName: "Deye SUN-15K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 6630 },
-  { maxPvKw: 18, name: "Deye SUN-16K-SG05LP3-EU-SM2", displayName: "Deye SUN-16K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 7650 },
-  { maxPvKw: 999, name: "Deye SUN-20K-SG05LP3-EU-SM2", displayName: "Deye SUN-20K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 8946.25 },
-  { maxPvKw: 5.5, name: "Falownik Sieciowy 5K", displayName: "Falownik Sieciowy 5K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 6.8, name: "Falownik Sieciowy 6K", displayName: "Falownik Sieciowy 6K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 8.8, name: "Falownik Sieciowy 8K", displayName: "Falownik Sieciowy 8K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 10.8, name: "Falownik Sieciowy 10K", displayName: "Falownik Sieciowy 10K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 12.8, name: "Falownik Sieciowy 12K", displayName: "Falownik Sieciowy 12K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 14.8, name: "Falownik Sieciowy 14K", displayName: "Falownik Sieciowy 14K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 15.8, name: "Falownik Sieciowy 15K", displayName: "Falownik Sieciowy 15K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 18, name: "Falownik Sieciowy 16K", displayName: "Falownik Sieciowy 16K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 999, name: "Falownik Sieciowy 20K", displayName: "Falownik Sieciowy 20K", type: "ongrid", priceNet: 1000 },
-];
-
-const FALLBACK_STORAGES: Record<string, StorageItem> = {
-  none: {
-    name: "Brak",
-    displayName: "Brak",
-    capacityKwh: 0,
-    voltageType: "low_voltage",
-    priceNet: 0,
-    installationNet: 0,
-  },
-  ZBPOWER_10: {
-    name: "ZBPOWER ZB-G512200 10 kWh",
-    displayName: "ZBPOWER ZB-G512200 10 kWh",
-    capacityKwh: 10,
-    voltageType: "low_voltage",
-    priceNet: 4394.5,
-    installationNet: 1500,
-  },
-  ZBPOWER_16: {
-    name: "ZBPOWER ZB-G512314 16 kWh",
-    displayName: "ZBPOWER ZB-G512314 16 kWh",
-    capacityKwh: 16,
-    voltageType: "low_voltage",
-    priceNet: 5372,
-    installationNet: 1500,
-  },
-};
-
 const ROOF_PLACEHOLDERS = {
   blacha: 1500,
   dachowka: 2000,
@@ -354,23 +291,19 @@ function buildPricing(
 ) {
   const overrides = body.pricingOverrides || {};
 
-  const effectivePanels =
-    catalog?.panels && Object.keys(catalog.panels).length > 0
-      ? catalog.panels
-      : FALLBACK_PANELS;
-
-  const effectiveInverters =
-    Array.isArray(catalog?.inverters) && catalog.inverters.length > 0
-      ? catalog.inverters
-      : FALLBACK_INVERTERS;
-
-  const effectiveStorages =
-    catalog?.storages && Object.keys(catalog.storages).length > 0
-      ? catalog.storages
-      : FALLBACK_STORAGES;
+  if (
+    !catalog?.panels ||
+    Object.keys(catalog.panels).length === 0 ||
+    !Array.isArray(catalog.inverters) ||
+    catalog.inverters.length === 0 ||
+    !catalog?.storages ||
+    Object.keys(catalog.storages).length === 0
+  ) {
+    throw new Error("Brak aktualnego katalogu sprzętu z bazy. Odśwież kalkulator po odzyskaniu połączenia.");
+  }
 
   const panels = Object.fromEntries(
-    Object.entries(effectivePanels).map(([code, panel]) => [
+    Object.entries(catalog.panels).map(([code, panel]) => [
       code,
       {
         ...panel,
@@ -382,7 +315,7 @@ function buildPricing(
     ])
   ) as Record<string, PanelItem>;
 
-  const inverters = effectiveInverters.map((inverter) => ({
+  const inverters = catalog.inverters.map((inverter) => ({
     ...inverter,
     priceNet: getNumberOverride(
       overrides?.inverters?.[inverter.name]?.priceNet,
@@ -391,7 +324,7 @@ function buildPricing(
   }));
 
   const storages = Object.fromEntries(
-    Object.entries(effectiveStorages).map(([code, storage]) => [
+    Object.entries(catalog.storages).map(([code, storage]) => [
       code,
       {
         ...storage,

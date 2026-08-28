@@ -2,16 +2,22 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { calculateOffer } from "@/lib/calculator/calculateOffer";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  }
-);
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+const supabase = supabaseUrl && serviceRoleKey
+  ? createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+const catalogSupabase = supabaseUrl && (serviceRoleKey || anonKey)
+  ? createClient(supabaseUrl, serviceRoleKey || anonKey!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
 
 type PanelItem = {
   name: string;
@@ -44,66 +50,18 @@ type StorageItem = {
   isEu?: boolean;
 };
 
-const FALLBACK_PANELS: Record<string, PanelItem> = {
-  AMERISOLAR_450_FB: {
-    name: "AMERISOLAR 450 FB",
-    displayName: "AMERISOLAR 450 FB",
-    powerWp: 450,
-    priceNet: 230,
-  },
-  HORAY_435_BIFACIAL: {
-    name: "HORAY 435 BIFACIAL",
-    displayName: "HORAY 435 BIFACIAL",
-    powerWp: 435,
-    priceNet: 240,
-  },
+const NO_STORAGE_ITEM: StorageItem = {
+  name: "Brak",
+  displayName: "Brak",
+  capacityKwh: 0,
+  voltageType: "low_voltage",
+  priceNet: 0,
+  installationNet: 0,
 };
 
-const FALLBACK_INVERTERS: InverterItem[] = [
-  { maxPvKw: 5.5, name: "Deye SUN-5K-SG04LP3-EU", displayName: "Deye SUN-5K-SG04LP3-EU", type: "hybrid", priceNet: 5223.25 },
-  { maxPvKw: 6.8, name: "Deye SUN-6K-SG04LP3-EU", displayName: "Deye SUN-6K-SG04LP3-EU", type: "hybrid", priceNet: 5359.25 },
-  { maxPvKw: 8.8, name: "Deye SUN-8K-SG04LP3-EU", displayName: "Deye SUN-8K-SG04LP3-EU", type: "hybrid", priceNet: 5478.25 },
-  { maxPvKw: 10.8, name: "Deye SUN-10K-SG05LP3-EU", displayName: "Deye SUN-10K-SG05LP3-EU", type: "hybrid", priceNet: 5631.25 },
-  { maxPvKw: 12.8, name: "Deye SUN-12K-SG05LP3-EU", displayName: "Deye SUN-12K-SG05LP3-EU", type: "hybrid", priceNet: 5780 },
-  { maxPvKw: 14.8, name: "Deye SUN-14K-SG05LP3-EU-SM2", displayName: "Deye SUN-14K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 7089 },
-  { maxPvKw: 15.8, name: "Deye SUN-15K-SG05LP3-EU-SM2", displayName: "Deye SUN-15K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 6630 },
-  { maxPvKw: 18, name: "Deye SUN-16K-SG05LP3-EU-SM2", displayName: "Deye SUN-16K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 7650 },
-  { maxPvKw: 999, name: "Deye SUN-20K-SG05LP3-EU-SM2", displayName: "Deye SUN-20K-SG05LP3-EU-SM2", type: "hybrid", priceNet: 8946.25 },
-  { maxPvKw: 5.5, name: "Falownik Sieciowy 5K", displayName: "Falownik Sieciowy 5K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 6.8, name: "Falownik Sieciowy 6K", displayName: "Falownik Sieciowy 6K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 8.8, name: "Falownik Sieciowy 8K", displayName: "Falownik Sieciowy 8K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 10.8, name: "Falownik Sieciowy 10K", displayName: "Falownik Sieciowy 10K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 12.8, name: "Falownik Sieciowy 12K", displayName: "Falownik Sieciowy 12K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 14.8, name: "Falownik Sieciowy 14K", displayName: "Falownik Sieciowy 14K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 15.8, name: "Falownik Sieciowy 15K", displayName: "Falownik Sieciowy 15K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 18, name: "Falownik Sieciowy 16K", displayName: "Falownik Sieciowy 16K", type: "ongrid", priceNet: 1000 },
-  { maxPvKw: 999, name: "Falownik Sieciowy 20K", displayName: "Falownik Sieciowy 20K", type: "ongrid", priceNet: 1000 },
-];
-
-const FALLBACK_STORAGES: Record<string, StorageItem> = {
+const EMPTY_STORAGE_CATALOG: Record<string, StorageItem> = {
   none: {
-    name: "Brak",
-    displayName: "Brak",
-    capacityKwh: 0,
-    voltageType: "low_voltage",
-    priceNet: 0,
-    installationNet: 0,
-  },
-  ZBPOWER_10: {
-    name: "ZBPOWER ZB-G512200 10 kWh",
-    displayName: "ZBPOWER ZB-G512200 10 kWh",
-    capacityKwh: 10,
-    voltageType: "low_voltage",
-    priceNet: 4394.5,
-    installationNet: 1500,
-  },
-  ZBPOWER_16: {
-    name: "ZBPOWER ZB-G512314 16 kWh",
-    displayName: "ZBPOWER ZB-G512314 16 kWh",
-    capacityKwh: 16,
-    voltageType: "low_voltage",
-    priceNet: 5372,
-    installationNet: 1500,
+    ...NO_STORAGE_ITEM,
   },
 };
 
@@ -132,28 +90,44 @@ function clampPercent(value: number) {
 }
 
 async function loadCatalogFromSupabase() {
+  if (!catalogSupabase) {
+    throw new Error("Brak konfiguracji połączenia z bazą sprzętu Supabase.");
+  }
+
   const [panelsResponse, invertersResponse, storagesResponse] = await Promise.all([
-    supabase
+    catalogSupabase
       .from("panels")
       .select("code, name, display_name, power_wp, price_net, catalog_card_url, active")
-      .eq("active", true),
-    supabase
+      .eq("active", true)
+      .order("power_wp", { ascending: true }),
+    catalogSupabase
       .from("inverters")
       .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
-    supabase
+    catalogSupabase
       .from("storages")
       .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
-      .eq("active", true),
+      .eq("active", true)
+      .order("capacity_kwh", { ascending: true }),
   ]);
+
+  const catalogError = panelsResponse.error || invertersResponse.error || storagesResponse.error;
+  if (catalogError) {
+    throw new Error(`Nie udało się pobrać katalogu sprzętu z Supabase: ${catalogError.message}`);
+  }
 
   const panelsFromDb = panelsResponse.data || [];
   const invertersFromDb = invertersResponse.data || [];
   const storagesFromDb = storagesResponse.data || [];
 
-  const panels = panelsFromDb.length
-    ? Object.fromEntries(
+  if (panelsFromDb.length === 0 || invertersFromDb.length === 0 || storagesFromDb.length === 0) {
+    throw new Error(
+      `Baza sprzętu nie zawiera pełnego aktywnego katalogu (panele: ${panelsFromDb.length}, falowniki: ${invertersFromDb.length}, magazyny: ${storagesFromDb.length}).`
+    );
+  }
+
+  const panels = Object.fromEntries(
       panelsFromDb.map((panel: any) => [
         panel.code,
         {
@@ -164,11 +138,9 @@ async function loadCatalogFromSupabase() {
           catalogCardUrl: panel.catalog_card_url || null,
         },
       ])
-    )
-    : FALLBACK_PANELS;
+    );
 
-  const inverters = invertersFromDb.length
-    ? invertersFromDb.map((inverter: any) => ({
+  const inverters = invertersFromDb.map((inverter: any) => ({
       name: inverter.name,
       displayName: inverter.display_name || inverter.name,
       type: inverter.type,
@@ -178,11 +150,9 @@ async function loadCatalogFromSupabase() {
       priceNet: Number(inverter.price_net),
       isEu: Boolean(inverter.is_eu),
       hasEms: Boolean(inverter.has_ems),
-    }))
-    : FALLBACK_INVERTERS;
+    }));
 
-  const storages = storagesFromDb.length
-    ? Object.fromEntries(
+  const storages = Object.fromEntries(
       storagesFromDb.map((storage: any) => [
         storage.code,
         {
@@ -196,11 +166,10 @@ async function loadCatalogFromSupabase() {
           isEu: Boolean(storage.is_eu),
         },
       ])
-    )
-    : FALLBACK_STORAGES;
+    ) as Record<string, StorageItem>;
 
   if (!storages.none) {
-    storages.none = FALLBACK_STORAGES.none;
+    storages.none = EMPTY_STORAGE_CATALOG.none;
   }
 
   return { panels, inverters, storages };
@@ -383,12 +352,14 @@ export async function GET() {
   try {
     const [{ data: settingsRow, error: settingsError }, catalog] = await Promise.all([
       supabase
-        .from("pricing_settings")
-        .select(
-          "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
-        )
-        .eq("id", 1)
-        .single(),
+        ? supabase
+            .from("pricing_settings")
+            .select(
+              "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
+            )
+            .eq("id", 1)
+            .single()
+        : Promise.resolve({ data: null, error: null }),
       loadCatalogFromSupabase(),
     ]);
 
@@ -396,10 +367,15 @@ export async function GET() {
       console.warn("Nie udało się pobrać pricing_settings dla katalogu kalkulatora", settingsError);
     }
 
-    return NextResponse.json({
-      catalog,
-      settingsRow: settingsRow || null,
-    });
+    return NextResponse.json(
+      {
+        catalog,
+        settingsRow: settingsRow || null,
+        catalogSource: "supabase",
+        catalogFetchedAt: new Date().toISOString(),
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     console.error("Nie udało się pobrać katalogu kalkulatora", error);
 
@@ -429,6 +405,12 @@ export async function POST(request: Request) {
   let authenticatedUserId: string | null = null;
 
   if (customModeRequested) {
+    if (!supabase) {
+      return NextResponse.json(
+        { error: "Tryb niestandardowy wymaga pełnej konfiguracji lokalnego Supabase." },
+        { status: 503 }
+      );
+    }
     const accessToken = readBearerToken(request);
 
     if (!accessToken) {
@@ -473,7 +455,7 @@ export async function POST(request: Request) {
     null;
   const sellerEmail = body?.advisor?.email || null;
   let currentUser: any = null;
-  if (sellerProfileId) {
+  if (sellerProfileId && supabase) {
     const { data: resolvedProfile } = await supabase
       .from("profiles")
       .select("id, role, manager_id, display_name, email")
@@ -483,7 +465,7 @@ export async function POST(request: Request) {
       currentUser = resolvedProfile;
     }
   }
-  if ((!currentUser || !currentUser.manager_id) && sellerEmail) {
+  if ((!currentUser || !currentUser.manager_id) && sellerEmail && supabase) {
     const { data: resolvedByEmail } = await supabase
       .from("profiles")
       .select("id, role, manager_id, display_name, email")
@@ -495,12 +477,14 @@ export async function POST(request: Request) {
   }
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
-      .from("pricing_settings")
-      .select(
-        "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
-      )
-      .eq("id", 1)
-      .single(),
+      ? supabase
+          .from("pricing_settings")
+          .select(
+            "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
+          )
+          .eq("id", 1)
+          .single()
+      : Promise.resolve({ data: null, error: null }),
     loadCatalogFromSupabase(),
   ]);
 

@@ -43,6 +43,8 @@ type CatalogInverter = {
   name: string;
   display_name: string | null;
   type: string;
+  battery_voltage_type?: "low_voltage" | "high_voltage" | null;
+  batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   max_pv_kw: number;
   price_net: number;
 };
@@ -65,7 +67,7 @@ type SelectedAdditionalService = {
   quantity: number;
 };
 
-type StorageVoltageFilter = "all" | "low_voltage" | "high_voltage";
+type StorageVoltageFilter = "low_voltage" | "high_voltage";
 
 function getStorageVoltageType(storageItem: CatalogStorage) {
   return storageItem.voltage_type || storageItem.voltageType || "low_voltage";
@@ -192,6 +194,7 @@ type OfferFormProps = {
   customPaymentSchedule: CustomPaymentSchedule;
   setCustomPaymentSchedule: Dispatch<SetStateAction<CustomPaymentSchedule>>;
   customPaymentTotalGross: number;
+  hasStaleResult?: boolean;
 };
 
 export default function OfferForm({
@@ -251,18 +254,25 @@ export default function OfferForm({
   customPaymentSchedule,
   setCustomPaymentSchedule,
   customPaymentTotalGross,
+  hasStaleResult = false,
 }: OfferFormProps) {
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [existingPvAnswer, setExistingPvAnswer] = useState<"yes" | "no" | "">("");
 
   const [storageVoltageFilter, setStorageVoltageFilter] =
-    useState<StorageVoltageFilter>("all");
+    useState<StorageVoltageFilter>("low_voltage");
 
   const [additionalServices, setAdditionalServices] = useState<CatalogAdditionalService[]>([]);
   const [showAdditionalServices, setShowAdditionalServices] = useState(false);
   const [additionalServicesStatus, setAdditionalServicesStatus] = useState("");
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [activeWorkspaceStep, setActiveWorkspaceStep] = useState<
+    "client" | "equipment" | "extras" | "settlement"
+  >("client");
+  const [activeEquipmentEditor, setActiveEquipmentEditor] = useState<
+    "pv" | "storage" | "inverter"
+  >("pv");
   useEffect(() => {
     async function loadAdditionalServices() {
       if (!isOfferFormOnline()) {
@@ -543,34 +553,19 @@ export default function OfferForm({
   const panelsToShow = panels;
 
   const storagesToShow = useMemo(() => {
-    if (storageVoltageFilter === "all") {
-      return storages;
-    }
-
     return storages.filter(
       (storageItem) => getStorageVoltageType(storageItem) === storageVoltageFilter
     );
   }, [storages, storageVoltageFilter]);
 
-  const invertersToShow =
-    inverters.length > 0
-      ? inverters
-      : [
-        {
-          name: "Deye SUN-10K-SG05LP3-EU",
-          display_name: "Deye SUN-10K-SG05LP3-EU",
-          type: "hybrid",
-          max_pv_kw: 10.8,
-          price_net: 5631.25,
-        },
-        {
-          name: "Falownik Sieciowy 10K",
-          display_name: "Falownik Sieciowy 10K",
-          type: "ongrid",
-          max_pv_kw: 10.8,
-          price_net: 1000,
-        },
-      ];
+  const selectedStorageVoltageType = useMemo<StorageVoltageFilter>(() => {
+    if (customMode) return customEquipment.storage.voltageType;
+
+    const selectedStorage = storages.find((storageItem) => storageItem.code === storage);
+    return selectedStorage ? getStorageVoltageType(selectedStorage) : storageVoltageFilter;
+  }, [customEquipment.storage.voltageType, customMode, storage, storageVoltageFilter, storages]);
+
+  const invertersToShow = inverters;
 
   const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
   const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
@@ -629,7 +624,7 @@ export default function OfferForm({
       return;
     }
 
-    setPanelModel(panels[0]?.code || "AMERISOLAR_450_FB");
+    setPanelModel(panels[0]?.code || "");
     setStorage(hasStorageSelected ? storagesToShow[0]?.code || "none" : "none");
     setSelectedInverterName("auto");
   }
@@ -667,14 +662,14 @@ export default function OfferForm({
     if (nextOfferType === "pv_storage") {
       setIncludeSubsidy(true);
       if (storage === "none") {
-        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "ZBPOWER_10");
+        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "none");
       }
     }
 
     if (nextOfferType === "storage") {
       setIncludeSubsidy(true);
       if (storage === "none") {
-        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "ZBPOWER_10");
+        setStorage(customMode ? CUSTOM_STORAGE_CODE : storagesToShow[0]?.code || "none");
       }
     }
 
@@ -697,31 +692,101 @@ export default function OfferForm({
     }
   }
 
-  return (
-    <section className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30 dark:ring-slate-800 sm:p-6">
-      <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-blue-500 via-emerald-400 to-cyan-400" />
-      <div className="relative mb-6 flex flex-col items-start justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-sm font-black text-white shadow-md shadow-blue-100 dark:shadow-none">
-            1
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Krok 1</p>
-            <h2 className="text-lg font-bold text-slate-950 dark:text-slate-100 sm:text-xl">Konfiguracja</h2>
-          </div>
+  const workspaceSteps = [
+    {
+      id: "client" as const,
+      number: "01",
+      label: "Klient",
+      description: selectedClient ? getClientDisplayName(selectedClient) : clientName || "Dane i obecna PV",
+    },
+    {
+      id: "equipment" as const,
+      number: "02",
+      label: "Instalacja",
+      description: hasPvSelected && hasStorageSelected
+        ? "PV + magazyn"
+        : hasPvSelected
+          ? "Fotowoltaika"
+          : hasStorageSelected
+            ? "Magazyn energii"
+            : "Dobór urządzeń",
+    },
+    {
+      id: "extras" as const,
+      number: "03",
+      label: "Dodatki",
+      description: selectedAdditionalServices.length > 0
+        ? `${selectedAdditionalServices.length} wybrane`
+        : "Usługi i opcje",
+    },
+    {
+      id: "settlement" as const,
+      number: "04",
+      label: "Rozliczenie",
+      description: `VAT ${vatRate}% · ${billingSystem === "net_billing" ? "Net Billing" : "Net Metering"}`,
+    },
+  ];
+  const activeWorkspaceStepIndex = workspaceSteps.findIndex((step) => step.id === activeWorkspaceStep);
+  const activeWorkspaceStepData = workspaceSteps[activeWorkspaceStepIndex];
+  const equipmentEditors = [
+    ...(hasPvSelected ? [{ id: "pv" as const, label: "PV" }] : []),
+    ...(hasStorageSelected ? [{ id: "storage" as const, label: "magazyn" }] : []),
+    ...((hasPvSelected || hasStorageSelected) ? [{ id: "inverter" as const, label: "falownik" }] : []),
+  ];
+  const activeEquipmentEditorIndex = equipmentEditors.findIndex(
+    (editor) => editor.id === activeEquipmentEditor
+  );
+  const previousEquipmentEditor = activeEquipmentEditorIndex > 0
+    ? equipmentEditors[activeEquipmentEditorIndex - 1]
+    : null;
+  const nextEquipmentEditor = activeEquipmentEditorIndex >= 0 && activeEquipmentEditorIndex < equipmentEditors.length - 1
+    ? equipmentEditors[activeEquipmentEditorIndex + 1]
+    : null;
 
-          <button
-            type="button"
-            onClick={() => setShowSettings((current) => !current)}
-            className="text-[2rem] text-[#7192dc] transition hover:scale-105 hover:text-[#5f84d8]"
-            aria-label="Ustawienia kalkulatora"
-          >
-            ⚙
-          </button>
+  function goToPreviousWorkspaceSection() {
+    if (activeWorkspaceStep === "equipment" && previousEquipmentEditor) {
+      setActiveEquipmentEditor(previousEquipmentEditor.id);
+      return;
+    }
+
+    setActiveWorkspaceStep(workspaceSteps[Math.max(0, activeWorkspaceStepIndex - 1)].id);
+  }
+
+  function goToNextWorkspaceSection() {
+    if (activeWorkspaceStep === "equipment" && nextEquipmentEditor) {
+      setActiveEquipmentEditor(nextEquipmentEditor.id);
+      return;
+    }
+
+    setActiveWorkspaceStep(workspaceSteps[Math.min(workspaceSteps.length - 1, activeWorkspaceStepIndex + 1)].id);
+  }
+
+  const nextSectionLabel = activeWorkspaceStep === "equipment"
+    ? nextEquipmentEditor?.label || "dodatki"
+    : workspaceSteps[Math.min(workspaceSteps.length - 1, activeWorkspaceStepIndex + 1)].label.toLocaleLowerCase("pl-PL");
+  const previousSectionLabel = activeWorkspaceStep === "equipment" && previousEquipmentEditor
+    ? previousEquipmentEditor.label
+    : null;
+
+  return (
+    <section className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-xl shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
+      <div className="relative flex items-center justify-between gap-4 bg-slate-950 px-5 py-4 text-white dark:bg-black">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-400">IdeaSol Configurator</p>
+          <h2 className="mt-1 text-xl font-black tracking-tight">Zbuduj wariant instalacji</h2>
         </div>
 
+        <button
+          type="button"
+          onClick={() => setShowSettings((current) => !current)}
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-lg transition hover:bg-white/20"
+          aria-label="Ustawienia kalkulatora"
+        >
+          ⚙
+        </button>
+
         {showSettings && (
-          <div className="absolute left-0 right-0 top-[calc(100%+0.75rem)] z-10 w-full rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-200/70 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/40 sm:left-auto sm:right-0 sm:w-72">
+          <div className="absolute right-4 top-[calc(100%+0.75rem)] z-40 w-[calc(100%-2rem)] rounded-2xl border border-blue-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-72">
             <label className="block">
               <span className="text-sm text-slate-700 dark:text-slate-200">
                 Narzut handlowca netto
@@ -753,12 +818,58 @@ export default function OfferForm({
           </div>
         )}
       </div>
+      <div className="grid xl:grid-cols-[190px_minmax(0,1fr)]">
+        <nav className="border-b border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950 xl:border-b-0 xl:border-r">
+          <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
+            {workspaceSteps.map((step, index) => {
+              const isActive = activeWorkspaceStep === step.id;
+              const isVisited = index < activeWorkspaceStepIndex;
+
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  onClick={() => setActiveWorkspaceStep(step.id)}
+                  className={`group rounded-2xl p-3 text-left transition ${isActive
+                    ? "bg-slate-950 text-white shadow-lg shadow-slate-300 dark:bg-white dark:text-slate-950 dark:shadow-none"
+                    : "text-slate-600 hover:bg-white hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-white"
+                    }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-black ${isActive
+                      ? "bg-emerald-400 text-slate-950"
+                      : isVisited
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                        : "bg-slate-200 text-slate-500 dark:bg-slate-800"
+                      }`}>
+                      {isVisited ? "✓" : step.number}
+                    </span>
+                    <span className="text-sm font-bold">{step.label}</span>
+                  </div>
+                  <p className={`mt-2 truncate text-[11px] ${isActive ? "text-slate-300 dark:text-slate-600" : "text-slate-400"}`}>
+                    {step.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+
+        <div className="min-w-0 p-4 sm:p-5">
+          <div className="mb-5 flex items-end justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">Etap {activeWorkspaceStepData.number}</p>
+              <h3 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white">{activeWorkspaceStepData.label}</h3>
+            </div>
+            <span className="hidden rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400 sm:block">
+              {activeWorkspaceStepIndex + 1} / {workspaceSteps.length}
+            </span>
+          </div>
       {/* CRM CLIENT SELECTOR */}
-      <div className="relative mb-5 min-w-0 rounded-3xl border-2 border-blue-300 bg-gradient-to-br from-blue-50 via-white to-emerald-50 p-4 shadow-md shadow-blue-100/70 dark:border-blue-500/40 dark:from-slate-900 dark:via-slate-950 dark:to-emerald-950/30 dark:shadow-black/30">
+      <div className={`relative mb-4 min-w-0 border-b border-slate-200 pb-5 dark:border-slate-700 ${activeWorkspaceStep === "client" ? "" : "hidden"}`}>
         <label className="block">
-          <span className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-blue-700">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs text-white">1</span>
-            Wyszukaj klienta
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-black uppercase tracking-[0.16em] text-slate-600 dark:text-slate-300">
+            Klient CRM
             <span className="normal-case tracking-normal text-slate-500 dark:text-slate-400">wymagany do wysyłki maila</span>
           </span>
 
@@ -862,7 +973,7 @@ export default function OfferForm({
         )}
 
         {selectedClient && (
-          <div className="mt-2 space-y-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-100">
+          <div className="mt-3 space-y-2 border-l-2 border-emerald-400 pl-3 text-sm text-slate-700 dark:text-slate-200">
             <div>
               Wybrany klient CRM: <strong>{getClientDisplayName(selectedClient)}</strong>
               {selectedClient.public_id ? ` • LeadID ${selectedClient.public_id}` : ""}
@@ -881,19 +992,18 @@ export default function OfferForm({
         )}
       </div>
 
-      <div className="mb-5 rounded-3xl border-2 border-emerald-200 bg-emerald-50/70 p-4 shadow-sm shadow-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-950/25 dark:shadow-black/20">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "client" ? "" : "hidden"}`}>
+        <div className="grid gap-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-emerald-700">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">2</span>
-              Czy klient posiada fotowoltaikę?
+            <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-800 dark:text-slate-100">
+              Stan obecny: czy klient posiada fotowoltaikę?
             </div>
             <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
               To pole wpływa na warunek dotacji PME: pojemność magazynu musi wynosić minimum dwukrotność łącznej mocy PV klienta.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[320px]">
+          <div className="grid gap-3 sm:grid-cols-2">
             <button
               type="button"
               onClick={() => {
@@ -902,9 +1012,9 @@ export default function OfferForm({
                 setResult(null);
                 setEmailStatus("");
               }}
-              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "yes"
-                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
-                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
+              className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "yes"
+                  ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                 }`}
             >
               TAK
@@ -919,9 +1029,9 @@ export default function OfferForm({
                 setResult(null);
                 setEmailStatus("");
               }}
-              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "no"
-                  ? "border-emerald-500 bg-white text-emerald-700 shadow-sm ring-2 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-500/20"
-                  : "border-slate-200 bg-white/80 text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
+              className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "no"
+                  ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                 }`}
             >
               NIE
@@ -954,17 +1064,17 @@ export default function OfferForm({
       </div>
 
       {customModeAvailable ? (
-        <div className="mb-5 rounded-3xl border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-fuchsia-50 p-4 shadow-sm dark:border-violet-500/50 dark:from-violet-950/30 dark:to-fuchsia-950/20">
+        <div className={`mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950 ${activeWorkspaceStep === "equipment" ? "" : "hidden"}`}>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
               checked={customMode}
               onChange={(event) => changeCustomMode(event.target.checked)}
-              className="mt-1 h-5 w-5 accent-violet-600"
+              className="mt-1 h-5 w-5 accent-emerald-500"
             />
             <div>
-              <div className="font-black text-violet-900 dark:text-violet-100">Custom Mode — sprzęt niestandardowy</div>
-              <p className="mt-1 text-xs leading-relaxed text-violet-700 dark:text-violet-300">
+              <div className="font-bold text-slate-900 dark:text-slate-100">Sprzęt niestandardowy</div>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 Wpisujesz sprzęt jednorazowo. Nie zostanie dodany do katalogu i nie będzie widoczny dla innych użytkowników.
               </p>
             </div>
@@ -973,38 +1083,66 @@ export default function OfferForm({
       ) : null}
 
       {/* MODULE/PRODUCT SECTION */}
-      <div className={`mb-5 transition ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
-        <div className="mb-4 flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">3</span>
-          <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Wybierz elementy oferty</span>
+      <div className={`mb-4 transition ${activeWorkspaceStep === "equipment" ? "" : "hidden"} ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
+        <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-950">
+          <button
+            type="button"
+            onClick={() => {
+              const nextValue = !hasPvSelected;
+              updateOfferModules(nextValue, hasStorageSelected);
+              setActiveEquipmentEditor(nextValue ? "pv" : hasStorageSelected ? "storage" : "pv");
+            }}
+            className={`rounded-xl px-3 py-3 text-left transition ${hasPvSelected ? "bg-white shadow-sm dark:bg-slate-800" : "text-slate-500"}`}
+          >
+            <span className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Moduł</span>
+            <span className="mt-1 flex items-center justify-between text-sm font-bold text-slate-900 dark:text-white">
+              Fotowoltaika <span>{hasPvSelected ? "✓" : "+"}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const nextValue = !hasStorageSelected;
+              updateOfferModules(hasPvSelected, nextValue);
+              setActiveEquipmentEditor(nextValue ? "storage" : hasPvSelected ? "pv" : "storage");
+            }}
+            className={`rounded-xl px-3 py-3 text-left transition ${hasStorageSelected ? "bg-white shadow-sm dark:bg-slate-800" : "text-slate-500"}`}
+          >
+            <span className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Moduł</span>
+            <span className="mt-1 flex items-center justify-between text-sm font-bold text-slate-900 dark:text-white">
+              Magazyn energii <span>{hasStorageSelected ? "✓" : "+"}</span>
+            </span>
+          </button>
         </div>
 
-        <div className="mt-3 space-y-3">
+        {(hasPvSelected || hasStorageSelected) && (
+          <div className="mb-4 flex gap-1 border-b border-slate-200 dark:border-slate-700">
+            {[
+              ...(hasPvSelected ? [{ value: "pv" as const, label: "PV" }] : []),
+              ...(hasStorageSelected ? [{ value: "storage" as const, label: "Magazyn" }] : []),
+              { value: "inverter" as const, label: "Falownik" },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setActiveEquipmentEditor(tab.value)}
+                className={`border-b-2 px-3 py-2 text-xs font-bold transition ${activeEquipmentEditor === tab.value
+                  ? "border-slate-950 text-slate-950 dark:border-white dark:text-white"
+                  : "border-transparent text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-3">
           <div
-            className={`rounded-2xl border p-4 transition ${hasPvSelected
-                ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
-                : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
-              }`}
+            className={`rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${hasPvSelected && activeEquipmentEditor === "pv" ? "" : "hidden"}`}
           >
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={hasPvSelected}
-                  disabled={!canConfigureOffer}
-                  onChange={(event) => {
-                    updateOfferModules(event.target.checked, hasStorageSelected);
-                  }}
-                  className="h-5 w-5"
-                />
-
-                <div className="font-semibold text-slate-900 dark:text-slate-100">Fotowoltaika</div>
-              </label>
-
-            </div>
-
             {hasPvSelected && (
-              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-3">
                 {customMode ? (
                   <CustomPanelFields
                     value={customEquipment.panel}
@@ -1012,7 +1150,7 @@ export default function OfferForm({
                     onInvalidate={invalidateCalculation}
                   />
                 ) : (
-                  <label className="block lg:col-span-1">
+                  <label className="block">
                     <span className="text-sm text-slate-700 dark:text-slate-200">Model panelu</span>
 
                     <select
@@ -1073,10 +1211,10 @@ export default function OfferForm({
                   />
                 </label>
 
-                <div className="block lg:col-span-3">
+                <div className="block sm:col-span-3">
                   <span className="text-sm text-slate-700 dark:text-slate-200">Rodzaj montażu</span>
 
-                  <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {[
                       { value: "blacha", label: "Blacha" },
                       { value: "dachowka", label: "Dachówka" },
@@ -1085,9 +1223,9 @@ export default function OfferForm({
                     ].map((option) => (
                       <label
                         key={option.value}
-                        className={`cursor-pointer rounded-[18px] border px-4 py-3 transition ${roofType === option.value
-                            ? "border-blue-500 bg-white shadow-sm ring-1 ring-blue-100 dark:bg-blue-950/30 dark:ring-blue-500/20"
-                            : "border-slate-200 bg-white/70 hover:border-blue-200 hover:bg-white dark:border-slate-700 dark:bg-slate-950 dark:hover:border-blue-500/40 dark:hover:bg-slate-900"
+                        className={`cursor-pointer rounded-xl border px-3 py-2.5 transition ${roofType === option.value
+                            ? "border-slate-950 bg-slate-100 dark:border-white dark:bg-slate-800"
+                            : "border-slate-200 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950"
                           }`}
                       >
                         <div className="flex items-center gap-3">
@@ -1115,32 +1253,10 @@ export default function OfferForm({
           </div>
 
           <div
-            className={`rounded-2xl border p-4 transition ${hasStorageSelected
-                ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-950/30"
-                : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
-              }`}
+            className={`rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${hasStorageSelected && activeEquipmentEditor === "storage" ? "" : "hidden"}`}
           >
-            <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                checked={hasStorageSelected}
-                disabled={!canConfigureOffer}
-                onChange={(event) => {
-                  updateOfferModules(hasPvSelected, event.target.checked);
-                }}
-                className="mt-1 h-5 w-5"
-              />
-
-              <div>
-                <div className="font-semibold text-slate-900 dark:text-slate-100">Magazyn Energii</div>
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-
-                </div>
-              </div>
-            </label>
-
             {hasStorageSelected && (
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="grid gap-4">
                 {customMode ? (
                   <CustomStorageFields
                     value={customEquipment.storage}
@@ -1159,14 +1275,13 @@ export default function OfferForm({
                   />
                 ) : (
                   <>
-                    <div className="rounded-2xl border border-emerald-100 bg-white/80 p-3 dark:border-emerald-500/30 dark:bg-slate-950 lg:col-span-2">
+                    <div>
                       <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                         Typ magazynu energii
                       </div>
 
-                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <div className="mt-2 grid grid-cols-2 gap-2">
                         {[
-                          { value: "all", label: "Wszystkie" },
                           { value: "low_voltage", label: "LV - niskonapięciowe" },
                           { value: "high_voltage", label: "HV - wysokonapięciowe" },
                         ].map((option) => (
@@ -1177,9 +1292,9 @@ export default function OfferForm({
                               setStorageVoltageFilter(option.value as StorageVoltageFilter);
                               setResult(null);
                             }}
-                            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
-                                ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-500/20"
-                                : "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:border-emerald-500/50"
+                            className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
+                                ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                               }`}
                           >
                             {option.label}
@@ -1194,7 +1309,7 @@ export default function OfferForm({
                       </span>
 
                       <select
-                        className="mt-2 h-[104px] w-full rounded-[18px] border border-slate-200 bg-white px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
+                        className="mt-2 h-[50px] w-full rounded-xl border border-slate-200 bg-white px-4 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-500/20"
                         value={storage}
                         onChange={(e) => {
                           setStorage(e.target.value);
@@ -1211,31 +1326,87 @@ export default function OfferForm({
                     </label>
                   </>
                 )}
-
-                <label className="flex min-h-[104px] cursor-pointer items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-950">
-                  <input
-                    type="checkbox"
-                    checked={clientHasOwnHybridInverter}
-                    onChange={(event) => {
-                      setClientHasOwnHybridInverter(event.target.checked);
-                      setSelectedInverterName("auto");
-                      setResult(null);
-                    }}
-                    className="h-5 w-5 accent-blue-600"
-                  />
-                  <div>
-                    <div className="font-semibold text-slate-900 dark:text-slate-100">
-                      Klient posiada własny falownik hybrydowy
-                    </div>
-                  </div>
-                </label>
               </div>
             )}
           </div>
         </div>
       </div>
       {(hasPvSelected || hasStorageSelected) && (
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "equipment" && activeEquipmentEditor === "inverter" ? "" : "hidden"}`}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold text-slate-900 dark:text-slate-100">Falownik</span>
+            {hasStorageSelected && (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                Zgodne modele {selectedStorageVoltageType === "high_voltage" ? "HV" : "LV"}
+              </span>
+            )}
+          </div>
+
+          {hasStorageSelected && (
+            <label className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950">
+              <input
+                type="checkbox"
+                checked={clientHasOwnHybridInverter}
+                onChange={(event) => {
+                  setClientHasOwnHybridInverter(event.target.checked);
+                  setSelectedInverterName("auto");
+                  setResult(null);
+                }}
+                className="h-4 w-4 accent-blue-600"
+              />
+              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                Klient posiada własny falownik hybrydowy
+              </span>
+            </label>
+          )}
+
+          {!clientHasOwnHybridInverter && (
+            customMode ? (
+              <CustomInverterFields
+                value={customEquipment.inverter}
+                onChange={(inverter) => setCustomEquipment((current) => ({ ...current, inverter }))}
+                onInvalidate={invalidateCalculation}
+              />
+            ) : (
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Model falownika</span>
+                <select
+                  className="mt-1.5 h-[46px] w-full rounded-xl border border-slate-200 bg-white px-4 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-blue-500 dark:focus:ring-blue-500/20"
+                  value={selectedInverterName}
+                  onChange={(event) => {
+                    setSelectedInverterName(event.target.value);
+                    setResult(null);
+                  }}
+                >
+                  <option value="auto">
+                    {hasStorageSelected
+                      ? "Automatycznie dobierz falownik hybrydowy"
+                      : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
+                  </option>
+                  {invertersToShow
+                    .filter((inverterItem) => {
+                      if (hasStorageSelected) {
+                        const inverterVoltageType =
+                          inverterItem.battery_voltage_type || inverterItem.batteryVoltageType;
+                        return inverterItem.type === "hybrid" &&
+                          (!inverterVoltageType || inverterVoltageType === selectedStorageVoltageType);
+                      }
+                      return inverterItem.type !== "hybrid";
+                    })
+                    .map((inverterItem, index) => (
+                      <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
+                        {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )
+          )}
+        </div>
+      )}
+      <div className={`mb-4 grid gap-3 sm:grid-cols-2 ${activeWorkspaceStep === "extras" ? "" : "hidden"}`}>
+      {(hasPvSelected || hasStorageSelected) && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setShowAdvancedOptions((current) => !current)}
@@ -1249,12 +1420,20 @@ export default function OfferForm({
               </div>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
-              {showAdvancedOptions ? "Ukryj" : "Pokaż"}
+              Otwórz
             </span>
           </button>
 
           {showAdvancedOptions && (
-            <div className="mt-4 rounded-2xl border border-white bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
+              <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:border dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-950 dark:text-slate-100">Opcje zaawansowane</h3>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Ustawienia wielu zestawów i harmonogramu płatności.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowAdvancedOptions(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">Zamknij</button>
+                </div>
               <label className="block max-w-xs">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Ilość identycznych zestawów / instalacji
@@ -1289,12 +1468,13 @@ export default function OfferForm({
                   totalGross={customPaymentTotalGross}
                 />
               ) : null}
+              </div>
             </div>
           )}
         </div>
       )}
       {(hasPvSelected || hasStorageSelected) && (
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
           <button
             type="button"
             onClick={() => setShowAdditionalServices((current) => !current)}
@@ -1309,12 +1489,21 @@ export default function OfferForm({
               </div>
             </div>
             <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
-              {showAdditionalServices ? "Ukryj" : "Pokaż"}
+              Otwórz
             </span>
           </button>
 
           {showAdditionalServices && (
-            <div className="mt-4 space-y-3">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
+              <div className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl dark:border dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-950 dark:text-slate-100">Usługi dodatkowe</h3>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Wybierz usługi i określ ich ilość.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowAdditionalServices(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">Gotowe</button>
+                </div>
+                <div className="space-y-3">
               {additionalServicesStatus && (
                 <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {additionalServicesStatus}
@@ -1381,178 +1570,95 @@ export default function OfferForm({
                   </div>
                 );
               })}
+                </div>
+              </div>
             </div>
           )}
         </div>
       )}
-      {(hasPvSelected || hasStorageSelected) && !clientHasOwnHybridInverter && (
-        customMode ? (
-          <CustomInverterFields
-            value={customEquipment.inverter}
-            onChange={(inverter) => setCustomEquipment((current) => ({ ...current, inverter }))}
-            onInvalidate={invalidateCalculation}
-          />
-        ) : (
-          <label className="mb-5 block">
-            <span className="text-sm text-slate-700 dark:text-slate-200">Falownik</span>
-
-            <select
-              className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-              value={selectedInverterName}
-              onChange={(e) => {
-                setSelectedInverterName(e.target.value);
-                setResult(null);
-              }}
-            >
-              <option value="auto">
-                {hasStorageSelected
-                  ? "Automatycznie dobierz falownik hybrydowy"
-                  : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
-              </option>
-
-              {invertersToShow
-                .filter((inverterItem) => {
-                  if (hasStorageSelected) return inverterItem.type === "hybrid";
-                  return inverterItem.type !== "hybrid";
-                })
-                .map((inverterItem, index) => (
-                  <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
-                    {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
-                  </option>
-                ))}
-            </select>
-
-            <p className="mt-2 rounded-xl bg-blue-50 px-3 py-2 text-xs leading-relaxed text-slate-500 dark:bg-blue-950/30 dark:text-slate-400">
-              Funkcja automatyczna dobiera falownik po mocy instalacji. Ręczny wybór pozwala zmienić model i typ falownika, np. z sieciowego na hybrydowy.
-            </p>
-          </label>
-        )
-      )}
-
-      {hasStorageSelected && (
-        <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-500/30 dark:bg-blue-950/25">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">4</span>
-            <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Czy uwzględnić dotację?</span>
-          </div>
-
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={includeSubsidy}
-              onChange={(e) => {
-                setIncludeSubsidy(e.target.checked);
-                setResult(null);
-              }}
-              className="mt-1 h-5 w-5"
-            />
-
+      </div>
+      {(hasPvSelected || hasStorageSelected) && (
+        <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "settlement" ? "" : "hidden"}`}>
+          <div className="space-y-4">
             <div>
-              <div className="font-semibold text-slate-900 dark:text-slate-100">
-                Uwzględnij dotację PME
-              </div>
-              <div className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                Dotacja będzie liczona tylko wtedy, gdy magazyn energii spełnia warunki programu, w tym minimalną pojemność oraz relację pojemności ME do mocy PV.
+              <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">System rozliczeń</span>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: "net_billing", label: "Net Billing", limit: "16 tys. zł" },
+                  { value: "net_metering", label: "Net Metering", limit: "8 tys. zł" },
+                ].map((option) => (
+                  <label key={option.value} className={`cursor-pointer rounded-xl border px-4 py-3 transition ${billingSystem === option.value ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 bg-white text-slate-900 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"}`}>
+                    <div className="flex items-center gap-3">
+                      <input type="radio" name="billingSystem" checked={billingSystem === option.value} onChange={() => { setBillingSystem(option.value as "net_billing" | "net_metering"); setResult(null); }} className="h-4 w-4 shrink-0 accent-emerald-400" />
+                      <span><span className="block text-sm font-bold">{option.label}</span><span className={`mt-0.5 block text-xs ${billingSystem === option.value ? "text-white/65 dark:text-slate-500" : "text-slate-500"}`}>Maksymalna dotacja: {option.limit}</span></span>
+                    </div>
+                  </label>
+                ))}
               </div>
             </div>
-          </label>
-        </div>
-      )}
 
-      {(hasPvSelected || hasStorageSelected) && (
-        <div className="mb-5">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">5</span>
-            <span className="text-sm font-black uppercase tracking-[0.14em] text-blue-700">Forma rozliczeń</span>
-          </div>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label
-              className={`cursor-pointer rounded-2xl border p-4 transition ${billingSystem === "net_billing"
-                  ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
-                  : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
-                }`}
-            >
-              <div className="flex items-start gap-3">
-                <input
-                  type="radio"
-                  name="billingSystem"
-                  checked={billingSystem === "net_billing"}
-                  onChange={() => {
-                    setBillingSystem("net_billing");
-                    setResult(null);
-                  }}
-                  className="mt-1 h-4 w-4"
-                />
-
-                <div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100">Net Billing</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Limit dotacji magazynu: 16 000 zł.
-                  </div>
-                </div>
+            <div>
+              <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">VAT klienta</span>
+              <div className="grid grid-cols-2 gap-2">
+                {[{ value: 8, label: "VAT 8%", meta: "B2C" }, { value: 23, label: "VAT 23%", meta: "B2B" }].map((option) => (
+                  <label key={option.value} className={`cursor-pointer rounded-xl border px-4 py-3 transition ${vatRate === option.value ? "border-slate-950 bg-slate-100 dark:border-white dark:bg-white/10" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"}`}>
+                    <div className="flex items-center gap-3"><input type="radio" name="vatRate" checked={vatRate === option.value} onChange={() => { setVatRate(option.value); setResult(null); }} className="h-4 w-4 shrink-0 accent-slate-950 dark:accent-white" /><span className="text-sm font-bold text-slate-900 dark:text-slate-100">{option.label} <span className="font-medium text-slate-500">({option.meta})</span></span></div>
+                  </label>
+                ))}
               </div>
-            </label>
+            </div>
 
-            <label
-              className={`cursor-pointer rounded-2xl border p-4 transition ${billingSystem === "net_metering"
-                  ? "border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/30"
-                  : "border-slate-200 bg-slate-50 hover:border-blue-200 hover:bg-blue-50/50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
-                }`}
-            >
-              <div className="flex items-start gap-3">
-                <input
-                  type="radio"
-                  name="billingSystem"
-                  checked={billingSystem === "net_metering"}
-                  onChange={() => {
-                    setBillingSystem("net_metering");
-                    setResult(null);
-                  }}
-                  className="mt-1 h-4 w-4"
-                />
-
-                <div>
-                  <div className="font-semibold text-slate-900 dark:text-slate-100">Net Metering</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Limit dotacji magazynu: 8 000 zł.
-                  </div>
-                </div>
-              </div>
-            </label>
+            <div>
+              <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">Program PME</span>
+              {hasStorageSelected ? (
+                <label className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-4 py-3 ${includeSubsidy ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"}`}>
+                  <span><span className="block text-sm font-bold text-slate-900 dark:text-slate-100">Uwzględnij dotację</span><span className="mt-0.5 block text-xs text-slate-500">Optymalizacja programu PME w wyniku</span></span>
+                  <input type="checkbox" checked={includeSubsidy} onChange={(event) => { setIncludeSubsidy(event.target.checked); setResult(null); }} className="h-5 w-5 shrink-0 accent-emerald-500" />
+                </label>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200 p-2.5 text-xs text-slate-400 dark:border-slate-700">Dostępne przy magazynie energii</div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {(hasPvSelected || hasStorageSelected) && (
-        <label className="mb-6 block">
-          <span className="text-sm text-slate-700 dark:text-slate-200">VAT klienta</span>
+          <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              disabled={activeWorkspaceStepIndex === 0}
+              onClick={goToPreviousWorkspaceSection}
+              className="rounded-xl px-4 py-3 text-sm font-bold text-slate-500 transition hover:bg-slate-100 disabled:invisible dark:hover:bg-slate-800"
+            >
+              ← {previousSectionLabel || "Wstecz"}
+            </button>
 
-          <select
-            className="mt-2 h-[50px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-blue-500 dark:focus:bg-slate-950 dark:focus:ring-blue-500/20"
-            value={vatRate}
-            onChange={(e) => {
-              setVatRate(Number(e.target.value));
-              setResult(null);
-            }}
-          >
-            <option value={8}>8% B2C</option>
-            <option value={23}>23% B2B</option>
-          </select>
-        </label>
-      )}
-
-      <button
-        onClick={calculate}
-        disabled={!canConfigureOffer || (!hasPvSelected && !hasStorageSelected)}
-        className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-200 transition hover:from-emerald-500 hover:to-teal-400 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-300 disabled:text-slate-500 disabled:shadow-none dark:shadow-black/30 dark:disabled:from-slate-700 dark:disabled:to-slate-700 dark:disabled:text-slate-400 sm:text-base"
-      >
-        {!canConfigureOffer
-          ? "Uzupełnij informację o obecnej PV klienta"
-          : hasPvSelected || hasStorageSelected
-            ? "Oblicz ofertę"
-            : "Wybierz PV lub ME"}
-      </button>
+            {activeWorkspaceStep !== "settlement" ? (
+              <button
+                type="button"
+                onClick={goToNextWorkspaceSection}
+                className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:shadow-none dark:hover:bg-slate-200"
+              >
+                Dalej: {nextSectionLabel} →
+              </button>
+            ) : (
+              <button
+                onClick={calculate}
+                disabled={!canConfigureOffer || (!hasPvSelected && !hasStorageSelected)}
+                className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 shadow-lg shadow-emerald-200 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:shadow-black/30"
+              >
+                {!canConfigureOffer
+                  ? "Uzupełnij dane klienta"
+                  : hasPvSelected || hasStorageSelected
+                    ? hasStaleResult
+                      ? "Przelicz ofertę"
+                      : "Oblicz ofertę"
+                    : "Wybierz PV lub ME"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

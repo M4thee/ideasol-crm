@@ -391,14 +391,14 @@ export default function AppShell({ children }: AppShellProps) {
 
   if (isCalculatorApp) {
     return (
-      <main className="min-h-screen w-full overflow-x-hidden bg-slate-100 text-slate-950">
+      <main className="min-h-screen w-full overflow-x-clip bg-slate-100 text-slate-950">
         {children}
       </main>
     );
   }
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-slate-100 text-slate-950">
+    <div className="min-h-screen w-full overflow-x-clip bg-slate-100 text-slate-950">
       <div className="mx-auto w-full max-w-7xl px-3 py-4 sm:px-4 sm:py-5 lg:p-6">
         {isLoggedIn ? <AppHeader /> : null}
         {offlineSyncBanner && (
@@ -411,7 +411,7 @@ export default function AppShell({ children }: AppShellProps) {
             {offlineSyncBanner.message}
           </div>
         )}
-        <div className="w-full overflow-x-hidden">
+        <div className="w-full overflow-x-clip">
           {children}
         </div>
       </div>

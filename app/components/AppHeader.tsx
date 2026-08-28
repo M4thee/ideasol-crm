@@ -70,6 +70,7 @@ type HeaderNotification = {
   title: string;
   body: string | null;
   client_id: string | null;
+  link_url: string | null;
   is_read: boolean;
   created_at: string;
 };
@@ -510,7 +511,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     async function loadNotifications() {
       const { data, error } = await supabase
         .from("notifications")
-        .select("id, title, body, client_id, is_read, created_at")
+        .select("id, title, body, client_id, link_url, is_read, created_at")
         .eq("user_id", profileId)
         .order("created_at", { ascending: false })
         .limit(10);
@@ -551,7 +552,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     async function handleNotificationsRefresh() {
       const { data, error } = await supabase
         .from("notifications")
-        .select("id, title, body, client_id, is_read, created_at")
+        .select("id, title, body, client_id, link_url, is_read, created_at")
         .eq("user_id", profileId)
         .order("created_at", { ascending: false })
         .limit(1);
@@ -854,6 +855,16 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
     setMobileMenuOpen(false);
     setMobileNotificationsOpen(false);
     setToastNotification(null);
+
+    if (notification.link_url) {
+      try {
+        const target = new URL(notification.link_url, window.location.origin);
+        router.push(`${target.pathname}${target.search}${target.hash}`);
+      } catch {
+        router.push(notification.link_url);
+      }
+      return;
+    }
 
     if (notification.client_id) {
       router.push(`/clients/${notification.client_id}`);
@@ -1786,7 +1797,7 @@ const canManageUsers = profile?.role === "admin";
                 </p>
               )}
               <p className="mt-2 text-xs font-semibold text-sky-300">
-                Kliknij, aby otworzyć kontakt
+                Kliknij, aby otworzyć w CRM
               </p>
             </div>
           </div>

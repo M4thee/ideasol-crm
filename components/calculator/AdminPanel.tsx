@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
+import CreditAdminPanel from "@/components/calculator/CreditAdminPanel";
 
 
 type PanelItem = {
@@ -759,6 +760,17 @@ export default function AdminPanel({
             }`}
         >
           Usługi dodatkowe
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("credits")}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${activeTab === "credits"
+            ? "bg-emerald-600 text-white shadow-md shadow-emerald-100 dark:shadow-none"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+        >
+          Finansowanie zewnętrzne
         </button>
       </div>
 
@@ -1806,7 +1818,7 @@ export default function AdminPanel({
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === "additionalServices" ? (
         <div className="space-y-6">
           <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-6 shadow-sm">
             <h3 className="mb-4 text-xl font-bold text-slate-950">Dodaj usługę dodatkową</h3>
@@ -1965,6 +1977,8 @@ export default function AdminPanel({
             </div>
           </div>
         </div>
+      ) : (
+        <CreditAdminPanel />
       )}
     </section>
   );

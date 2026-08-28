@@ -358,3 +358,53 @@ body {
 .dark [class*="text-[#0d9488]"] {
   color: #a5f3fc !important;
 }
+
+/* Pastel task cards stay paper-like and readable in the dark CRM theme. */
+.sticky-notes-surface {
+  background-color: #f7f3e9;
+  background-image: radial-gradient(circle, rgba(100, 116, 139, 0.18) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.dark .sticky-notes-surface {
+  background-color: #182132 !important;
+  background-image: radial-gradient(circle, rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+}
+
+html.dark .sticky-notes-surface .sticky-note-card,
+html.dark .sticky-notes-surface .sticky-note-card > p {
+  color: #0f172a !important;
+}
+
+html.dark .sticky-notes-surface .sticky-note-card .sticky-note-muted,
+html.dark .sticky-notes-surface .sticky-note-card .sticky-note-muted p {
+  color: #475569 !important;
+}
+
+html.dark .sticky-notes-surface .sticky-note-card .sticky-note-chip {
+  background-color: rgba(255, 255, 255, 0.68) !important;
+  color: #334155 !important;
+}
+
+html.dark .sticky-notes-surface .sticky-note-card .sticky-note-muted .sticky-note-expired {
+  color: #dc2626 !important;
+}
+.sticky-note-highlighted {
+  animation: sticky-note-glow 1.35s ease-in-out 3;
+  box-shadow:
+    0 0 0 4px var(--sticky-note-glow),
+    0 0 34px 10px color-mix(in srgb, var(--sticky-note-glow) 72%, transparent) !important;
+}
+
+@keyframes sticky-note-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--sticky-note-glow) 58%, transparent),
+      0 0 24px 5px color-mix(in srgb, var(--sticky-note-glow) 44%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px var(--sticky-note-glow),
+      0 0 42px 14px color-mix(in srgb, var(--sticky-note-glow) 82%, transparent);
+  }
+}

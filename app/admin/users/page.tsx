@@ -10,6 +10,15 @@ import SmsTemplatesAdmin from "@/components/admin/SmsTemplatesAdmin";
 import AuditLogsAdmin from "@/components/admin/AuditLogsAdmin";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
+const STICKY_NOTE_COLORS = [
+  ["yellow", "Żółty", "#fff2a8"], ["mint", "Miętowy", "#ccebdc"],
+  ["blue", "Niebieski", "#cdebf7"], ["pink", "Różowy", "#ffd7df"],
+  ["lavender", "Lawendowy", "#e8ddff"], ["peach", "Brzoskwiniowy", "#ffd8b8"],
+  ["coral", "Koralowy", "#ffc9c2"], ["aqua", "Turkusowy", "#c8f0ee"],
+  ["sage", "Szałwiowy", "#dce8c5"], ["lilac", "Liliowy", "#f0d6f2"],
+  ["apricot", "Morelowy", "#ffe2a8"], ["stone", "Kamienny", "#e8e3dc"],
+] as const;
+type StickyNoteColor = (typeof STICKY_NOTE_COLORS)[number][0];
 
 type Role = (typeof ROLES)[number];
 
@@ -25,6 +34,7 @@ type Profile = {
   realization_access: boolean;
   sms_access: boolean;
   custom_mode_access: boolean;
+  sticky_note_color: StickyNoteColor;
 };
 
 type ClientTag = {
@@ -416,7 +426,7 @@ export default function AdminUsersPage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, user_number, display_name, email, role, manager_id, hidden_from_assignment, is_active")
+      .select("id, user_number, display_name, email, role, manager_id, hidden_from_assignment, is_active, sticky_note_color")
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -1023,6 +1033,11 @@ export default function AdminUsersPage() {
       changeLines.push(
         `Rola: ${profile.role} → ${changes.role}`
       );
+    }
+    if (changes.sticky_note_color && changes.sticky_note_color !== profile.sticky_note_color) {
+      const previousColor = STICKY_NOTE_COLORS.find(([value]) => value === profile.sticky_note_color)?.[1] || profile.sticky_note_color;
+      const nextColor = STICKY_NOTE_COLORS.find(([value]) => value === changes.sticky_note_color)?.[1] || changes.sticky_note_color;
+      changeLines.push(`Kolor karteczek: ${previousColor} → ${nextColor}`);
     }
 
     if (
@@ -1927,6 +1942,7 @@ export default function AdminUsersPage() {
                       </button>
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
+                    <th className="px-4 py-3">Kolor karteczek</th>
                     <th className="px-4 py-3 text-center">SMS</th>
                     <th className="px-4 py-3 text-center">Custom Mode</th>
                     <th className="px-4 py-3">Manager</th>
@@ -2046,6 +2062,32 @@ export default function AdminUsersPage() {
                             )
                               ? "Tak"
                               : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <label className="flex min-w-[190px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                            <span
+                              className="h-6 w-6 shrink-0 rounded-md border border-black/10"
+                              style={{
+                                backgroundColor: STICKY_NOTE_COLORS.find(
+                                  ([value]) => value === (editedProfile.sticky_note_color ?? profile.sticky_note_color)
+                                )?.[2],
+                              }}
+                              aria-hidden="true"
+                            />
+                            <select
+                              value={editedProfile.sticky_note_color ?? profile.sticky_note_color ?? "yellow"}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                sticky_note_color: event.target.value as StickyNoteColor,
+                              })}
+                              aria-label={`Kolor karteczek użytkownika ${profile.display_name || profile.email || profile.user_number}`}
+                              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-slate-800 outline-none"
+                            >
+                              {STICKY_NOTE_COLORS.map(([value, label]) => (
+                                <option key={value} value={value}>{label}</option>
+                              ))}
+                            </select>
                           </label>
                         </td>
 

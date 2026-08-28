@@ -2200,6 +2200,17 @@ if (updateClientStatusError) {
 
           <div className="flex flex-wrap gap-2">
             <Link
+              href={`/calculator-app?copyOffer=${offer.id}`}
+              className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-100"
+              title="Utwórz nową ofertę na podstawie tej wyceny"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <rect x="8" y="8" width="11" height="11" rx="2" />
+                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+              </svg>
+              Utwórz kopię
+            </Link>
+            <Link
               href={`/clients/${offer.client_id}`}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >

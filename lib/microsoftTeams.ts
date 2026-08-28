@@ -26,6 +26,24 @@ export type TeamsMeetingConfirmationReminderPayload = {
   kind?: "meeting" | "phone";
 };
 
+export type TeamsStickyNoteCreatedPayload = {
+  authorName: string;
+  noteUrl: string;
+};
+
+export type TeamsStickyNoteCommentPayload = {
+  commenterName: string;
+  noteAuthorName: string;
+  commentContent: string;
+  noteUrl: string;
+};
+
+export type TeamsStickyNoteReminderPayload = {
+  authorName: string;
+  noteContent: string;
+  noteUrl: string;
+};
+
 export type TeamsDelegatedCalendarNotificationPayload = TeamsCalendarNotificationPayload & {
   accessToken: string;
 };
@@ -245,6 +263,36 @@ export function buildTeamsMeetingConfirmationReminderMessage(
   payload: TeamsMeetingConfirmationReminderPayload
 ) {
   return buildMeetingConfirmationReminderMessage(payload);
+}
+
+export function buildTeamsStickyNoteCreatedMessage(payload: TeamsStickyNoteCreatedPayload) {
+  return [
+    "<strong>📝 Nowa notatka na tablicy zadań</strong>",
+    "",
+    `<em>Pojawiła się nowa notatka na tablicy zadań w CRM od <strong>${displayValue(payload.authorName)}</strong>.</em>`,
+    "",
+    `<a href="${escapeHtml(payload.noteUrl)}">Otwórz i wyróżnij notatkę w CRM</a>`,
+  ].join("\n");
+}
+
+export function buildTeamsStickyNoteCommentMessage(payload: TeamsStickyNoteCommentPayload) {
+  return [
+    "<strong>💬 Nowy komentarz na tablicy zadań</strong>",
+    "",
+    `Użytkownik <strong>${displayValue(payload.commenterName)}</strong> skomentował notatkę użytkownika <strong>${displayValue(payload.noteAuthorName)}</strong> na tablicy zadań w CRM:`,
+    "",
+    `<a href="${escapeHtml(payload.noteUrl)}">${displayValue(payload.commentContent)}</a>`,
+  ].join("\n");
+}
+
+export function buildTeamsStickyNoteReminderMessage(payload: TeamsStickyNoteReminderPayload) {
+  return [
+    "<strong>⏰ Przypomnienie z tablicy zadań</strong>",
+    "",
+    `Notatka użytkownika <strong>${displayValue(payload.authorName)}</strong>:`,
+    "",
+    `<a href="${escapeHtml(payload.noteUrl)}">${displayValue(payload.noteContent)}</a>`,
+  ].join("\n");
 }
 
 export async function sendTeamsCalendarNotification(
@@ -599,6 +647,66 @@ export async function sendTeamsDirectNoteMentionNotification(
     userEmail: payload.userEmail,
     message: buildTeamsNoteMentionMessage(payload),
     accessToken: delegatedAccessToken,
+  });
+}
+
+async function getStickyNotesDelegatedAccessToken() {
+  const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN?.trim();
+
+  if (!delegatedRefreshToken) {
+    throw new Error(
+      "Brak MICROSOFT_DELEGATED_REFRESH_TOKEN do wysyłki powiadomień tablicy zadań."
+    );
+  }
+
+  const delegatedToken = await refreshMicrosoftDelegatedAccessToken(delegatedRefreshToken);
+
+  if (!delegatedToken.access_token) {
+    throw new Error(
+      "Nie udało się pobrać delegowanego tokenu Microsoft Graph dla tablicy zadań."
+    );
+  }
+
+  return delegatedToken.access_token;
+}
+
+async function sendTeamsStickyChatNotification(chatId: string, messageContent: string) {
+  const accessToken = await getStickyNotesDelegatedAccessToken();
+  const message = await graphApiRequestWithAccessToken<GraphChannelMessage>(
+    `https://graph.microsoft.com/v1.0/chats/${encodeURIComponent(chatId)}/messages`,
+    accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: {
+          contentType: "html",
+          content: messageContent.replaceAll("\n", "<br />"),
+        },
+      }),
+    }
+  );
+
+  return { success: true, chatId, messageId: message.id };
+}
+
+export async function sendTeamsStickyManagementNotification(message: string) {
+  return sendTeamsStickyChatNotification(requireEnv("MICROSOFT_TEAMS_BOARD_CHAT_ID"), message);
+}
+
+export async function sendTeamsStickyGeneralNotification(message: string) {
+  return sendTeamsStickyChatNotification(
+    requireEnv("MICROSOFT_TEAMS_GENERAL_CHAT_ID"),
+    message
+  );
+}
+
+export async function sendTeamsStickyDirectNotification(
+  payload: TeamsCalendarNotificationPayload
+) {
+  const accessToken = await getStickyNotesDelegatedAccessToken();
+  return sendTeamsDelegatedDirectCalendarNotification({
+    ...payload,
+    accessToken,
   });
 }
 
