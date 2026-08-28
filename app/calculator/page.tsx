@@ -2542,8 +2542,8 @@ IdeaSol`;
                       expanded={isResultFocusMode}
                     />
                   )}
-                  <div className={`${isResultFocusMode ? "gap-2 p-1.5" : "gap-1 p-1"} grid ${result?.offerType === "custom" ? "grid-cols-1" : "grid-cols-3"} rounded-xl bg-white/10`}>
-                    {(result?.offerType === "custom"
+                  <div className={`${isResultFocusMode ? "gap-2 p-1.5" : "gap-1 p-1"} grid ${customProductMode ? "grid-cols-1" : "grid-cols-3"} rounded-xl bg-white/10`}>
+                    {(customProductMode
                       ? [{ value: "summary", label: "Wycena" }]
                       : [
                           { value: "summary", label: "Wycena" },
@@ -2568,7 +2568,11 @@ IdeaSol`;
                   <div className="p-7 text-center">
                     <div className="mx-auto h-12 w-px bg-gradient-to-b from-emerald-400 to-transparent" />
                     <p className="mt-3 font-bold text-slate-900 dark:text-white">Czekam na przeliczenie</p>
-                    <p className="mx-auto mt-1 max-w-56 text-xs leading-5 text-slate-500">Tutaj pojawi się cena, konfiguracja, dotacja i finansowanie.</p>
+                    <p className="mx-auto mt-1 max-w-56 text-xs leading-5 text-slate-500">
+                      {customProductMode
+                        ? "Tutaj pojawią się pozycje i cena oferty."
+                        : "Tutaj pojawi się cena, konfiguracja, dotacja i finansowanie."}
+                    </p>
                   </div>
                 ) : (
                   <div className={`${isResultFocusMode ? "w-full px-5 pb-5 pt-5" : "max-h-[calc(100vh-13rem)] overflow-y-auto px-1 pb-1 pt-2"} ${resultIsDirty ? "pointer-events-none opacity-65" : ""}`}>

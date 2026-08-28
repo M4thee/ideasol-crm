@@ -12,7 +12,7 @@ type CustomOfferFieldsProps = {
 };
 
 const inputClass =
-  "mt-2 w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-violet-100/40 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 dark:border-violet-500/40 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-violet-400 dark:focus:ring-violet-500/20";
+  "mt-2 min-w-0 w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-violet-100/40 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 dark:border-violet-500/40 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-violet-400 dark:focus:ring-violet-500/20";
 
 export default function CustomOfferFields({
   items,
@@ -78,8 +78,8 @@ export default function CustomOfferFields({
                 </button>
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px_200px]">
-                <label className="block">
+              <div className="space-y-4">
+                <label className="block min-w-0">
                   <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                     Nazwa produktu lub usługi
                   </span>
@@ -92,47 +92,49 @@ export default function CustomOfferFields({
                   />
                 </label>
 
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    Ilość (opcjonalnie)
-                  </span>
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    placeholder="1"
-                    value={item.quantity ?? ""}
-                    onChange={(event) =>
-                      updateItem(item.id, {
-                        quantity: event.target.value ? Number(event.target.value) : null,
-                      })
-                    }
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                    Cena netto / szt.
-                  </span>
-                  <div className="relative">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      Ilość <span className="font-normal text-slate-400">(opcjonalnie)</span>
+                    </span>
                     <input
-                      className={`${inputClass} pr-12`}
+                      className={inputClass}
                       type="number"
-                      min="0"
+                      min="0.01"
                       step="0.01"
-                      inputMode="decimal"
-                      placeholder="0,00"
-                      value={item.unitNet || ""}
+                      placeholder="1"
+                      value={item.quantity ?? ""}
                       onChange={(event) =>
-                        updateItem(item.id, { unitNet: Number(event.target.value) })
+                        updateItem(item.id, {
+                          quantity: event.target.value ? Number(event.target.value) : null,
+                        })
                       }
                     />
-                    <span className="pointer-events-none absolute bottom-3 right-4 text-sm font-semibold text-slate-400">
-                      zł
+                  </label>
+
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      Cena netto / szt.
                     </span>
-                  </div>
-                </label>
+                    <div className="relative">
+                      <input
+                        className={`${inputClass} pr-12`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        value={item.unitNet || ""}
+                        onChange={(event) =>
+                          updateItem(item.id, { unitNet: Number(event.target.value) })
+                        }
+                      />
+                      <span className="pointer-events-none absolute bottom-3 right-4 text-sm font-semibold text-slate-400">
+                        zł
+                      </span>
+                    </div>
+                  </label>
+                </div>
               </div>
 
               {item.name.trim() && item.unitNet > 0 ? (
