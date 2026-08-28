@@ -14,6 +14,10 @@ import {
 } from "@/lib/calculator/customEquipment";
 import CustomPaymentScheduleFields from "@/components/calculator/CustomPaymentScheduleFields";
 import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
+import {
+  getExplicitStorageVoltageType,
+  rankInvertersForStorage,
+} from "@/lib/calculator/equipmentCompatibility";
 
 function isOfferFormOnline() {
   if (typeof navigator === "undefined") return true;
@@ -70,10 +74,11 @@ type SelectedAdditionalService = {
 type StorageVoltageFilter = "low_voltage" | "high_voltage";
 
 function getStorageVoltageType(storageItem: CatalogStorage) {
-  return storageItem.voltage_type || storageItem.voltageType || "low_voltage";
+  return getExplicitStorageVoltageType(storageItem);
 }
 
-function getStorageVoltageLabel(voltageType: "low_voltage" | "high_voltage") {
+function getStorageVoltageLabel(voltageType: "low_voltage" | "high_voltage" | null) {
+  if (!voltageType) return "brak danych o napięciu";
   return voltageType === "high_voltage" ? "wysokonapięciowy" : "niskonapięciowy";
 }
 
@@ -551,6 +556,8 @@ export default function OfferForm({
   }
 
   const panelsToShow = panels;
+  const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
+  const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
 
   const storagesToShow = useMemo(() => {
     return storages.filter(
@@ -558,17 +565,24 @@ export default function OfferForm({
     );
   }, [storages, storageVoltageFilter]);
 
-  const selectedStorageVoltageType = useMemo<StorageVoltageFilter>(() => {
+  const selectedStorageItem = useMemo(
+    () => storages.find((storageItem) => storageItem.code === storage) || null,
+    [storage, storages]
+  );
+
+  const selectedStorageVoltageType = useMemo<StorageVoltageFilter | null>(() => {
     if (customMode) return customEquipment.storage.voltageType;
 
-    const selectedStorage = storages.find((storageItem) => storageItem.code === storage);
-    return selectedStorage ? getStorageVoltageType(selectedStorage) : storageVoltageFilter;
-  }, [customEquipment.storage.voltageType, customMode, storage, storageVoltageFilter, storages]);
+    return selectedStorageItem
+      ? getStorageVoltageType(selectedStorageItem)
+      : storageVoltageFilter;
+  }, [customEquipment.storage.voltageType, customMode, selectedStorageItem, storageVoltageFilter]);
 
-  const invertersToShow = inverters;
+  const invertersToShow = useMemo(() => {
+    if (!hasStorageSelected || !selectedStorageItem) return inverters;
+    return rankInvertersForStorage(inverters, selectedStorageItem);
+  }, [hasStorageSelected, inverters, selectedStorageItem]);
 
-  const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
-  const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
   const existingPvPowerNumber = Number(String(existingPvPowerKw || "0").replace(",", "."));
   const canConfigureOffer =
     existingPvAnswer === "no" ||
@@ -1337,7 +1351,7 @@ export default function OfferForm({
             <span className="font-semibold text-slate-900 dark:text-slate-100">Falownik</span>
             {hasStorageSelected && (
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                Zgodne modele {selectedStorageVoltageType === "high_voltage" ? "HV" : "LV"}
+                Zgodne modele {selectedStorageVoltageType === "high_voltage" ? "HV" : selectedStorageVoltageType === "low_voltage" ? "LV" : "—"}
               </span>
             )}
           </div>
@@ -1380,7 +1394,7 @@ export default function OfferForm({
                 >
                   <option value="auto">
                     {hasStorageSelected
-                      ? "Automatycznie dobierz falownik hybrydowy"
+                      ? "Automatycznie dobierz zgodny zestaw"
                       : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
                   </option>
                   {invertersToShow
@@ -1389,7 +1403,8 @@ export default function OfferForm({
                         const inverterVoltageType =
                           inverterItem.battery_voltage_type || inverterItem.batteryVoltageType;
                         return inverterItem.type === "hybrid" &&
-                          (!inverterVoltageType || inverterVoltageType === selectedStorageVoltageType);
+                          Boolean(inverterVoltageType) &&
+                          inverterVoltageType === selectedStorageVoltageType;
                       }
                       return inverterItem.type !== "hybrid";
                     })

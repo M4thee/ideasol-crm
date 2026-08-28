@@ -43,7 +43,7 @@ type StorageItem = {
   name: string;
   displayName: string;
   capacityKwh: number;
-  voltageType: "low_voltage" | "high_voltage";
+  voltageType: "low_voltage" | "high_voltage" | null;
   priceNet: number;
   installationNet: number;
   catalogCardUrl?: string | null;
@@ -159,7 +159,7 @@ async function loadCatalogFromSupabase() {
           name: storage.name,
           displayName: storage.display_name || storage.name,
           capacityKwh: Number(storage.capacity_kwh),
-          voltageType: storage.voltage_type || "low_voltage",
+          voltageType: storage.voltage_type || null,
           priceNet: Number(storage.price_net),
           installationNet: Number(storage.installation_net),
           catalogCardUrl: storage.catalog_card_url || null,

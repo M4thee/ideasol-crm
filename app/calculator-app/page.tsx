@@ -28,6 +28,10 @@ import {
   calculateOffer,
   type CalculatorCatalog,
 } from "@/lib/calculator/calculateOffer";
+import {
+  getExplicitStorageVoltageType,
+  rankInvertersForStorage,
+} from "@/lib/calculator/equipmentCompatibility";
 
 
 type Result = {
@@ -172,7 +176,7 @@ type CatalogInverter = {
 };
 
 function getCatalogStorageVoltageType(storageItem?: CatalogStorage) {
-  return storageItem?.voltage_type || storageItem?.voltageType || "low_voltage";
+  return getExplicitStorageVoltageType(storageItem);
 }
 
 type SelectedAdditionalService = {
@@ -2794,20 +2798,10 @@ IdeaSol`;
 
 
 
-  const quickEditStorageVoltageType = getCatalogStorageVoltageType(
-    storages.find((storageItem) => storageItem.code === storage)
-  );
-  const quickEditInverters = inverters
-    .filter((inverterItem) => {
-      if (result?.energyStorage !== "Brak") {
-        const inverterVoltageType =
-          inverterItem.battery_voltage_type || inverterItem.batteryVoltageType || "low_voltage";
-
-        return inverterItem.type === "hybrid" && inverterVoltageType === quickEditStorageVoltageType;
-      }
-
-      return inverterItem.type !== "hybrid";
-    })
+  const quickEditStorageItem = storages.find((storageItem) => storageItem.code === storage);
+  const quickEditInverters = (result?.energyStorage !== "Brak" && quickEditStorageItem
+    ? rankInvertersForStorage(inverters, quickEditStorageItem)
+    : inverters.filter((inverterItem) => inverterItem.type !== "hybrid"))
     .filter((inverterItem, index, compatibleInverters) => (
       compatibleInverters.findIndex((candidate) => candidate.name === inverterItem.name) === index
     ));
@@ -3151,7 +3145,7 @@ IdeaSol`;
                       value: storage,
                       options: storages.map((storageItem) => ({
                         value: storageItem.code,
-                        label: `${storageItem.display_name || storageItem.name} · ${storageItem.capacity_kwh.toLocaleString("pl-PL")} kWh · ${getCatalogStorageVoltageType(storageItem) === "high_voltage" ? "HV" : "LV"}`,
+                        label: `${storageItem.display_name || storageItem.name} · ${storageItem.capacity_kwh.toLocaleString("pl-PL")} kWh · ${getCatalogStorageVoltageType(storageItem) === "high_voltage" ? "HV" : getCatalogStorageVoltageType(storageItem) === "low_voltage" ? "LV" : "brak danych"}`,
                       })),
                       onChange: (value) => {
                         setStorage(value);

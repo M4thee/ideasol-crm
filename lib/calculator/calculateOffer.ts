@@ -5,6 +5,11 @@ import {
   CUSTOM_STORAGE_CODE,
   normalizeCustomEquipment,
 } from "@/lib/calculator/customEquipment";
+import {
+  getExplicitInverterVoltageType,
+  getExplicitStorageVoltageType,
+  rankInvertersForStorage,
+} from "@/lib/calculator/equipmentCompatibility";
 
 export type CalculatorCatalog = {
   panels: Record<string, PanelItem>;
@@ -73,7 +78,7 @@ export type StorageItem = {
   name: string;
   displayName: string;
   capacityKwh: number;
-  voltageType?: "low_voltage" | "high_voltage";
+  voltageType?: "low_voltage" | "high_voltage" | null;
   priceNet: number;
   installationNet: number;
   catalogCardUrl?: string | null;
@@ -131,9 +136,9 @@ function beforeDiscountFromAfterDiscountGross(grossAfterDiscount: number) {
 }
 
 function getStorageVoltageDescription(storage: StorageItem) {
-  return storage.voltageType === "high_voltage"
-    ? "wysokonapięciowy"
-    : "niskonapięciowy";
+  if (storage.voltageType === "high_voltage") return "wysokonapięciowy";
+  if (storage.voltageType === "low_voltage") return "niskonapięciowy";
+  return "brak danych o napięciu";
 }
 
 function getStorageDisplayName(storage: StorageItem) {
@@ -150,7 +155,7 @@ function getInverterBatteryVoltageType(inverter: InverterItem) {
   if (inverter.type !== "hybrid") {
     return null;
   }
-  return inverter.batteryVoltageType || "low_voltage";
+  return getExplicitInverterVoltageType(inverter);
 }
 
 function getBatteryVoltageDescription(voltageType: "low_voltage" | "high_voltage" | null) {
@@ -161,19 +166,6 @@ function getBatteryVoltageDescription(voltageType: "low_voltage" | "high_voltage
     return "niskonapięciowy";
   }
   return "nie dotyczy";
-}
-
-function isInverterCompatibleWithStorage(
-  inverter: InverterItem,
-  storageVoltageType: "low_voltage" | "high_voltage" | null
-) {
-  if (!storageVoltageType) {
-    return true;
-  }
-  if (inverter.type !== "hybrid") {
-    return false;
-  }
-  return getInverterBatteryVoltageType(inverter) === storageVoltageType;
 }
 
 function buildContractBreakdown(params: {
@@ -760,9 +752,15 @@ export function calculateOffer(input: CalculateOfferInput) {
     (body.clientHasOwnHybridInverter || body.selectedInverterName === "none")
   );
   const selectedStorageVoltageType = hasStorageSelected
-    ? storage.voltageType || "low_voltage"
+    ? getExplicitStorageVoltageType(storage)
     : null;
   const selectedInverterName = String(body.selectedInverterName || "auto");
+
+  if (hasStorageSelected && !selectedStorageVoltageType) {
+    throw new Error(
+      `Magazyn „${storage.displayName || storage.name}” nie ma określonego napięcia baterii. Uzupełnij kartę produktu przed przygotowaniem oferty.`
+    );
+  }
 
   const manuallySelectedInverter =
     selectedInverterName !== "auto" && selectedInverterName !== "none"
@@ -771,17 +769,28 @@ export function calculateOffer(input: CalculateOfferInput) {
 
   const compatibleManuallySelectedInverter =
     manuallySelectedInverter &&
-    isInverterCompatibleWithStorage(manuallySelectedInverter, selectedStorageVoltageType)
+    (!hasStorageSelected ||
+      rankInvertersForStorage([manuallySelectedInverter], storage).length > 0)
       ? manuallySelectedInverter
       : null;
 
+  if (manuallySelectedInverter && !compatibleManuallySelectedInverter) {
+    throw new Error(
+      `Falownik „${manuallySelectedInverter.displayName || manuallySelectedInverter.name}” nie jest zgodny napięciowo z magazynem „${storage.displayName || storage.name}”. Wybierz falownik ${selectedStorageVoltageType === "high_voltage" ? "wysokonapięciowy" : "niskonapięciowy"}.`
+    );
+  }
+
   const autoInverterType = isStorageOnly || hasStorageSelected ? "hybrid" : "ongrid";
 
-  const compatibleAutomaticInverters = pricing.inverters.filter(
-    (item) =>
-      item.type === autoInverterType &&
-      isInverterCompatibleWithStorage(item, selectedStorageVoltageType)
-  );
+  const compatibleAutomaticInverters = hasStorageSelected
+    ? rankInvertersForStorage(pricing.inverters, storage)
+    : pricing.inverters
+        .filter((item) => item.type === autoInverterType)
+        .filter(
+          (item, index, compatibleInverters) =>
+            compatibleInverters.findIndex((candidate) => candidate.name === item.name) === index
+        )
+        .sort((first, second) => first.maxPvKw - second.maxPvKw);
 
   const automaticallySelectedInverter = compatibleAutomaticInverters.find(
     (item) => inverterSizingPvPowerKw <= item.maxPvKw
@@ -791,8 +800,17 @@ export function calculateOffer(input: CalculateOfferInput) {
     clientHasOwnHybridInverter
       ? { name: "Brak", priceNet: 0 }
       : compatibleManuallySelectedInverter ||
-        automaticallySelectedInverter ||
-        { name: "Brak", priceNet: 0 };
+        automaticallySelectedInverter;
+
+  if (!inverter) {
+    const requiredVoltageDescription = hasStorageSelected
+      ? ` i napięcia ${selectedStorageVoltageType === "high_voltage" ? "wysokiego" : "niskiego"}`
+      : "";
+
+    throw new Error(
+      `Brak falownika zgodnego z wymaganą mocą ${inverterSizingPvPowerKw.toLocaleString("pl-PL")} kWp${requiredVoltageDescription}. Uzupełnij katalog albo wybierz właściwy model ręcznie.`
+    );
+  }
 
   const panelsCostNet = isStorageOnly ? 0 : panelCount * panel.priceNet;
   const inverterCostNet = inverter.priceNet;
@@ -1042,7 +1060,7 @@ export function calculateOffer(input: CalculateOfferInput) {
         : "nie dotyczy",
     energyStorage: storageDisplayName,
     storage: storageDisplayName,
-    storageVoltageType: storage.voltageType || "low_voltage",
+    storageVoltageType: getExplicitStorageVoltageType(storage),
     storageVoltageLabel: getStorageVoltageDescription(storage),
     storageCapacityKwh: storage.capacityKwh,
     offerType,
