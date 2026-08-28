@@ -23,10 +23,12 @@ import {
   validateCustomPaymentSchedule,
 } from "@/lib/customPaymentSchedule";
 import {
+  DEFAULT_CUSTOM_OFFER_TITLE,
   createCustomOfferItem,
   getCustomOfferItemQuantity,
   getCustomOfferNetTotal,
   getValidCustomOfferItems,
+  normalizeCustomOfferTitle,
   type CustomOfferItem,
 } from "@/lib/calculator/customOffer";
 
@@ -53,6 +55,7 @@ type Result = {
   storageVoltageType?: "low_voltage" | "high_voltage";
   storageVoltageLabel?: string;
   offerType: string;
+  customOfferTitle?: string;
   customPaymentTerms?: string;
 
   billingSystem?: "net_billing" | "net_metering";
@@ -697,6 +700,7 @@ export default function Home() {
   const [identicalSetCount, setIdenticalSetCount] = useState(1);
   const [customMode, setCustomMode] = useState(false);
   const [customProductMode, setCustomProductMode] = useState(false);
+  const [customOfferTitle, setCustomOfferTitle] = useState(DEFAULT_CUSTOM_OFFER_TITLE);
   const [customOfferItems, setCustomOfferItems] = useState<CustomOfferItem[]>([
     createCustomOfferItem(),
   ]);
@@ -1616,6 +1620,14 @@ export default function Home() {
         customModeAvailable && !sourceCustomProductMode && Boolean(form.customMode ?? offerData.customMode)
       );
       if (sourceCustomProductMode) {
+        setCustomOfferTitle(
+          normalizeCustomOfferTitle(
+            form.customOfferTitle ??
+              offerData.customOfferTitle ??
+              sourceResult?.customOfferTitle ??
+              data.panel_model
+          )
+        );
         const savedItems = form.customOfferItems || offerData.customOfferItems;
         const fallbackItems = sourceResult?.additionalServices?.map((service, index) => ({
           id: `copied-${index}-${Date.now()}`,
@@ -1820,6 +1832,7 @@ export default function Home() {
     return {
       customMode: customModeActive,
       customProductMode,
+      customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
       customOfferItems: customProductMode ? customOfferItems : null,
       customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
       customEquipment: customModeActive ? customEquipment : null,
@@ -1917,6 +1930,7 @@ export default function Home() {
           inverter: "Brak",
           energyStorage: "Brak",
           offerType: "custom",
+          customOfferTitle: normalizeCustomOfferTitle(customOfferTitle),
           billingSystem: "net_billing",
           withEms: false,
           withBackup: false,
@@ -2058,6 +2072,7 @@ export default function Home() {
   function resetForm() {
     setCustomMode(false);
     setCustomProductMode(false);
+    setCustomOfferTitle(DEFAULT_CUSTOM_OFFER_TITLE);
     setCustomOfferItems([createCustomOfferItem()]);
     setCustomPaymentTerms("");
     setCustomEquipment(createDefaultCustomEquipment());
@@ -2147,7 +2162,7 @@ export default function Home() {
     const selectedClientEmailForOffer =
       selectedClientForOffer?.email?.trim() || clientEmail.trim();
     const panelModelForSave = customProductMode
-      ? "Oferta niestandardowa"
+      ? normalizeCustomOfferTitle(customOfferTitle)
       : customModeActive
       ? customEquipment.panel.displayName.trim()
       : panelModel;
@@ -2204,6 +2219,7 @@ export default function Home() {
         pdfQuantity: installationCount,
         customMode: customModeActive,
         customProductMode,
+        customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
         customOfferItems: customProductMode ? customOfferItems : null,
         customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
         customEquipment: customModeActive ? customEquipment : null,
@@ -2217,6 +2233,7 @@ export default function Home() {
           identicalSetCount: installationCount,
           customMode: customModeActive,
           customProductMode,
+          customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
           customOfferItems: customProductMode ? customOfferItems : null,
           customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
           customEquipment: customModeActive ? customEquipment : null,
@@ -2467,6 +2484,7 @@ IdeaSol`;
           typedClientEmail,
           customMode: customModeActive,
           customProductMode,
+          customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
           customOfferItems: customProductMode ? customOfferItems : null,
           customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
           customEquipment: customModeActive ? customEquipment : null,
@@ -2604,6 +2622,7 @@ IdeaSol`;
           vatRate: result.vatRate,
           additionalServices: result.additionalServices || [],
           customPaymentTerms: result.customPaymentTerms || "",
+          customOfferTitle: result.customOfferTitle || DEFAULT_CUSTOM_OFFER_TITLE,
           subsidyAllocation: result.subsidyAllocation || null,
           subsidyTotal: result.subsidyAllocation?.total || 0,
           sellerNote: emailOptions?.sellerNote || "",
@@ -2871,6 +2890,10 @@ IdeaSol`;
             advisorPhone: advisorSnapshot.phone || advisorPhone,
             advisorEmail: advisorSnapshot.email || advisorEmail,
             offerType: queuedResult.offerType,
+            customOfferTitle:
+              queuedResult.customOfferTitle ||
+              snapshot.customOfferTitle ||
+              DEFAULT_CUSTOM_OFFER_TITLE,
             pvPowerKw: queuedResult.pvPowerKw,
             panelName: snapshot.panelName || snapshot.panelModel,
             panelModel: snapshot.panelModel,
@@ -3199,6 +3222,8 @@ IdeaSol`;
               setCustomMode={setCustomMode}
               customProductMode={customProductMode}
               setCustomProductMode={setCustomProductMode}
+              customOfferTitle={customOfferTitle}
+              setCustomOfferTitle={setCustomOfferTitle}
               customOfferItems={customOfferItems}
               setCustomOfferItems={setCustomOfferItems}
               customPaymentTerms={customPaymentTerms}

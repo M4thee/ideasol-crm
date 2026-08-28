@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
+import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
 
 export const runtime = "nodejs";
 
@@ -329,8 +330,11 @@ export async function POST(request: Request) {
       }
     }
 
+    const customOfferTitle = isCustomOffer
+      ? normalizeCustomOfferTitle(body.customOfferTitle)
+      : "";
     const subject = isCustomOffer
-      ? "Oferta IdeaSol"
+      ? customOfferTitle
       : isStorageOnly
       ? "Oferta magazynu energii"
       : hasEnergyStorage
@@ -380,7 +384,7 @@ export async function POST(request: Request) {
         : "instalacji fotowoltaicznej";
 
     const offerIntro = isCustomOffer
-      ? `W nawiązaniu do rozmowy przesyłam wycenę ${offerProductName}.`
+      ? `W nawiązaniu do rozmowy przesyłam ofertę „${customOfferTitle}” dotyczącą ${offerProductName}.`
       : `W nawiązaniu do rozmowy telefonicznej przesyłam wstępną wycenę ${offerProductName} wraz z montażem.`;
 
     const pvTextLine = isCustomOffer || isStorageOnly

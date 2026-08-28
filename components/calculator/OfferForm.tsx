@@ -188,7 +188,7 @@ type OfferFormProps = {
   vatRate: number;
   setVatRate: (value: number) => void;
   calculate: () => void;
-  setResult: (value: any) => void;
+  setResult: (value: null) => void;
   setEmailStatus: (value: string) => void;
   showSettings: boolean;
   setShowSettings: (value: boolean | ((current: boolean) => boolean)) => void;
@@ -201,6 +201,8 @@ type OfferFormProps = {
   setCustomMode: (value: boolean) => void;
   customProductMode: boolean;
   setCustomProductMode: (value: boolean) => void;
+  customOfferTitle: string;
+  setCustomOfferTitle: (value: string) => void;
   customOfferItems: CustomOfferItem[];
   setCustomOfferItems: Dispatch<SetStateAction<CustomOfferItem[]>>;
   customPaymentTerms: string;
@@ -267,6 +269,8 @@ export default function OfferForm({
   setCustomMode,
   customProductMode,
   setCustomProductMode,
+  customOfferTitle,
+  setCustomOfferTitle,
   customOfferItems,
   setCustomOfferItems,
   customPaymentTerms,
@@ -1173,6 +1177,8 @@ export default function OfferForm({
 
       {customProductMode && activeWorkspaceStep === "equipment" ? (
         <CustomOfferFields
+          title={customOfferTitle}
+          onTitleChange={setCustomOfferTitle}
           items={customOfferItems}
           onChange={setCustomOfferItems}
           onInvalidate={invalidateCalculation}

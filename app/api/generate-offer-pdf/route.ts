@@ -9,12 +9,14 @@ import {
   hasCustomPaymentDeposit,
   normalizeCustomPaymentSchedule,
 } from "@/lib/customPaymentSchedule";
+import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
 
 export const runtime = "nodejs";
 
 type OfferPdfData = {
   clientName?: string;
   offerType?: string;
+  customOfferTitle?: string;
   pvPowerKw?: number;
   panelCount?: number;
   panelPowerWp?: number;
@@ -191,8 +193,8 @@ function normalizeAdditionalServices(value: unknown) {
     .filter(Boolean) as Array<{ name: string; quantity: number; unitLabel: string; unitNet: number }>;
 }
 
-function getHeadline(offerType?: string) {
-  if (offerType === "custom") return "Oferta niestandardowa";
+function getHeadline(offerType?: string, customOfferTitle?: string) {
+  if (offerType === "custom") return normalizeCustomOfferTitle(customOfferTitle);
   if (offerType === "pv") return "Oferta instalacji fotowoltaicznej";
   if (offerType === "storage") return "Oferta magazynu energii";
 
@@ -475,7 +477,7 @@ async function createOfferPdf(data: OfferPdfData) {
     });
   }
 
-  drawWrappedText(page, getHeadline(data.offerType), {
+  drawWrappedText(page, getHeadline(data.offerType, data.customOfferTitle), {
     x: marginX + 170,
     y: y - 30,
     maxWidth: 250,
@@ -986,6 +988,7 @@ export async function POST(request: Request) {
     const pdfBuffer = await createOfferPdf({
       clientName: body.clientName,
       offerType: body.offerType,
+      customOfferTitle: body.customOfferTitle,
       pvPowerKw: body.pvPowerKw,
       panelCount: body.panelCount,
       panelPowerWp: body.panelPowerWp,

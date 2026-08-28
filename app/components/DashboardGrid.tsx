@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 
 import { supabase } from "@/lib/supabase";
 import DashboardTour from "@/app/components/DashboardTour";
@@ -139,7 +139,6 @@ export default function DashboardGrid({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "account" | "local">("idle");
   const [tourOpen, setTourOpen] = useState(false);
   const [tourReady, setTourReady] = useState(false);
-  const tourCompletedThisSessionRef = useRef(false);
 
   const widgetContent = useMemo<Record<DashboardWidgetId, ReactNode>>(
     () => ({
@@ -153,15 +152,11 @@ export default function DashboardGrid({
 
   useEffect(() => {
     let cancelled = false;
-    let tourTimerId: number | undefined;
-
     async function loadLayout() {
       setLoaded(false);
       setSaveStatus("idle");
       setTourOpen(false);
       setTourReady(false);
-      tourCompletedThisSessionRef.current = false;
-
       let cachedLayout: DashboardWidgetLayout[] | null = null;
       let tourCompleted = false;
 
@@ -178,19 +173,6 @@ export default function DashboardGrid({
       const previewTour =
         new URLSearchParams(window.location.search).get("dashboard-tour-preview") === "1";
 
-      if (previewTour) {
-        setTourReady(true);
-        setTourOpen(true);
-      } else if (tourCompleted) {
-        setTourReady(true);
-      } else {
-        tourTimerId = window.setTimeout(() => {
-          if (cancelled) return;
-          setTourReady(true);
-          setTourOpen(true);
-        }, 500);
-      }
-
       const { data, error } = await supabase
         .from("dashboard_layouts")
         .select("layout, layout_version, tour_completed_at")
@@ -198,8 +180,6 @@ export default function DashboardGrid({
         .maybeSingle();
 
       if (cancelled) return;
-      if (tourTimerId) window.clearTimeout(tourTimerId);
-
       if (!error && data?.layout) {
         const accountLayout = normalizeLayout(data.layout);
         setLayout(accountLayout);
@@ -214,21 +194,22 @@ export default function DashboardGrid({
 
       if (!error && data?.tour_completed_at) {
         tourCompleted = true;
-        window.localStorage.setItem(getTourStorageKey(currentUserId), "completed");
+        try {
+          window.localStorage.setItem(getTourStorageKey(currentUserId), "completed");
+        } catch {
+          // Zapis konta pozostaje źródłem prawdy, gdy przeglądarka blokuje localStorage.
+        }
       }
 
       setLoaded(true);
       setTourReady(true);
-      setTourOpen(
-        tourCompletedThisSessionRef.current ? false : previewTour || !tourCompleted
-      );
+      setTourOpen(previewTour || !tourCompleted);
     }
 
     void loadLayout();
 
     return () => {
       cancelled = true;
-      if (tourTimerId) window.clearTimeout(tourTimerId);
     };
   }, [currentUserId]);
 
@@ -314,19 +295,30 @@ export default function DashboardGrid({
     setDragOverId(null);
   }
 
-  function completeTour() {
-    tourCompletedThisSessionRef.current = true;
-    window.localStorage.setItem(getTourStorageKey(currentUserId), "completed");
+  async function completeTour() {
+    const completedAt = new Date().toISOString();
     setTourOpen(false);
 
-    void supabase.from("dashboard_layouts").upsert(
+    try {
+      window.localStorage.setItem(getTourStorageKey(currentUserId), "completed");
+    } catch {
+      // Nie blokuj trwałego zapisu na koncie, gdy przeglądarka odrzuca localStorage.
+    }
+
+    const { error } = await supabase.from("dashboard_layouts").upsert(
       {
         user_id: currentUserId,
-        tour_completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        layout,
+        layout_version: LAYOUT_VERSION,
+        tour_completed_at: completedAt,
+        updated_at: completedAt,
       },
       { onConflict: "user_id" }
     );
+
+    if (error) {
+      console.error("Nie udało się zapisać ukończenia samouczka", error);
+    }
   }
 
   return (

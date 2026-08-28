@@ -6,6 +6,8 @@ import {
 } from "@/lib/calculator/customOffer";
 
 type CustomOfferFieldsProps = {
+  title: string;
+  onTitleChange: (title: string) => void;
   items: CustomOfferItem[];
   onChange: (items: CustomOfferItem[]) => void;
   onInvalidate: () => void;
@@ -15,6 +17,8 @@ const inputClass =
   "mt-2 min-w-0 w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-violet-100/40 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 dark:border-violet-500/40 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-violet-400 dark:focus:ring-violet-500/20";
 
 export default function CustomOfferFields({
+  title,
+  onTitleChange,
   items,
   onChange,
   onInvalidate,
@@ -40,6 +44,26 @@ export default function CustomOfferFields({
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border-2 border-violet-300 bg-violet-50/60 p-4 dark:border-violet-500/50 dark:bg-violet-950/20">
+        <label className="mb-5 block min-w-0">
+          <span className="text-sm font-bold text-violet-800 dark:text-violet-200">
+            Nagłówek oferty
+          </span>
+          <input
+            className={inputClass}
+            type="text"
+            maxLength={120}
+            value={title}
+            onChange={(event) => {
+              onTitleChange(event.target.value);
+              onInvalidate();
+            }}
+            placeholder="Oferta niestandardowa"
+          />
+          <span className="mt-2 block text-xs leading-relaxed text-violet-700/75 dark:text-violet-300/75">
+            Nagłówek pojawi się w dokumencie PDF oraz temacie wiadomości do klienta.
+          </span>
+        </label>
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h4 className="font-black text-violet-800 dark:text-violet-200">

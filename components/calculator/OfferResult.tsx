@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
+import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
 
 type Result = {
   pvPowerKw: number;
@@ -15,6 +16,7 @@ type Result = {
   storageVoltageLabel?: string;
   storageCapacityKwh?: number;
   offerType: string;
+  customOfferTitle?: string;
   customPaymentTerms?: string;
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
@@ -460,6 +462,10 @@ export default function OfferResult({
     return {
       clientName: clientName || clientEmail || "Klient",
       offerType: result.offerType,
+      customOfferTitle:
+        result.offerType === "custom"
+          ? normalizeCustomOfferTitle(result.customOfferTitle)
+          : undefined,
       pdfQuantity,
       pvPowerKw: result.pvPowerKw,
       panelCount,
