@@ -119,6 +119,7 @@ export function canViewStickyNote(
   role: StickyUserRole | null
 ) {
   if (note.author_id === userId) return true;
+  if (role === "admin") return note.visibility !== "private";
   if (note.visibility === "public") return true;
   if (note.recipient_ids.includes(userId)) return true;
   return role === "owner" && ["management", "shared"].includes(note.visibility);

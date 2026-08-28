@@ -22,6 +22,13 @@ import {
   normalizeCustomPaymentSchedule,
   validateCustomPaymentSchedule,
 } from "@/lib/customPaymentSchedule";
+import {
+  createCustomOfferItem,
+  getCustomOfferItemQuantity,
+  getCustomOfferNetTotal,
+  getValidCustomOfferItems,
+  type CustomOfferItem,
+} from "@/lib/calculator/customOffer";
 
 import AdminPanel from "@/components/calculator/AdminPanel";
 import {
@@ -46,6 +53,7 @@ type Result = {
   storageVoltageType?: "low_voltage" | "high_voltage";
   storageVoltageLabel?: string;
   offerType: string;
+  customPaymentTerms?: string;
 
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
@@ -131,6 +139,16 @@ type Result = {
     label: string;
     value: number;
   }[];
+  additionalServices?: {
+    id: number | null;
+    name: string;
+    unitLabel?: string;
+    unit_label?: string;
+    priceNet: number;
+    quantity: number;
+    totalNet: number;
+  }[];
+  additionalServicesNet?: number;
 };
 
 
@@ -503,6 +521,11 @@ export default function Home() {
   const [identicalSetCount, setIdenticalSetCount] = useState(1);
   const [includeCatalogCards, setIncludeCatalogCards] = useState(true);
   const [customMode, setCustomMode] = useState(false);
+  const [customProductMode, setCustomProductMode] = useState(false);
+  const [customOfferItems, setCustomOfferItems] = useState<CustomOfferItem[]>([
+    createCustomOfferItem(),
+  ]);
+  const [customPaymentTerms, setCustomPaymentTerms] = useState("");
   const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
     createEmptyCustomPaymentSchedule
   );
@@ -756,6 +779,8 @@ export default function Home() {
   }
 
   function buildCatalogCardRequests(offerResult: Result): CatalogCardEmailAttachment[] {
+    if (offerResult.offerType === "custom") return [];
+
     const cards = [
       getSelectedPanelCatalogCard(),
       getSelectedInverterCatalogCard(offerResult),
@@ -1306,6 +1331,9 @@ export default function Home() {
   function buildCalculationPayload() {
     return {
       customMode: customModeActive,
+      customProductMode,
+      customOfferItems: customProductMode ? customOfferItems : null,
+      customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
       customEquipment: customModeActive ? customEquipment : null,
       offerType,
       panelModel,
@@ -1341,7 +1369,55 @@ export default function Home() {
     try {
       let data: Result;
 
-      if (!isCalculatorOnline()) {
+      if (customProductMode) {
+        if (!customModeAvailable) {
+          throw new Error("Nie masz uprawnienia do trybu Custom Mode.");
+        }
+
+        const validItems = getValidCustomOfferItems(customOfferItems);
+        const finalNet = getCustomOfferNetTotal(validItems);
+        const normalizedItems = validItems.map((item, index) => {
+          const quantity = getCustomOfferItemQuantity(item);
+
+          return {
+            id: -(index + 1),
+            name: item.name.trim(),
+            unitLabel: "szt.",
+            unit_label: "szt.",
+            priceNet: item.unitNet,
+            quantity,
+            totalNet: item.unitNet * quantity,
+          };
+        });
+
+        if (normalizedItems.length === 0 || finalNet <= 0) {
+          throw new Error("Dodaj przynajmniej jedną pozycję z nazwą i ceną netto.");
+        }
+
+        data = {
+          pvPowerKw: 0,
+          inverter: "Brak",
+          energyStorage: "Brak",
+          offerType: "custom",
+          billingSystem: "net_billing",
+          withEms: false,
+          withBackup: false,
+          includeSubsidy: false,
+          basePriceNet: finalNet,
+          sellerMarkupNet: 0,
+          finalNet,
+          finalGross: finalNet * (1 + vatRate / 100),
+          vatRate,
+          companyMargin: 0,
+          breakdown: normalizedItems.map((item) => ({
+            label: item.name,
+            value: item.totalNet,
+          })),
+          additionalServices: normalizedItems,
+          additionalServicesNet: finalNet,
+          customPaymentTerms: customPaymentTerms.trim(),
+        };
+      } else if (!isCalculatorOnline()) {
         const offlineCatalog = buildCalculatorCatalogFromState();
 
         if (
@@ -1436,6 +1512,9 @@ export default function Home() {
 
   function resetForm() {
     setCustomMode(false);
+    setCustomProductMode(false);
+    setCustomOfferItems([createCustomOfferItem()]);
+    setCustomPaymentTerms("");
     setCustomEquipment(createDefaultCustomEquipment());
     setOfferType("none");
     setPanelModel(panels[0]?.code || "");
@@ -1494,10 +1573,12 @@ export default function Home() {
       return;
     }
 
-    const installationCount = normalizeInstallationCount(identicalSetCount);
+    const installationCount = customProductMode
+      ? 1
+      : normalizeInstallationCount(identicalSetCount);
     const customPaymentScheduleForSave = normalizeCustomPaymentSchedule({
       ...customPaymentSchedule,
-      enabled: customModeAvailable && customPaymentSchedule.enabled,
+      enabled: !customProductMode && customModeAvailable && customPaymentSchedule.enabled,
     });
     const customPaymentError = validateCustomPaymentSchedule(
       customPaymentScheduleForSave,
@@ -1518,13 +1599,19 @@ export default function Home() {
     );
     const selectedClientEmailForOffer =
       selectedClientForOffer?.email?.trim() || clientEmail.trim();
-    const panelModelForSave = customModeActive
+    const panelModelForSave = customProductMode
+      ? "Oferta niestandardowa"
+      : customModeActive
       ? customEquipment.panel.displayName.trim()
       : panelModel;
-    const storageForSave = customModeActive
+    const storageForSave = customProductMode
+      ? "Brak"
+      : customModeActive
       ? customEquipment.storage.displayName.trim()
       : storage;
-    const inverterForSave = customModeActive
+    const inverterForSave = customProductMode
+      ? "Brak"
+      : customModeActive
       ? customEquipment.inverter.displayName.trim()
       : selectedInverterName;
     const resultForSave = {
@@ -1556,8 +1643,8 @@ export default function Home() {
       subsidy_total: result.subsidyAllocation?.total ?? null,
       pv_power_kw: result.pvPowerKw,
       panel_model: panelModelForSave,
-      panel_count: panelCount,
-      panel_power_wp: getPanelPowerWp(panelModel),
+      panel_count: customProductMode ? 0 : panelCount,
+      panel_power_wp: customProductMode ? 0 : getPanelPowerWp(panelModel),
       inverter: result.inverter,
       energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
@@ -1566,6 +1653,9 @@ export default function Home() {
         identicalSetCount: installationCount,
         pdfQuantity: installationCount,
         customMode: customModeActive,
+        customProductMode,
+        customOfferItems: customProductMode ? customOfferItems : null,
+        customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
         customEquipment: customModeActive ? customEquipment : null,
         customPaymentSchedule: customPaymentScheduleForSave,
         result: resultForSave,
@@ -1576,11 +1666,14 @@ export default function Home() {
           installationCount,
           identicalSetCount: installationCount,
           customMode: customModeActive,
+          customProductMode,
+          customOfferItems: customProductMode ? customOfferItems : null,
+          customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
           customEquipment: customModeActive ? customEquipment : null,
           customPaymentSchedule: customPaymentScheduleForSave,
           offerType,
           panelModel: panelModelForSave,
-          panelCount,
+          panelCount: customProductMode ? 0 : panelCount,
           manualPowerKw,
           roofType,
           storage: storageForSave,
@@ -1659,6 +1752,33 @@ export default function Home() {
 
 
   function buildOfferText(result: Result) {
+    if (result.offerType === "custom") {
+      const itemLines = (result.additionalServices || [])
+        .map((item) => {
+          const quantity = Number(item.quantity || 1);
+          const quantityText = quantity !== 1 ? ` × ${quantity} szt.` : "";
+          return `- ${item.name}${quantityText}: ${Number(item.totalNet || 0).toLocaleString("pl-PL")} zł netto`;
+        })
+        .join("\n");
+      const paymentTerms = result.customPaymentTerms?.trim()
+        ? `\nForma rozliczenia / warunki płatności:\n${result.customPaymentTerms.trim()}\n`
+        : "";
+
+      return `Dzień dobry,
+
+przesyłam ofertę przygotowaną na wskazane produkty lub usługi.
+
+Zakres oferty:
+${itemLines}
+
+Cena netto: ${result.finalNet.toLocaleString("pl-PL")} zł
+Cena brutto ${result.vatRate}%: ${result.finalGross.toLocaleString("pl-PL")} zł
+${paymentTerms}
+
+Pozdrawiamy,
+IdeaSol`;
+    }
+
     const isStorageOnly = result.offerType === "storage";
 const storageDisplayName = getResultStorageDisplayName(result);
 const hasStorage = storageDisplayName !== "Brak";
@@ -1760,10 +1880,13 @@ IdeaSol`;
           selectedClientEmail,
           typedClientEmail,
           customMode: customModeActive,
+          customProductMode,
+          customOfferItems: customProductMode ? customOfferItems : null,
+          customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
           customEquipment: customModeActive ? customEquipment : null,
           customPaymentSchedule: normalizeCustomPaymentSchedule({
             ...customPaymentSchedule,
-            enabled: customModeAvailable && customPaymentSchedule.enabled,
+            enabled: !customProductMode && customModeAvailable && customPaymentSchedule.enabled,
           }),
           offerType,
           panelModel: getPanelDisplayName(panelModel),
@@ -1895,6 +2018,8 @@ IdeaSol`;
           finalNet: result.finalNet,
           finalGross: result.finalGross,
           vatRate: result.vatRate,
+          additionalServices: result.additionalServices || [],
+          customPaymentTerms: result.customPaymentTerms || "",
           subsidyAllocation: result.subsidyAllocation || null,
           subsidyTotal: result.subsidyAllocation?.total || 0,
           includeCatalogCards: catalogCardsForEmail.length > 0,
@@ -2367,12 +2492,18 @@ IdeaSol`;
               customModeAvailable={customModeAvailable}
               customMode={customModeActive}
               setCustomMode={setCustomMode}
+              customProductMode={customProductMode}
+              setCustomProductMode={setCustomProductMode}
+              customOfferItems={customOfferItems}
+              setCustomOfferItems={setCustomOfferItems}
+              customPaymentTerms={customPaymentTerms}
+              setCustomPaymentTerms={setCustomPaymentTerms}
               customEquipment={customEquipment}
               setCustomEquipment={setCustomEquipment}
               customPaymentSchedule={customPaymentSchedule}
               setCustomPaymentSchedule={setCustomPaymentSchedule}
               customPaymentTotalGross={
-                Number(result?.finalGross || 0) * normalizeInstallationCount(identicalSetCount)
+                Number(result?.finalGross || 0) * (customProductMode ? 1 : normalizeInstallationCount(identicalSetCount))
               }
               hasStaleResult={resultIsDirty}
             />
@@ -2405,18 +2536,21 @@ IdeaSol`;
                   </div>
                   {result && (
                     <ResultOverviewBar
-                      priceGross={result.finalGross * normalizeInstallationCount(identicalSetCount)}
+                      priceGross={result.finalGross * (customProductMode ? 1 : normalizeInstallationCount(identicalSetCount))}
                       pvPowerKw={result.pvPowerKw}
                       storageCapacityKwh={result.storageCapacityKwh}
                       expanded={isResultFocusMode}
                     />
                   )}
-                  <div className={`${isResultFocusMode ? "gap-2 p-1.5" : "gap-1 p-1"} grid grid-cols-3 rounded-xl bg-white/10`}>
-                    {[
-                      { value: "summary", label: "Wycena" },
-                      { value: "subsidy", label: "Dotacja" },
-                      { value: "credit", label: "Raty" },
-                    ].map((tab) => (
+                  <div className={`${isResultFocusMode ? "gap-2 p-1.5" : "gap-1 p-1"} grid ${result?.offerType === "custom" ? "grid-cols-1" : "grid-cols-3"} rounded-xl bg-white/10`}>
+                    {(result?.offerType === "custom"
+                      ? [{ value: "summary", label: "Wycena" }]
+                      : [
+                          { value: "summary", label: "Wycena" },
+                          { value: "subsidy", label: "Dotacja" },
+                          { value: "credit", label: "Raty" },
+                        ]
+                    ).map((tab) => (
                       <button key={tab.value} type="button" disabled={!result} onClick={() => setResultPanelTab(tab.value as "summary" | "subsidy" | "credit")} className={`${isResultFocusMode ? "py-3 text-sm" : "py-2 text-xs"} rounded-lg px-2 font-bold transition ${resultPanelTab === tab.value && result ? "bg-white text-slate-950 shadow-sm" : "text-white/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"}`}>
                         {tab.label}
                       </button>
@@ -2444,8 +2578,10 @@ IdeaSol`;
                   panelCount={panelCount}
                   panelPowerWp={getPanelPowerWp(panelModel)}
                   panelName={getPanelDisplayName(panelModel)}
-                  identicalSetCount={identicalSetCount}
-                  customPaymentSchedule={customPaymentSchedule}
+                  identicalSetCount={customProductMode ? 1 : identicalSetCount}
+                  customPaymentSchedule={
+                    customProductMode ? createEmptyCustomPaymentSchedule() : customPaymentSchedule
+                  }
                   copied={copied}
                   copyOffer={copyOffer}
                   resetForm={resetForm}
@@ -2479,7 +2615,7 @@ IdeaSol`;
                   compact
                   wide={isResultFocusMode}
                   hideSubsidy
-                  equipmentQuickEdit={customModeActive ? undefined : {
+                  equipmentQuickEdit={customModeActive || customProductMode ? undefined : {
                     panel: result.offerType === "storage" ? undefined : {
                       value: panelModel,
                       options: panels.map((panel) => ({

@@ -13,7 +13,12 @@ import {
   type CustomEquipment,
 } from "@/lib/calculator/customEquipment";
 import CustomPaymentScheduleFields from "@/components/calculator/CustomPaymentScheduleFields";
+import CustomOfferFields from "@/components/calculator/CustomOfferFields";
 import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
+import {
+  getValidCustomOfferItems,
+  type CustomOfferItem,
+} from "@/lib/calculator/customOffer";
 import {
   getExplicitStorageVoltageType,
   rankInvertersForStorage,
@@ -194,6 +199,12 @@ type OfferFormProps = {
   customModeAvailable?: boolean;
   customMode: boolean;
   setCustomMode: (value: boolean) => void;
+  customProductMode: boolean;
+  setCustomProductMode: (value: boolean) => void;
+  customOfferItems: CustomOfferItem[];
+  setCustomOfferItems: Dispatch<SetStateAction<CustomOfferItem[]>>;
+  customPaymentTerms: string;
+  setCustomPaymentTerms: (value: string) => void;
   customEquipment: CustomEquipment;
   setCustomEquipment: Dispatch<SetStateAction<CustomEquipment>>;
   customPaymentSchedule: CustomPaymentSchedule;
@@ -254,6 +265,12 @@ export default function OfferForm({
   customModeAvailable = false,
   customMode,
   setCustomMode,
+  customProductMode,
+  setCustomProductMode,
+  customOfferItems,
+  setCustomOfferItems,
+  customPaymentTerms,
+  setCustomPaymentTerms,
   customEquipment,
   setCustomEquipment,
   customPaymentSchedule,
@@ -585,8 +602,9 @@ export default function OfferForm({
 
   const existingPvPowerNumber = Number(String(existingPvPowerKw || "0").replace(",", "."));
   const canConfigureOffer =
-    existingPvAnswer === "no" ||
+    customProductMode || existingPvAnswer === "no" ||
     (existingPvAnswer === "yes" && Number.isFinite(existingPvPowerNumber) && existingPvPowerNumber > 0);
+  const hasValidCustomOfferItems = getValidCustomOfferItems(customOfferItems).length > 0;
   useEffect(() => {
     if (customMode) return;
     if (!hasStorageSelected) return;
@@ -619,6 +637,7 @@ export default function OfferForm({
 
   function changeCustomMode(enabled: boolean) {
     setCustomMode(enabled);
+    if (enabled) setCustomProductMode(false);
     invalidateCalculation();
 
     if (enabled) {
@@ -641,6 +660,24 @@ export default function OfferForm({
     setPanelModel(panels[0]?.code || "");
     setStorage(hasStorageSelected ? storagesToShow[0]?.code || "none" : "none");
     setSelectedInverterName("auto");
+  }
+
+  function changeCustomProductMode(enabled: boolean) {
+    setCustomProductMode(enabled);
+    setCustomMode(false);
+    invalidateCalculation();
+    setActiveWorkspaceStep("equipment");
+
+    if (enabled) {
+      setOfferType("custom");
+      setStorage("none");
+      setSelectedInverterName("auto");
+      setIncludeSubsidy(false);
+      setClientHasOwnHybridInverter(false);
+      return;
+    }
+
+    setOfferType("none");
   }
 
   function updateOfferModules(nextHasPv: boolean, nextHasStorage: boolean) {
@@ -706,7 +743,7 @@ export default function OfferForm({
     }
   }
 
-  const workspaceSteps = [
+  const standardWorkspaceSteps = [
     {
       id: "client" as const,
       number: "01",
@@ -740,9 +777,31 @@ export default function OfferForm({
       description: `VAT ${vatRate}% · ${billingSystem === "net_billing" ? "Net Billing" : "Net Metering"}`,
     },
   ];
+  const workspaceSteps = customProductMode
+    ? [
+        {
+          id: "client" as const,
+          number: "01",
+          label: "Klient",
+          description: selectedClient ? getClientDisplayName(selectedClient) : clientName || "Wybierz odbiorcę",
+        },
+        {
+          id: "equipment" as const,
+          number: "02",
+          label: "Pozycje",
+          description: `${getValidCustomOfferItems(customOfferItems).length} uzupełnionych`,
+        },
+        {
+          id: "settlement" as const,
+          number: "03",
+          label: "Rozliczenie",
+          description: `VAT ${vatRate}%`,
+        },
+      ]
+    : standardWorkspaceSteps;
   const activeWorkspaceStepIndex = workspaceSteps.findIndex((step) => step.id === activeWorkspaceStep);
   const activeWorkspaceStepData = workspaceSteps[activeWorkspaceStepIndex];
-  const equipmentEditors = [
+  const equipmentEditors = customProductMode ? [] : [
     ...(hasPvSelected ? [{ id: "pv" as const, label: "PV" }] : []),
     ...(hasStorageSelected ? [{ id: "storage" as const, label: "magazyn" }] : []),
     ...((hasPvSelected || hasStorageSelected) ? [{ id: "inverter" as const, label: "falownik" }] : []),
@@ -776,7 +835,7 @@ export default function OfferForm({
   }
 
   const nextSectionLabel = activeWorkspaceStep === "equipment"
-    ? nextEquipmentEditor?.label || "dodatki"
+    ? nextEquipmentEditor?.label || (customProductMode ? "rozliczenie" : "dodatki")
     : workspaceSteps[Math.min(workspaceSteps.length - 1, activeWorkspaceStepIndex + 1)].label.toLocaleLowerCase("pl-PL");
   const previousSectionLabel = activeWorkspaceStep === "equipment" && previousEquipmentEditor
     ? previousEquipmentEditor.label
@@ -787,19 +846,21 @@ export default function OfferForm({
       <div className="relative flex items-center justify-between gap-4 bg-slate-950 px-5 py-4 text-white dark:bg-black">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-400">IdeaSol Configurator</p>
-          <h2 className="mt-1 text-xl font-black tracking-tight">Zbuduj wariant instalacji</h2>
+          <h2 className="mt-1 text-xl font-black tracking-tight">
+            {customProductMode ? "Zbuduj ofertę niestandardową" : "Zbuduj wariant instalacji"}
+          </h2>
         </div>
 
-        <button
+        {!customProductMode ? <button
           type="button"
           onClick={() => setShowSettings((current) => !current)}
           className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-lg transition hover:bg-white/20"
           aria-label="Ustawienia kalkulatora"
         >
           ⚙
-        </button>
+        </button> : null}
 
-        {showSettings && (
+        {showSettings && !customProductMode && (
           <div className="absolute right-4 top-[calc(100%+0.75rem)] z-40 w-[calc(100%-2rem)] rounded-2xl border border-blue-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-72">
             <label className="block">
               <span className="text-sm text-slate-700 dark:text-slate-200">
@@ -1006,7 +1067,7 @@ export default function OfferForm({
         )}
       </div>
 
-      <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "client" ? "" : "hidden"}`}>
+      {!customProductMode ? <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "client" ? "" : "hidden"}`}>
         <div className="grid gap-4">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.16em] text-slate-800 dark:text-slate-100">
@@ -1075,10 +1136,10 @@ export default function OfferForm({
           </label>
         )}
 
-      </div>
+      </div> : null}
 
       {customModeAvailable ? (
-        <div className={`mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950 ${activeWorkspaceStep === "equipment" ? "" : "hidden"}`}>
+        <div className={`mb-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950 sm:grid-cols-2 ${activeWorkspaceStep === "equipment" ? "" : "hidden"}`}>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
@@ -1093,11 +1154,33 @@ export default function OfferForm({
               </p>
             </div>
           </label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-violet-200 bg-white p-3 dark:border-violet-500/30 dark:bg-slate-900">
+            <input
+              type="checkbox"
+              checked={customProductMode}
+              onChange={(event) => changeCustomProductMode(event.target.checked)}
+              className="mt-1 h-5 w-5 accent-violet-600"
+            />
+            <div>
+              <div className="font-bold text-slate-900 dark:text-slate-100">Dowolne produkty</div>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Prosta oferta z własnymi nazwami, ilością i ceną netto, generowana na szablonie IdeaSol.
+              </p>
+            </div>
+          </label>
         </div>
       ) : null}
 
+      {customProductMode && activeWorkspaceStep === "equipment" ? (
+        <CustomOfferFields
+          items={customOfferItems}
+          onChange={setCustomOfferItems}
+          onInvalidate={invalidateCalculation}
+        />
+      ) : null}
+
       {/* MODULE/PRODUCT SECTION */}
-      <div className={`mb-4 transition ${activeWorkspaceStep === "equipment" ? "" : "hidden"} ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
+      <div className={`mb-4 transition ${activeWorkspaceStep === "equipment" && !customProductMode ? "" : "hidden"} ${canConfigureOffer ? "" : "pointer-events-none opacity-45 grayscale"}`}>
         <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5 dark:bg-slate-950">
           <button
             type="button"
@@ -1419,7 +1502,7 @@ export default function OfferForm({
           )}
         </div>
       )}
-      <div className={`mb-4 grid gap-3 sm:grid-cols-2 ${activeWorkspaceStep === "extras" ? "" : "hidden"}`}>
+      <div className={`mb-4 grid gap-3 sm:grid-cols-2 ${activeWorkspaceStep === "extras" && !customProductMode ? "" : "hidden"}`}>
       {(hasPvSelected || hasStorageSelected) && (
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900">
           <button
@@ -1592,10 +1675,10 @@ export default function OfferForm({
         </div>
       )}
       </div>
-      {(hasPvSelected || hasStorageSelected) && (
+      {(customProductMode || hasPvSelected || hasStorageSelected) && (
         <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "settlement" ? "" : "hidden"}`}>
           <div className="space-y-4">
-            <div>
+            {!customProductMode ? <div>
               <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">System rozliczeń</span>
               <div className="grid grid-cols-2 gap-2">
                 {[
@@ -1610,7 +1693,7 @@ export default function OfferForm({
                   </label>
                 ))}
               </div>
-            </div>
+            </div> : null}
 
             <div>
               <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">VAT klienta</span>
@@ -1623,7 +1706,28 @@ export default function OfferForm({
               </div>
             </div>
 
-            <div>
+            {customProductMode ? (
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Forma rozliczenia / warunki płatności
+                </span>
+                <textarea
+                  className="mt-2 min-h-32 w-full resize-y rounded-2xl border border-violet-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-violet-100/40 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 dark:border-violet-500/40 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none dark:focus:border-violet-400 dark:focus:ring-violet-500/20"
+                  placeholder="np. Zadatek 20% w terminie 3 dni od podpisania umowy. Pozostała kwota przed odbiorem."
+                  value={customPaymentTerms}
+                  maxLength={1200}
+                  onChange={(event) => {
+                    setCustomPaymentTerms(event.target.value);
+                    invalidateCalculation();
+                  }}
+                />
+                <span className="mt-1 block text-right text-xs text-slate-400">
+                  {customPaymentTerms.length}/1200
+                </span>
+              </label>
+            ) : null}
+
+            {!customProductMode ? <div>
               <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">Program PME</span>
               {hasStorageSelected ? (
                 <label className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-4 py-3 ${includeSubsidy ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"}`}>
@@ -1633,7 +1737,7 @@ export default function OfferForm({
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-200 p-2.5 text-xs text-slate-400 dark:border-slate-700">Dostępne przy magazynie energii</div>
               )}
-            </div>
+            </div> : null}
           </div>
         </div>
       )}
@@ -1659,12 +1763,23 @@ export default function OfferForm({
             ) : (
               <button
                 onClick={calculate}
-                disabled={!canConfigureOffer || (!hasPvSelected && !hasStorageSelected)}
+                disabled={
+                  !canConfigureOffer ||
+                  (customProductMode
+                    ? !hasValidCustomOfferItems
+                    : !hasPvSelected && !hasStorageSelected)
+                }
                 className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 shadow-lg shadow-emerald-200 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:shadow-black/30"
               >
                 {!canConfigureOffer
                   ? "Uzupełnij dane klienta"
-                  : hasPvSelected || hasStorageSelected
+                  : customProductMode
+                    ? hasValidCustomOfferItems
+                      ? hasStaleResult
+                        ? "Przelicz ofertę"
+                        : "Oblicz ofertę"
+                      : "Uzupełnij pozycję"
+                    : hasPvSelected || hasStorageSelected
                     ? hasStaleResult
                       ? "Przelicz ofertę"
                       : "Oblicz ofertę"

@@ -15,6 +15,7 @@ type Result = {
   storageVoltageLabel?: string;
   storageCapacityKwh?: number;
   offerType: string;
+  customPaymentTerms?: string;
   billingSystem?: "net_billing" | "net_metering";
   withEms?: boolean;
   includeSubsidy?: boolean;
@@ -494,6 +495,7 @@ export default function OfferResult({
       advisorPhone,
       advisorEmail,
       customPaymentSchedule,
+      customPaymentTerms: result.customPaymentTerms,
     };
   }
 
@@ -650,14 +652,14 @@ export default function OfferResult({
             <div className={`${wide ? "mt-5 gap-4 pt-5" : "mt-3 gap-2 pt-3"} grid grid-cols-3 border-t border-slate-100 dark:border-slate-800`}>
               <div><p className={`${wide ? "text-[11px]" : "text-[9px]"} uppercase tracking-wide text-emerald-700/70 dark:text-emerald-300/70`}>Netto</p><p className={`${wide ? "mt-2 text-lg" : "mt-1 text-xs"} font-bold text-slate-900 dark:text-white`}>{result.finalNet.toLocaleString("pl-PL")} zł</p></div>
               <div><p className={`${wide ? "text-[11px]" : "text-[9px]"} uppercase tracking-wide text-emerald-700/70 dark:text-emerald-300/70`}>VAT</p><p className={`${wide ? "mt-2 text-lg" : "mt-1 text-xs"} font-bold text-slate-900 dark:text-white`}>{result.vatRate}%</p></div>
-              <div><p className={`${wide ? "text-[11px]" : "text-[9px]"} uppercase tracking-wide text-emerald-700/70 dark:text-emerald-300/70`}>Dotacja</p><p className={`${wide ? "mt-2 text-lg" : "mt-1 text-xs"} font-bold text-emerald-700 dark:text-emerald-300`}>{compactSubsidyTotal > 0 ? `${compactSubsidyTotal.toLocaleString("pl-PL")} zł` : "—"}</p></div>
+              <div><p className={`${wide ? "text-[11px]" : "text-[9px]"} uppercase tracking-wide text-emerald-700/70 dark:text-emerald-300/70`}>{result.offerType === "custom" ? "Pozycji" : "Dotacja"}</p><p className={`${wide ? "mt-2 text-lg" : "mt-1 text-xs"} font-bold text-emerald-700 dark:text-emerald-300`}>{result.offerType === "custom" ? additionalServices.length : compactSubsidyTotal > 0 ? `${compactSubsidyTotal.toLocaleString("pl-PL")} zł` : "—"}</p></div>
             </div>
           </div>
 
-          <div className={`${wide ? "p-5" : "p-3"} rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900`}>
+          {result.offerType !== "custom" ? <div className={`${wide ? "p-5" : "p-3"} rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900`}>
             <p className={`${wide ? "mb-3 text-xs" : "mb-2 text-[10px]"} font-black uppercase tracking-[0.16em] text-slate-400`}>Konfiguracja</p>
             <div className="space-y-2">
-              {result.offerType !== "storage" && (
+              {result.offerType !== "storage" && result.offerType !== "custom" && (
                 <div className={`${wide ? "p-4" : "p-3"} rounded-xl border border-sky-100 bg-sky-50/65 dark:border-sky-900/40 dark:bg-sky-950/20`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-sky-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Fotowoltaika</p>{renderEditButton("panel", "fotowoltaikę")}</div><p className={`${wide ? "mt-1.5 text-sm" : "mt-1 text-[10px]"} truncate text-slate-500`}>{panelCount} × {panelPowerWp} Wp · {panelName}</p></div>
@@ -683,12 +685,12 @@ export default function OfferResult({
                 </div>
               )}
             </div>
-          </div>
+          </div> : null}
           </div>
 
           {additionalServices.length > 0 && (
             <div className={`${wide ? "p-5" : "p-3"} rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900`}>
-              <div className="flex items-center justify-between gap-3"><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Usługi dodatkowe</p><p className={`${wide ? "text-base" : "text-xs"} font-black`}>{additionalServicesNet.toLocaleString("pl-PL")} zł netto</p></div>
+              <div className="flex items-center justify-between gap-3"><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>{result.offerType === "custom" ? "Pozycje oferty" : "Usługi dodatkowe"}</p><p className={`${wide ? "text-base" : "text-xs"} font-black`}>{additionalServicesNet.toLocaleString("pl-PL")} zł netto</p></div>
               <p className={`${wide ? "mt-2 text-sm leading-5" : "mt-1 text-[10px] leading-4"} line-clamp-2 text-slate-500`}>{additionalServices.map((service) => service.name).join(" · ")}</p>
             </div>
           )}
@@ -776,7 +778,7 @@ export default function OfferResult({
 
       <div className={compact ? "space-y-2.5" : "space-y-4"}>
         <div className={compact ? "grid grid-cols-2 gap-2" : wide ? "grid gap-4 lg:grid-cols-2" : "contents"}>
-        {result.offerType !== "storage" && (
+        {result.offerType !== "storage" && result.offerType !== "custom" && (
           <div className={`${compact ? "rounded-xl p-3" : "rounded-2xl p-4 shadow-sm ring-1 ring-slate-100"} border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800`}>
             <p className="text-sm text-slate-500 dark:text-slate-400">Moc instalacji</p>
             <p className="text-xl font-bold text-slate-950 dark:text-slate-100 sm:text-2xl">{result.pvPowerKw} kWp</p>
@@ -826,7 +828,9 @@ export default function OfferResult({
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Usługi dodatkowe</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {result.offerType === "custom" ? "Pozycje oferty" : "Usługi dodatkowe"}
+                </p>
                 <div className="mt-2 space-y-2">
                   {additionalServices.map((service) => (
                     <div
@@ -859,6 +863,17 @@ export default function OfferResult({
             </div>
           </div>
         )}
+
+        {result.offerType === "custom" && result.customPaymentTerms?.trim() ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <p className={`${wide ? "text-base" : "text-sm"} font-bold text-slate-900 dark:text-white`}>
+              Forma rozliczenia / warunki płatności
+            </p>
+            <p className={`${wide ? "mt-3 text-sm leading-6" : "mt-2 text-xs leading-5"} whitespace-pre-wrap text-slate-600 dark:text-slate-300`}>
+              {result.customPaymentTerms.trim()}
+            </p>
+          </section>
+        ) : null}
 
         <div className={compact ? "grid grid-cols-2 gap-2" : wide ? "grid gap-4 lg:grid-cols-2" : "contents"}>
         <div className={`${compact ? "rounded-xl p-3" : "rounded-2xl p-4 shadow-sm ring-1 ring-slate-100"} border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 dark:ring-slate-800`}>

@@ -14,6 +14,9 @@ import MeetingConfirmationReminderFields, {
 } from "@/components/MeetingConfirmationReminderFields";
 import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
 import StickyNotesBoard from "@/app/components/StickyNotesBoard";
+import QuickCalculatorWidget from "@/app/components/QuickCalculatorWidget";
+import DashboardGrid from "@/app/components/DashboardGrid";
+import DashboardWidgetIcon from "@/app/components/DashboardWidgetIcon";
 
 type AuthUser = {
   id: string;
@@ -32,6 +35,7 @@ type FollowUp = {
   follow_up_at: string;
   status: string | null;
   client_name: string;
+  completed: boolean;
 };
 
 type Meeting = {
@@ -68,6 +72,43 @@ type ResolutionStatus =
   | "not_interested"
   | "meeting_scheduled";
 
+type SalesSummaryPeriod = "week" | "month" | "quarter" | "year";
+
+const salesSummaryPeriodOptions: Array<{
+  value: SalesSummaryPeriod;
+  label: string;
+}> = [
+  { value: "week", label: "Tydzień" },
+  { value: "month", label: "Miesiąc" },
+  { value: "quarter", label: "Kwartał" },
+  { value: "year", label: "Rok" },
+];
+
+function getSalesSummaryPeriodRange(period: SalesSummaryPeriod) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  if (period === "week") {
+    const day = start.getDay();
+    start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  } else if (period === "month") {
+    start.setDate(1);
+  } else if (period === "quarter") {
+    start.setDate(1);
+    start.setMonth(Math.floor(start.getMonth() / 3) * 3);
+  } else {
+    start.setMonth(0, 1);
+  }
+
+  const end = new Date(start);
+  if (period === "week") end.setDate(end.getDate() + 7);
+  if (period === "month") end.setMonth(end.getMonth() + 1);
+  if (period === "quarter") end.setMonth(end.getMonth() + 3);
+  if (period === "year") end.setFullYear(end.getFullYear() + 1);
+
+  return { start, end };
+}
+
 const resolutionStatusOptions = [
   { value: "no_answer", label: "Nie odbiera" },
   { value: "call_back_request", label: "Prośba o ponowny kontakt" },
@@ -80,6 +121,84 @@ const AUTH_REMEMBER_STORAGE_KEY = "ideasol_auth_remember_me";
 const SESSION_DURATION_REMEMBER_MS = 12 * 60 * 60 * 1000;
 
 const SESSION_DURATION_SHORT_MS = 30 * 60 * 1000;
+
+type StickyCallTaskState = {
+  event_id: string;
+  completed_at: string | null;
+  dismissed_at: string | null;
+};
+
+function isMissingStickyCallTaskStatesTable(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const databaseError = error as { code?: unknown; message?: unknown };
+  const code = String(databaseError.code || "");
+  const message = String(databaseError.message || "").toLowerCase();
+
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    (message.includes("sticky_call_task_states") &&
+      (message.includes("schema cache") || message.includes("does not exist")))
+  );
+}
+
+function getLocalStickyCallTaskStatesKey(userId: string) {
+  return `ideasol_sticky_call_task_states_${userId}`;
+}
+
+function readLocalStickyCallTaskStates(userId: string): StickyCallTaskState[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const storedValue = window.localStorage.getItem(
+      getLocalStickyCallTaskStatesKey(userId)
+    );
+    if (!storedValue) return [];
+
+    const parsedValue = JSON.parse(storedValue);
+    if (!Array.isArray(parsedValue)) return [];
+
+    return parsedValue.filter(
+      (state): state is StickyCallTaskState =>
+        Boolean(state) && typeof state.event_id === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalStickyCallTaskState(
+  userId: string,
+  state: StickyCallTaskState
+) {
+  if (typeof window === "undefined") return;
+
+  const currentStates = readLocalStickyCallTaskStates(userId);
+  const nextStates = [
+    state,
+    ...currentStates.filter((item) => item.event_id !== state.event_id),
+  ];
+
+  try {
+    window.localStorage.setItem(
+      getLocalStickyCallTaskStatesKey(userId),
+      JSON.stringify(nextStates)
+    );
+  } catch {
+    // Brak miejsca w localStorage nie może blokować obsługi telefonu.
+  }
+}
+
+function clearLocalStickyCallTaskStates(userId: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(getLocalStickyCallTaskStatesKey(userId));
+  } catch {
+    // Stan w bazie pozostaje źródłem prawdy.
+  }
+}
 
 function getAuthErrorMessage(error: unknown) {
   if (!error) return "";
@@ -185,6 +304,8 @@ export default function Home() {
   const [meetingsCollapsed, setMeetingsCollapsed] = useState(false);
   const [salesSummaryCollapsed, setSalesSummaryCollapsed] = useState(false);
   const [salesSummaryMode, setSalesSummaryMode] = useState<"mine" | "team">("mine");
+  const [salesSummaryPeriod, setSalesSummaryPeriod] =
+    useState<SalesSummaryPeriod>("month");
   const [followUpsCollapsed, setFollowUpsCollapsed] = useState(false);
   const [clientsCollapsed, setClientsCollapsed] = useState(false);
   const [resolvingFollowUp, setResolvingFollowUp] = useState<FollowUp | null>(null);
@@ -491,6 +612,7 @@ export default function Home() {
   useEffect(() => {
     if (!currentUser || visibleUserIds === undefined) return;
 
+    loadFollowUps();
     loadMeetings();
     if (currentUserRole === "cc") {
       loadCcSummary();
@@ -502,6 +624,7 @@ export default function Home() {
     currentUserRole,
     calendarMode,
     salesSummaryMode,
+    salesSummaryPeriod,
     JSON.stringify(visibleUserIds),
   ]);
 
@@ -509,6 +632,7 @@ export default function Home() {
     if (!currentUser || visibleUserIds === undefined) return;
 
     await Promise.all([
+      loadFollowUps(),
       loadMeetings(),
       currentUserRole === "cc" ? loadCcSummary() : loadSalesSummary(),
     ]);
@@ -573,36 +697,13 @@ export default function Home() {
     );
   }
 
-  function isClosedMeetingStatus(status: string | null | undefined) {
+  function isCancelledEventStatus(status: string | null | undefined) {
     const normalizedStatus = normalizeEventStatus(status);
 
     return (
-      normalizedStatus.startsWith("zakonczone") ||
-      normalizedStatus === "done" ||
-      normalizedStatus === "completed" ||
-      normalizedStatus === "complete" ||
-      normalizedStatus === "finished" ||
-      normalizedStatus === "closed" ||
-      normalizedStatus === "resolved"
-    );
-  }
-
-  function isSignedContractStatus(status: string | null | undefined) {
-    const normalizedStatus = normalizeEventStatus(status);
-
-    return (
-      normalizedStatus === "zakonczona" ||
-      normalizedStatus === "zakonczone" ||
-      normalizedStatus === "podpisana" ||
-      normalizedStatus === "podpisane" ||
-      normalizedStatus === "spisana" ||
-      normalizedStatus === "spisane" ||
-      normalizedStatus === "completed" ||
-      normalizedStatus === "complete" ||
-      normalizedStatus === "done" ||
-      normalizedStatus.startsWith("zakoncz") ||
-      normalizedStatus.startsWith("podpis") ||
-      normalizedStatus.startsWith("spisan")
+      normalizedStatus.startsWith("anul") ||
+      normalizedStatus.includes("odwol") ||
+      normalizedStatus.includes("cancel")
     );
   }
 
@@ -731,6 +832,8 @@ export default function Home() {
       "seller_warranty_commission_net",
       "sellerCommissionNet",
       "seller_commission_net",
+      "sellerMargin",
+      "seller_margin",
     ];
 
     for (const key of preferredKeys) {
@@ -826,21 +929,29 @@ export default function Home() {
   }
 
   async function loadFollowUps() {
+    if (!currentUser?.id) {
+      setFollowUps([]);
+      setLoadingFollowUps(false);
+      return;
+    }
+
     setLoadingFollowUps(true);
-    const followUpsRangeStart = new Date();
-    followUpsRangeStart.setDate(followUpsRangeStart.getDate() - 90);
-    followUpsRangeStart.setHours(0, 0, 0, 0);
-
-    let query = supabase
-      .from("calendar_events")
-      .select("id, client_id, title, description, event_at, status, created_by, assigned_user_id")
-      .eq("event_type", "reminder")
-      .not("client_id", "is", null)
-      .gte("event_at", followUpsRangeStart.toISOString())
-      .order("event_at", { ascending: true })
-      .limit(200);
-
-    const { data, error } = await query;
+    const [{ data, error }, { data: taskStateData, error: taskStateError }] =
+      await Promise.all([
+        supabase
+          .from("calendar_events")
+          .select("id, client_id, title, description, event_at, status, created_by, assigned_user_id")
+          .eq("event_type", "reminder")
+          .not("client_id", "is", null)
+          .not("event_at", "is", null)
+          .or(`created_by.eq.${currentUser.id},assigned_user_id.eq.${currentUser.id}`)
+          .order("event_at", { ascending: false })
+          .limit(1000),
+        supabase
+          .from("sticky_call_task_states")
+          .select("event_id, completed_at, dismissed_at")
+          .eq("user_id", currentUser.id),
+      ]);
 
     if (error) {
       console.error("Błąd ładowania przypomnień", error);
@@ -848,17 +959,38 @@ export default function Home() {
       return;
     }
 
-    const activeReminders = (data || []).filter(
-      (item) => isEventVisibleForUsers(item, visibleUserIds) && !isEventDone(item.status)
+    let resolvedTaskStateData: StickyCallTaskState[] = taskStateData || [];
+
+    if (taskStateError) {
+      resolvedTaskStateData = readLocalStickyCallTaskStates(currentUser.id);
+
+      if (!isMissingStickyCallTaskStatesTable(taskStateError)) {
+        console.warn(
+          "Nie udało się wczytać prywatnego stanu telefonów; użyto zapisu lokalnego.",
+          taskStateError
+        );
+      }
+    } else {
+      clearLocalStickyCallTaskStates(currentUser.id);
+    }
+
+    const visibleCompletedEventIds = new Set(
+      resolvedTaskStateData
+        .filter((state) => state.completed_at && !state.dismissed_at)
+        .map((state) => state.event_id)
     );
 
-    if (activeReminders.length === 0) {
+    const visibleReminders = (data || []).filter(
+      (item) => !isEventDone(item.status) || visibleCompletedEventIds.has(item.id)
+    );
+
+    if (visibleReminders.length === 0) {
       setFollowUps([]);
       setLoadingFollowUps(false);
       return;
     }
 
-    const clientIds = [...new Set(activeReminders.map((item) => item.client_id))];
+    const clientIds = [...new Set(visibleReminders.map((item) => item.client_id))];
 
     const { data: clientsData, error: clientsError } = await supabase
       .from("clients")
@@ -877,7 +1009,7 @@ export default function Home() {
     );
 
     setFollowUps(
-      activeReminders.map((item) => ({
+      visibleReminders.map((item) => ({
         id: item.id,
         client_id: item.client_id,
         title: item.title || "Ponowny kontakt",
@@ -885,6 +1017,7 @@ export default function Home() {
         follow_up_at: item.event_at,
         status: item.status,
         client_name: clientsById.get(item.client_id) || "Klient",
+        completed: isEventDone(item.status),
       }))
     );
 
@@ -1023,31 +1156,31 @@ export default function Home() {
   async function loadSalesSummary() {
     setLoadingSalesSummary(true);
 
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    const nextMonthStart = new Date(monthStart);
-    nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+    const { start: periodStart, end: periodEnd } =
+      getSalesSummaryPeriodRange(salesSummaryPeriod);
 
     const canViewCompanySalesSummary =
       canViewCompanySales(currentUserRole as any);
-    const shouldShowCompanySalesSummary =
+    const shouldShowGroupSalesSummary =
       canViewCompanySalesSummary && salesSummaryMode === "team";
+    const shouldShowCompanySalesSummary =
+      shouldShowGroupSalesSummary && ["admin", "owner"].includes(currentUserRole);
 
     const salesSummaryVisibleUserIds =
       shouldShowCompanySalesSummary
         ? null
-        : salesSummaryMode === "mine" && currentUser?.id
-          ? [currentUser.id]
-          : visibleUserIds;
+        : shouldShowGroupSalesSummary
+          ? visibleUserIds
+          : currentUser?.id
+            ? [currentUser.id]
+            : [];
 
     const closedMeetingsQuery = supabase
       .from("calendar_events")
-      .select("id, status, created_by, assigned_user_id")
+      .select("id, status, event_at, created_by, assigned_user_id")
       .eq("event_type", "meeting")
-      .gte("event_at", monthStart.toISOString())
-      .lt("event_at", nextMonthStart.toISOString())
+      .gte("event_at", periodStart.toISOString())
+      .lt("event_at", periodEnd.toISOString())
       .limit(1000);
 
     const { data: closedMeetings, error: closedMeetingsError } = await closedMeetingsQuery;
@@ -1058,51 +1191,53 @@ export default function Home() {
 
     const visibleClosedMeetings = (closedMeetings || []).filter(
       (meeting) =>
-        isClosedMeetingStatus(meeting.status) &&
+        Boolean(meeting.event_at) &&
+        new Date(meeting.event_at).getTime() <= Date.now() &&
+        !isCancelledEventStatus(meeting.status) &&
         isEventVisibleForUsers(meeting, salesSummaryVisibleUserIds)
     );
 
     const closedMeetingsCount = visibleClosedMeetings.length;
 
-    const { data: allSales, error: monthlySalesError } = await supabase
+    const { data: allSales, error: periodSalesError } = await supabase
       .from("sales")
       .select("*")
-      .eq("status", "Zakończona")
-      .gte("created_at", monthStart.toISOString())
-      .lt("created_at", nextMonthStart.toISOString())
+      .gte("sale_date", periodStart.toISOString())
+      .lt("sale_date", periodEnd.toISOString())
       .limit(1000);
 
-    if (monthlySalesError) {
-      console.warn("Nie udało się pobrać sprzedaży do podsumowania", monthlySalesError);
+    if (periodSalesError) {
+      console.warn("Nie udało się pobrać sprzedaży do podsumowania", periodSalesError);
     }
 
-    const monthlySales = (allSales || []).filter((sale) => {
-      const rawSaleDate = sale.sale_date || sale.created_at;
-      if (!rawSaleDate) return false;
-
-      const saleDate = new Date(rawSaleDate);
-      const isCurrentMonth = saleDate >= monthStart && saleDate < nextMonthStart;
-
-      if (!isCurrentMonth) return false;
-
+    const periodSales = (allSales || []).filter((sale) => {
+      if (normalizeEventStatus(sale.status).startsWith("anul")) return false;
       if (shouldShowCompanySalesSummary) return true;
-
+      if (shouldShowGroupSalesSummary) {
+        return Boolean(
+          sale.seller_id && salesSummaryVisibleUserIds?.includes(sale.seller_id)
+        );
+      }
       return saleBelongsToCurrentUser(sale as Record<string, unknown>);
     });
 
-    const meetingsWithSalesCount = monthlySales.length;
+    const meetingsWithSalesCount = periodSales.length;
     const conversionRate =
       closedMeetingsCount > 0
-        ? Math.round((meetingsWithSalesCount / closedMeetingsCount) * 100)
-        : 0;
+        ? Math.min(100, Math.round((meetingsWithSalesCount / closedMeetingsCount) * 100))
+        : meetingsWithSalesCount > 0
+          ? 100
+          : 0;
 
-    const monthlySellerMargin = monthlySales.reduce((sum, sale) => {
+    const periodSellerMargin = periodSales.reduce((sum, sale) => {
       if (shouldShowCompanySalesSummary) {
-        const companyMargin = findCompanyMarginDeep(sale);
+        const companyMargin =
+          findCompanyMarginDeep(sale) ?? toFiniteNumber(sale.margin_value);
         return sum + (companyMargin ?? 0);
       }
 
-      const sellerCommissionAfterWarranty = findSellerCommissionAfterWarrantyDeep(sale);
+      const sellerCommissionAfterWarranty =
+        findSellerCommissionAfterWarrantyDeep(sale) ?? toFiniteNumber(sale.margin_value);
 
       return sum + (sellerCommissionAfterWarranty ?? 0);
     }, 0);
@@ -1111,7 +1246,7 @@ export default function Home() {
       closedMeetingsCount,
       meetingsWithSalesCount,
       conversionRate,
-      monthlySellerMargin,
+      monthlySellerMargin: periodSellerMargin,
     });
 
     setLoadingSalesSummary(false);
@@ -1122,19 +1257,15 @@ export default function Home() {
 
     setLoadingSalesSummary(true);
 
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    const nextMonthStart = new Date(monthStart);
-    nextMonthStart.setMonth(nextMonthStart.getMonth() + 1);
+    const { start: periodStart, end: periodEnd } =
+      getSalesSummaryPeriodRange(salesSummaryPeriod);
 
     const { data: activities, error: activitiesError } = await supabase
       .from("client_activities")
       .select("id, client_id, activity_type, phone_status, meeting_at, created_at")
       .eq("created_by", currentUser.id)
-      .gte("created_at", monthStart.toISOString())
-      .lt("created_at", nextMonthStart.toISOString())
+      .gte("created_at", periodStart.toISOString())
+      .lt("created_at", periodEnd.toISOString())
       .limit(1000);
 
     if (activitiesError) {
@@ -1143,9 +1274,9 @@ export default function Home() {
       return;
     }
 
-    const monthlyActivities = activities || [];
+    const periodActivities = activities || [];
 
-    const phoneActivities = monthlyActivities.filter((activity) => {
+    const phoneActivities = periodActivities.filter((activity) => {
       const activityType = normalizeEventStatus(activity.activity_type);
       const phoneStatus = normalizeEventStatus(activity.phone_status);
 
@@ -1173,16 +1304,16 @@ export default function Home() {
         .from("sales")
         .select("id, client_id, status, created_at, sale_date")
         .in("client_id", scheduledMeetingClientIds)
-        .gte("created_at", monthStart.toISOString())
-        .lt("created_at", nextMonthStart.toISOString())
+        .gte("sale_date", periodStart.toISOString())
+        .lt("sale_date", periodEnd.toISOString())
         .limit(1000);
 
       if (salesError) {
         console.warn("Nie udało się pobrać umów z umówionych spotkań CC", salesError);
       }
 
-      signedContractsFromMeetingsCount = (salesData || []).filter((sale) =>
-        isSignedContractStatus(sale.status)
+      signedContractsFromMeetingsCount = (salesData || []).filter(
+        (sale) => !normalizeEventStatus(sale.status).startsWith("anul")
       ).length;
     }
 
@@ -1288,13 +1419,13 @@ export default function Home() {
 
     return (
       <div>
-        <label className="mb-2 block text-sm font-semibold text-slate-700">
+        <label className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
           {label}
         </label>
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-800/70">
           <div className="mt-1 flex items-end gap-3">
             <div className="min-w-0 flex-1">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Data
               </label>
               <input
@@ -1305,11 +1436,11 @@ export default function Home() {
                   const nextDate = event.target.value;
                   onChange(combineDateAndTime(nextDate, `${selectedHour}:00`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-700/70"
               />
             </div>
             <div className="w-24">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Godzina
               </label>
               <select
@@ -1318,7 +1449,7 @@ export default function Home() {
                   const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
                   onChange(combineDateAndTime(nextDate, `${event.target.value}:${selectedMinute}`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-700/70"
               >
                 {hourOptions.map((hour) => (
                   <option key={hour} value={hour}>
@@ -1328,7 +1459,7 @@ export default function Home() {
               </select>
             </div>
             <div className="w-24">
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Minuty
               </label>
               <select
@@ -1337,7 +1468,7 @@ export default function Home() {
                   const nextDate = selectedDate || new Date().toISOString().slice(0, 10);
                   onChange(combineDateAndTime(nextDate, `${selectedHour}:${event.target.value}`));
                 }}
-                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70"
+                className="h-11 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition hover:border-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-200/70 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-slate-700/70"
               >
                 {minuteOptions.map((minute) => (
                   <option key={minute} value={minute}>
@@ -1485,6 +1616,34 @@ export default function Home() {
       return;
     }
 
+    const { error: taskStateError } = await supabase
+      .from("sticky_call_task_states")
+      .upsert(
+        {
+          user_id: currentUser.id,
+          event_id: resolvingFollowUp.id,
+          completed_at: new Date().toISOString(),
+          dismissed_at: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,event_id" }
+      );
+
+    if (taskStateError) {
+      saveLocalStickyCallTaskState(currentUser.id, {
+        event_id: resolvingFollowUp.id,
+        completed_at: new Date().toISOString(),
+        dismissed_at: null,
+      });
+
+      if (!isMissingStickyCallTaskStatesTable(taskStateError)) {
+        console.warn(
+          "Nie udało się zachować prywatnego stanu telefonu w bazie; użyto zapisu lokalnego.",
+          taskStateError
+        );
+      }
+    }
+
     const { error: insertError } = await supabase
       .from("client_activities")
       .insert({
@@ -1582,6 +1741,41 @@ export default function Home() {
     closeResolutionModal();
     loadFollowUps();
     loadMeetings();
+  }
+
+  async function dismissCompletedFollowUp(followUp: FollowUp) {
+    if (!currentUser?.id || !followUp.completed) return;
+
+    const now = new Date().toISOString();
+    const { error: dismissError } = await supabase
+      .from("sticky_call_task_states")
+      .upsert(
+        {
+          user_id: currentUser.id,
+          event_id: followUp.id,
+          completed_at: now,
+          dismissed_at: now,
+          updated_at: now,
+        },
+        { onConflict: "user_id,event_id" }
+      );
+
+    if (dismissError) {
+      saveLocalStickyCallTaskState(currentUser.id, {
+        event_id: followUp.id,
+        completed_at: now,
+        dismissed_at: now,
+      });
+
+      if (!isMissingStickyCallTaskStatesTable(dismissError)) {
+        console.warn(
+          "Nie udało się usunąć wykonanego telefonu w bazie; użyto zapisu lokalnego.",
+          dismissError
+        );
+      }
+    }
+
+    setFollowUps((current) => current.filter((item) => item.id !== followUp.id));
   }
 
   async function openClientFromFollowUp(clientId: string) {
@@ -1921,15 +2115,16 @@ export default function Home() {
       <div>
 
         <section className="space-y-6">
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-            <div ref={meetingsRef} className="xl:col-span-2 self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
-            <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-2xl font-bold">Kalendarz spotkań</h2>
-
-                <p className="text-slate-500 text-sm mt-1">
-                  Najbliższe przyszłe spotkania zapisane w CRM.
-                </p>
+          <DashboardGrid
+            currentUserId={currentUser.id}
+            calendarWidget={(
+            <div ref={meetingsRef} className="self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-6 scroll-mt-6">
+            <div className="dashboard-calendar-header flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <DashboardWidgetIcon name="calendar" />
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-bold">Kalendarz spotkań</h2>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1994,7 +2189,7 @@ export default function Home() {
             ) : meetings.length === 0 ? (
               <p className="text-sm text-slate-400">Brak zaplanowanych spotkań.</p>
             ) : (
-              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3 items-stretch">
+              <div className="dashboard-calendar-grid grid gap-3 items-stretch md:grid-cols-2 xl:grid-cols-3">
                 {visibleMeetings.map((meeting) => {
                   const meetingDate = new Date(meeting.meeting_at);
 
@@ -2115,25 +2310,39 @@ export default function Home() {
                 </div>
             )}
           </div>
+            )}
 
+            salesWidget={(
             <div className="self-start bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div>
-                  <h2 className="text-xl font-bold">
-                    {currentUserRole === "cc" ? "Wyniki CC" : "Podsumowanie sprzedaży"}
-                  </h2>
-                  <p className="text-slate-500 text-xs mt-1">
-                    {currentUserRole === "cc"
-                      ? "Telefony, umówione spotkania i umowy z tych spotkań w tym miesiącu."
-                      : salesSummaryMode === "team"
-                        ? currentUserRole === "manager"
-                          ? "Konwersja spotkań i marża zespołu managera w tym miesiącu."
-                          : "Konwersja spotkań i marża całej firmy w tym miesiącu."
-                        : "Konwersja spotkań i marża doradcy w tym miesiącu."}
-                  </p>
+              <div className="dashboard-sales-header flex items-start justify-between gap-3 mb-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <DashboardWidgetIcon name="sales" />
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-bold">
+                      {currentUserRole === "cc" ? "Wyniki CC" : "Podsumowanie sprzedaży"}
+                    </h2>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-2">
+                  <label className="sr-only" htmlFor="sales-summary-period">
+                    Okres podsumowania
+                  </label>
+                  <select
+                    id="sales-summary-period"
+                    value={salesSummaryPeriod}
+                    onChange={(event) =>
+                      setSalesSummaryPeriod(event.target.value as SalesSummaryPeriod)
+                    }
+                    className="h-9 cursor-pointer rounded-xl border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition hover:border-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  >
+                    {salesSummaryPeriodOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
                   {!salesSummaryCollapsed && canViewCompanySalesSummary && (
                     <div className="flex rounded-xl border border-emerald-200 bg-emerald-50 p-1">
                       <button
@@ -2187,7 +2396,7 @@ export default function Home() {
               {salesSummaryCollapsed ? null : loadingSalesSummary ? (
                 <p className="text-sm text-slate-400">Ładowanie podsumowania...</p>
               ) : (
-                <div className="flex items-center gap-4">
+                <div className="dashboard-sales-content flex items-center gap-4">
                   <div className="flex flex-1 items-center justify-center">
                     <div className="relative h-32 w-32 shrink-0">
                       <svg className="h-32 w-32 -rotate-90" viewBox="0 0 120 120">
@@ -2223,7 +2432,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="grid w-36 shrink-0 grid-cols-1 gap-2">
+                  <div className="dashboard-sales-metrics grid w-36 shrink-0 grid-cols-1 gap-2">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] text-slate-500 leading-tight">
                         {currentUserRole === "cc" ? "Wykonane telefony" : "Odbyte spotkania"}
@@ -2265,24 +2474,39 @@ export default function Home() {
                 </div>
               )}
             </div>
-          </div>
-
-          <StickyNotesBoard
-            currentUserId={currentUser.id}
-            currentUserEmail={currentUser.email}
-            currentUserName={currentUser.user_metadata?.display_name}
-            currentUserRole={currentUserRole}
+            )}
+            quickCalculatorWidget={(
+              <QuickCalculatorWidget
+                currentUserId={currentUser.id}
+                currentUserEmail={currentUser.email}
+                currentUserName={currentUser.user_metadata?.display_name}
+                currentUserRole={currentUserRole}
+              />
+            )}
+            stickyNotesWidget={(
+              <StickyNotesBoard
+                currentUserId={currentUser.id}
+                currentUserEmail={currentUser.email}
+                currentUserName={currentUser.user_metadata?.display_name}
+                currentUserRole={currentUserRole}
+                callTasks={followUps}
+                callTasksLoading={loadingFollowUps}
+                onResolveCallTask={startResolvingFollowUp}
+                onDismissCallTask={dismissCompletedFollowUp}
+                onOpenCallTaskClient={openClientFromFollowUp}
+              />
+            )}
           />
 
         </section>
       </div>
 
       {resolvingFollowUp && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-6 z-50">
-          <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xl p-6">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="call-task-resolution-title">
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:rounded-2xl sm:p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold">Rezultat kontaktu</h2>
+                <h2 id="call-task-resolution-title" className="text-2xl font-bold text-slate-900 dark:text-slate-100">Rezultat kontaktu</h2>
 
                 <p className="text-sm text-slate-500 mt-1">
                   {resolvingFollowUp.client_name}
@@ -2292,7 +2516,8 @@ export default function Home() {
               <button
                 type="button"
                 onClick={closeResolutionModal}
-                className="text-slate-400 hover:text-slate-700 text-xl"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                  aria-label="Zamknij okno rezultatu kontaktu"
               >
                 ✕
               </button>
@@ -2302,7 +2527,7 @@ export default function Home() {
               <select
                 value={resolutionStatus}
                 onChange={(event) => setResolutionStatus(event.target.value as ResolutionStatus)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
               >
                 {resolutionStatusOptions.map((status) => (
                   <option key={status.value} value={status.value}>
@@ -2350,7 +2575,7 @@ export default function Home() {
                 placeholder="Opis kontaktu..."
                 value={resolutionDescription}
                 onChange={(event) => setResolutionDescription(event.target.value)}
-                className="w-full min-h-[120px] rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 resize-none"
+                className="min-h-[120px] w-full resize-none rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
 
@@ -2362,7 +2587,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={closeResolutionModal}
-                className="px-4 py-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Anuluj
               </button>

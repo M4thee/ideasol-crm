@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
+import DashboardWidgetIcon from "@/app/components/DashboardWidgetIcon";
 
 type UserRole = "admin" | "owner" | "manager" | "seller" | "cc";
 type NoteVisibility = "private" | "management" | "public" | "shared" | "user";
@@ -51,6 +52,19 @@ type StickyNote = {
   comments?: NoteComment[];
 };
 
+type CallTask = {
+  id: string;
+  client_id: string;
+  title: string;
+  description: string | null;
+  follow_up_at: string;
+  status: string | null;
+  client_name: string;
+  completed: boolean;
+};
+
+const EMPTY_CALL_TASKS: CallTask[] = [];
+
 type Recipient = {
   id: string;
   display_name: string | null;
@@ -76,6 +90,11 @@ type StickyNotesBoardProps = {
   currentUserColor?: NoteColor;
   previewRecipients?: PreviewRecipient[];
   persistLocally?: boolean;
+  callTasks?: CallTask[];
+  callTasksLoading?: boolean;
+  onResolveCallTask?: (task: CallTask) => void;
+  onDismissCallTask?: (task: CallTask) => void;
+  onOpenCallTaskClient?: (clientId: string) => void;
 };
 
 const noteColorStyles: Record<NoteColor, string> = {
@@ -250,6 +269,7 @@ function visibilityLabel(note: StickyNote) {
 
 function canUserSeeNote(note: StickyNote, userId: string, role: UserRole) {
   if (note.visibility === "private") return note.authorId === userId;
+  if (role === "admin") return true;
   if (note.visibility === "management") return role === "owner";
   if (note.visibility === "public") return true;
   if (note.visibility === "shared") {
@@ -447,6 +467,153 @@ function MentionTextarea({
   );
 }
 
+function CallTasksStickyNote({
+  tasks,
+  loading,
+  onResolve,
+  onDismiss,
+  onOpenClient,
+  currentTimestamp,
+}: {
+  tasks: CallTask[];
+  loading: boolean;
+  onResolve?: (task: CallTask) => void;
+  onDismiss?: (task: CallTask) => void;
+  onOpenClient?: (clientId: string) => void;
+  currentTimestamp: number;
+}) {
+  const activeCount = tasks.filter((task) => !task.completed).length;
+
+  return (
+    <article className="call-tasks-sticky relative flex h-64 min-h-0 flex-col overflow-hidden rounded-xl border border-amber-200 bg-[#fff2a8] p-4 text-slate-950 shadow-[0_10px_24px_rgba(15,23,42,0.14)] sm:h-[19rem] sm:rounded-sm sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <span className="call-tasks-private-badge inline-flex items-center gap-1.5 rounded-full bg-white/65 px-2.5 py-1 text-[11px] font-black text-slate-900">
+          <VisibilityIcon visibility="private" />
+          Tylko ja
+        </span>
+        <span className="call-tasks-pinned-badge inline-flex items-center gap-1 rounded-full bg-amber-900/10 px-2.5 py-1 text-[11px] font-black text-amber-950">
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M12 17v5M5 3h14l-3 6v4l2 2H6l2-2V9L5 3Z" />
+          </svg>
+          Stała karta
+        </span>
+      </div>
+
+      <div className="call-tasks-header mt-4 flex items-start justify-between gap-3 border-b border-amber-950/15 pb-3">
+        <div>
+          <h3 className="call-tasks-title text-lg font-black leading-tight">Telefony do wykonania</h3>
+          <p className="call-tasks-summary mt-1 text-xs font-semibold text-slate-700">
+            {activeCount === 0
+              ? "Nie masz niewykonanych telefonów."
+              : activeCount === 1
+                ? "1 telefon czeka na wykonanie."
+                : `${activeCount} telefonów czeka na wykonanie.`}
+          </p>
+        </div>
+        <span className="call-tasks-count flex h-9 min-w-9 items-center justify-center rounded-full bg-slate-950 px-2 text-sm font-black text-white">
+          {activeCount}
+        </span>
+      </div>
+
+      <div className="call-tasks-list mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
+        {loading ? (
+          <p className="call-tasks-empty rounded-xl bg-white/45 px-3 py-5 text-center text-xs font-bold text-slate-600">
+            Ładowanie telefonów…
+          </p>
+        ) : tasks.length === 0 ? (
+          <p className="call-tasks-empty rounded-xl bg-white/45 px-3 py-5 text-center text-xs font-bold text-slate-600">
+            Wszystko załatwione. Nowe zadania pojawią się tutaj automatycznie.
+          </p>
+        ) : (
+          tasks.map((task) => {
+            const taskDate = new Date(task.follow_up_at);
+            const isOverdue =
+              !task.completed &&
+              currentTimestamp > 0 &&
+              taskDate.getTime() < currentTimestamp;
+
+            return (
+              <div
+                key={task.id}
+                data-call-task-state={task.completed ? "completed" : isOverdue ? "overdue" : "pending"}
+                className={`rounded-xl border px-3 py-2.5 transition ${
+                  task.completed
+                    ? "border-emerald-700/20 bg-emerald-50/65"
+                    : isOverdue
+                      ? "border-red-500/35 bg-red-50/70"
+                      : "border-amber-950/10 bg-white/55"
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!task.completed) onResolve?.(task);
+                    }}
+                    disabled={task.completed || !onResolve}
+                    className={`call-task-check mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 transition ${
+                      task.completed
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-slate-700 bg-white/70 text-transparent hover:border-emerald-700 hover:text-emerald-700"
+                    }`}
+                    aria-label={task.completed ? "Telefon wykonany" : `Ustaw rezultat telefonu do ${task.client_name}`}
+                    title={task.completed ? "Telefon wykonany" : "Ustaw rezultat kontaktu"}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                  </button>
+
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => onOpenClient?.(task.client_id)}
+                      disabled={!onOpenClient}
+                      className={`call-task-client block max-w-full truncate text-left text-sm font-black underline-offset-2 hover:underline ${
+                        task.completed ? "text-slate-600 line-through" : "text-slate-950"
+                      }`}
+                      title={task.client_name}
+                    >
+                      {task.client_name}
+                    </button>
+                    <p className={`call-task-description mt-0.5 line-clamp-2 text-xs font-semibold ${task.completed ? "text-slate-500 line-through" : "text-slate-700"}`}>
+                      {task.title || task.description || "Ponowny kontakt"}
+                    </p>
+                    <p className={`call-task-meta mt-1 text-[11px] font-black ${isOverdue ? "text-red-700" : task.completed ? "text-emerald-800" : "text-slate-600"}`}>
+                      {task.completed ? "Wykonano · " : isOverdue ? "Zaległy · " : "Termin · "}
+                      {taskDate.toLocaleString("pl-PL", {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: "Europe/Warsaw",
+                      })}
+                    </p>
+                  </div>
+
+                  {task.completed && onDismiss ? (
+                    <button
+                      type="button"
+                      onClick={() => onDismiss(task)}
+                      className="call-task-dismiss flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-white/70 hover:text-red-700"
+                      aria-label={`Usuń wykonany telefon do ${task.client_name} z kartki`}
+                      title="Usuń wykonane zadanie z kartki"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="m7 7 10 10M17 7 7 17" />
+                      </svg>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function StickyNotesBoard({
   currentUserId,
   currentUserEmail,
@@ -455,6 +622,11 @@ export default function StickyNotesBoard({
   currentUserColor = "mint",
   previewRecipients,
   persistLocally = true,
+  callTasks = EMPTY_CALL_TASKS,
+  callTasksLoading = false,
+  onResolveCallTask,
+  onDismissCallTask,
+  onOpenCallTaskClient,
 }: StickyNotesBoardProps) {
   const isPreviewMode = Boolean(previewRecipients) || !persistLocally;
   const [notes, setNotes] = useState<StickyNote[]>([]);
@@ -1128,14 +1300,9 @@ export default function StickyNotesBoard({
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className={`flex flex-col gap-4 px-4 py-5 sm:px-6 sm:py-6 lg:flex-row lg:items-center lg:justify-between ${isCollapsed ? "" : "border-b border-slate-200 dark:border-slate-700"}`}>
+      <div className={`dashboard-sticky-header flex flex-col gap-4 px-4 py-5 sm:px-6 sm:py-6 lg:flex-row lg:items-center lg:justify-between ${isCollapsed ? "" : "border-b border-slate-200 dark:border-slate-700"}`}>
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-200">
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 3h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
-              <path d="M14 21v-6h6M8 8h8M8 12h5" />
-            </svg>
-          </div>
+          <DashboardWidgetIcon name="tasks" className="mt-0.5" />
 
           <h2 className="pt-1 text-xl font-bold text-slate-900 dark:text-slate-100 sm:text-2xl">
             Tablica zadań
@@ -1146,6 +1313,7 @@ export default function StickyNotesBoard({
           <button
             type="button"
             onClick={() => setIsComposerOpen(true)}
+            data-dashboard-tour-target="sticky-notes"
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-400"
           >
             <span className="text-lg leading-none">+</span>
@@ -1170,25 +1338,25 @@ export default function StickyNotesBoard({
             {boardError}
           </p>
         )}
-        {notesLoading ? (
-          <div className="flex min-h-56 items-center justify-center text-sm font-bold text-slate-500 dark:text-slate-400">
-            Ładowanie tablicy zadań…
-          </div>
-        ) : visibleNotes.length === 0 ? (
-          <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/65 px-6 text-center dark:border-slate-600 dark:bg-slate-900/65">
-            <div className="mb-3 text-3xl">📝</div>
-            <p className="font-bold text-slate-800 dark:text-slate-100">Tablica jest pusta</p>
-            <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">
-              Dodaj pierwszą notatkę i zdecyduj, kto powinien ją zobaczyć.
-            </p>
-          </div>
-        ) : (
-          <div
-            className={`grid items-start gap-3 transition-[padding] duration-200 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 ${
-              openCommentsNoteId ? "pb-80" : ""
-            }`}
-          >
-            {visibleNotes.map((note, index) => {
+        <div
+          className={`dashboard-sticky-grid grid items-start gap-3 transition-[padding] duration-200 sm:gap-4 md:grid-cols-2 xl:grid-cols-3 ${
+            openCommentsNoteId ? "pb-80" : ""
+          }`}
+        >
+          <CallTasksStickyNote
+            tasks={callTasks}
+            loading={callTasksLoading}
+            onResolve={onResolveCallTask}
+            onDismiss={onDismissCallTask}
+            onOpenClient={onOpenCallTaskClient}
+            currentTimestamp={currentTimestamp}
+          />
+          {notesLoading ? (
+            <div className="flex min-h-56 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/55 px-4 text-sm font-bold text-slate-500 dark:border-slate-600 dark:bg-slate-900/55 dark:text-slate-400">
+              Ładowanie pozostałych notatek…
+            </div>
+          ) : (
+            visibleNotes.map((note, index) => {
               const isCompleted = Boolean(note.completedAt);
               const isExpired = Boolean(
                 !isCompleted &&
@@ -1503,9 +1671,9 @@ export default function StickyNotesBoard({
                 )}
                 </article>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </div>}
 
       {isComposerOpen && (

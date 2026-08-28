@@ -58,6 +58,7 @@ type OfferPdfData = {
   advisorEmail?: string;
   pdfQuantity?: number;
   customPaymentSchedule?: unknown;
+  customPaymentTerms?: string;
 };
 
 function formatMoney(value: unknown) {
@@ -191,6 +192,7 @@ function normalizeAdditionalServices(value: unknown) {
 }
 
 function getHeadline(offerType?: string) {
+  if (offerType === "custom") return "Oferta niestandardowa";
   if (offerType === "pv") return "Oferta instalacji fotowoltaicznej";
   if (offerType === "storage") return "Oferta magazynu energii";
 
@@ -771,8 +773,11 @@ async function createOfferPdf(data: OfferPdfData) {
   y -= 88;
 
   const customPaymentSchedule = normalizeCustomPaymentSchedule(data.customPaymentSchedule);
-  const depositGross = summaryGross * 0.25;
-  const remainingGross = Math.max(summaryGross - depositGross, 0);
+  const customPaymentTerms = String(data.customPaymentTerms || "").trim();
+  const isCustomOffer = data.offerType === "custom";
+  const manualPaymentLines = customPaymentTerms
+    ? wrapText(customPaymentTerms, font, 7, cardWidth - 36)
+    : [];
   const customPaymentLines = customPaymentSchedule.enabled
     ? customPaymentSchedule.installments.flatMap((installment, index) =>
         wrapText(
@@ -792,78 +797,98 @@ async function createOfferPdf(data: OfferPdfData) {
           cardWidth - 36
         )
       : [];
-  const paymentCardHeight = customPaymentSchedule.enabled
-    ? Math.max(
+  const paymentCardHeight = isCustomOffer
+    ? Math.max(58, 34 + manualPaymentLines.length * 9)
+    : customPaymentSchedule.enabled
+      ? Math.max(
         58,
         34 + customPaymentLines.length * 9 + customPaymentNoteLines.length * 8 +
           (customPaymentNoteLines.length > 0 ? 7 : 0)
       )
-    : 58;
+      : 58;
 
-  page.drawRectangle({
-    x: marginX,
-    y: y - paymentCardHeight,
-    width: cardWidth,
-    height: paymentCardHeight,
-    color: hexToRgb("#FFFFFF"),
-    borderColor: hexToRgb("#E2E8F0"),
-    borderWidth: 0.7,
-  });
+  if (!isCustomOffer || manualPaymentLines.length > 0) {
+    page.drawRectangle({
+      x: marginX,
+      y: y - paymentCardHeight,
+      width: cardWidth,
+      height: paymentCardHeight,
+      color: hexToRgb("#FFFFFF"),
+      borderColor: hexToRgb("#E2E8F0"),
+      borderWidth: 0.7,
+    });
 
-  page.drawText(
-    customPaymentSchedule.enabled ? "Indywidualny harmonogram płatności" : "Forma rozliczenia",
-    {
+    page.drawText(
+      isCustomOffer
+        ? "Forma rozliczenia / warunki płatności"
+        : customPaymentSchedule.enabled
+          ? "Indywidualny harmonogram płatności"
+          : "Forma rozliczenia",
+      {
       x: marginX + 18,
       y: y - 18,
       size: 9,
       font: headingFont,
       color: hexToRgb("#0F172A"),
-    }
-  );
+      }
+    );
 
-  if (customPaymentSchedule.enabled) {
-    let paymentY = y - 34;
-    customPaymentLines.forEach((line) => {
-      page.drawText(line, {
-        x: marginX + 18,
-        y: paymentY,
-        size: 7,
-        font,
-        color: hexToRgb("#475569"),
-      });
-      paymentY -= 9;
-    });
-
-    if (customPaymentNoteLines.length > 0) {
-      paymentY -= 3;
-      customPaymentNoteLines.forEach((line) => {
+    if (isCustomOffer) {
+      let paymentY = y - 34;
+      manualPaymentLines.forEach((line) => {
         page.drawText(line, {
           x: marginX + 18,
           y: paymentY,
-          size: 6.4,
-          font: headingFont,
-          color: hexToRgb("#7C3AED"),
+          size: 7,
+          font,
+          color: hexToRgb("#475569"),
         });
-        paymentY -= 8;
+        paymentY -= 9;
       });
-    }
-  } else {
-    drawWrappedText(
-      page,
-      `Zaliczka: ${formatMoney(depositGross)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji. Pozostała kwota: ${formatMoney(remainingGross)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
-      {
-        x: marginX + 18,
-        y: y - 34,
-        maxWidth: cardWidth - 36,
-        size: 7,
-        lineHeight: 9,
-        font,
-        color: hexToRgb("#475569"),
-      }
-    );
-  }
+    } else if (customPaymentSchedule.enabled) {
+      let paymentY = y - 34;
+      customPaymentLines.forEach((line) => {
+        page.drawText(line, {
+          x: marginX + 18,
+          y: paymentY,
+          size: 7,
+          font,
+          color: hexToRgb("#475569"),
+        });
+        paymentY -= 9;
+      });
 
-  y -= paymentCardHeight + 12;
+      if (customPaymentNoteLines.length > 0) {
+        paymentY -= 3;
+        customPaymentNoteLines.forEach((line) => {
+          page.drawText(line, {
+            x: marginX + 18,
+            y: paymentY,
+            size: 6.4,
+            font: headingFont,
+            color: hexToRgb("#7C3AED"),
+          });
+          paymentY -= 8;
+        });
+      }
+    } else {
+      drawWrappedText(
+        page,
+        `Zaliczka: ${formatMoney(summaryGross * 0.25)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji. Pozostała kwota: ${formatMoney(summaryGross * 0.75)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
+        {
+          x: marginX + 18,
+          y: y - 34,
+          maxWidth: cardWidth - 36,
+          size: 7,
+          lineHeight: 9,
+          font,
+          color: hexToRgb("#475569"),
+        }
+      );
+    }
+
+    y -= paymentCardHeight + 12;
+  }
 
   const subsidyTotal = data.subsidyAllocation?.enabled ? getSubsidyTotal(data) : 0;
   const storageSubsidy = Number(data.subsidyAllocation?.storageSubsidy || 0);
@@ -927,7 +952,9 @@ async function createOfferPdf(data: OfferPdfData) {
 
   drawWrappedText(
     page,
-    data.subsidyAllocation?.enabled
+    data.offerType === "custom"
+      ? "Oferta ma charakter informacyjny. Zakres, dostępność oraz warunki realizacji wymagają potwierdzenia przed zawarciem umowy."
+      : data.subsidyAllocation?.enabled
       ? "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu i zostały zoptymalizowane pod jak najkorzystniejszą dla klienta wysokość dotacji z programu PME."
       : "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu.",
     {
@@ -993,6 +1020,7 @@ export async function POST(request: Request) {
       advisorEmail: body.advisorEmail,
       pdfQuantity: body.pdfQuantity,
       customPaymentSchedule: body.customPaymentSchedule,
+      customPaymentTerms: body.customPaymentTerms,
     });
 
     return new NextResponse(new Uint8Array(pdfBuffer), {

@@ -277,6 +277,7 @@ export async function POST(request: Request) {
     });
 
     const offerType = String(body.offerType || "pv_storage");
+    const isCustomOffer = offerType === "custom";
     const isStorageOnly = offerType === "storage";
     const hasEnergyStorage = String(body.energyStorage || "").toLowerCase() !== "brak";
     const sendMode = body.sendMode === "public" ? "public" : "anonymous";
@@ -328,19 +329,15 @@ export async function POST(request: Request) {
       }
     }
 
-    const subject = isStorageOnly
+    const subject = isCustomOffer
+      ? "Oferta IdeaSol"
+      : isStorageOnly
       ? "Oferta magazynu energii"
       : hasEnergyStorage
         ? "Oferta instalacji fotowoltaicznej z magazynem energii"
         : "Oferta instalacji fotowoltaicznej";
 
-    const offerSubtitle = isStorageOnly
-      ? "Magazyn energii"
-      : hasEnergyStorage
-        ? "Fotowoltaika + magazyn energii"
-        : "Fotowoltaika";
-
-    const hasInverter = String(body.inverter || "").toLowerCase() !== "brak";
+    const hasInverter = !isCustomOffer && String(body.inverter || "").toLowerCase() !== "brak";
 
     const panelName = String(
       body.panelName ||
@@ -354,7 +351,7 @@ export async function POST(request: Request) {
       body.panelPowerWp || body.panelPower || body.selectedPanelPowerWp || body.modulePowerWp || 0
     );
     const panelCount = Number(body.panelCount || body.panelsCount || body.modulesCount || 0);
-    const hasPanelDetails = !isStorageOnly && Boolean(panelName || panelPowerWp || panelCount);
+    const hasPanelDetails = !isCustomOffer && !isStorageOnly && Boolean(panelName || panelPowerWp || panelCount);
     const inverterTypeLabel = getInverterTypeLabel(body.inverterType);
     const includeSubsidy = Boolean(
       body.includeSubsidy || body.subsidyAllocation?.requested
@@ -374,15 +371,19 @@ export async function POST(request: Request) {
 
     const hasSubsidy = includeSubsidy && subsidyTotal > 0;
 
-    const offerProductName = isStorageOnly
+    const offerProductName = isCustomOffer
+      ? "wybranych produktów i usług"
+      : isStorageOnly
       ? "magazynu energii"
       : hasEnergyStorage
         ? "instalacji fotowoltaicznej z magazynem energii"
         : "instalacji fotowoltaicznej";
 
-    const offerIntro = `W nawiązaniu do rozmowy telefonicznej przesyłam wstępną wycenę ${offerProductName} wraz z montażem.`;
+    const offerIntro = isCustomOffer
+      ? `W nawiązaniu do rozmowy przesyłam wycenę ${offerProductName}.`
+      : `W nawiązaniu do rozmowy telefonicznej przesyłam wstępną wycenę ${offerProductName} wraz z montażem.`;
 
-    const pvTextLine = isStorageOnly
+    const pvTextLine = isCustomOffer || isStorageOnly
       ? ""
       : `- instalacja PV: ${body.pvPowerKw} kWp\n`;
 
@@ -392,6 +393,36 @@ export async function POST(request: Request) {
 
     const storageTextLine = hasEnergyStorage
       ? `- magazyn energii: ${body.energyStorage}\n`
+      : "";
+
+    const customOfferItems = Array.isArray(body.additionalServices)
+      ? body.additionalServices
+          .filter((item: unknown) => item && typeof item === "object")
+          .map((item: Record<string, unknown>) => ({
+            name: String(item.name || "").trim(),
+            quantity: Math.max(Number(item.quantity || 1), 1),
+            totalNet: Number(item.totalNet || item.total_net || 0),
+          }))
+          .filter((item: { name: string }) => item.name)
+      : [];
+    const customItemsTextLine = isCustomOffer
+      ? customOfferItems
+          .map((item: { name: string; quantity: number }) =>
+            `- ${item.name}${item.quantity !== 1 ? ` × ${item.quantity} szt.` : ""}`
+          )
+          .join("\n") + "\n"
+      : "";
+    const customPaymentTerms = isCustomOffer
+      ? String(body.customPaymentTerms || "").trim()
+      : "";
+    const customPaymentTextLine = customPaymentTerms
+      ? `\nForma rozliczenia / warunki płatności:\n${customPaymentTerms}\n`
+      : "";
+    const customPaymentHtmlBox = customPaymentTerms
+      ? `<div style="border-left:5px solid #0f766e; background:#f0fdfa; border:1px solid #99f6e4; border-radius:14px; padding:16px 18px; margin:0 0 22px;">
+                <p style="margin:0 0 8px; font-size:13px; color:#0f766e; font-weight:800;">Forma rozliczenia / warunki płatności</p>
+                <p style="margin:0; font-size:15px; color:#111827; line-height:1.65; white-space:pre-wrap;">${escapeHtml(customPaymentTerms).replace(/\r?\n/g, "<br />")}</p>
+              </div>`
       : "";
 
     const catalogCardsTextLine = catalogCardAttachments.length
@@ -420,7 +451,7 @@ export async function POST(request: Request) {
       ? panelDetailsParts.join(" | ") || "Panele fotowoltaiczne"
       : "";
 
-    const pvTableRows = isStorageOnly
+    const pvTableRows = isCustomOffer || isStorageOnly
       ? ""
       : `<tr>
                   <td style="border-bottom:1px solid #e5e7eb; padding:16px 18px; color:#047857; font-weight:800; width:42%;">Instalacja fotowoltaiczna</td>
@@ -446,6 +477,14 @@ export async function POST(request: Request) {
                   <td style="padding:16px 18px; color:#047857; font-weight:800;">Magazyn energii</td>
                   <td style="padding:16px 18px; color:#111827;">${body.energyStorage}</td>
                 </tr>`
+      : "";
+    const customOfferTableRows = isCustomOffer
+      ? customOfferItems
+          .map((item: { name: string; quantity: number; totalNet: number }) => `<tr>
+                  <td style="border-bottom:1px solid #e5e7eb; padding:16px 18px; color:#047857; font-weight:800; width:42%;">${escapeHtml(item.name)}</td>
+                  <td style="border-bottom:1px solid #e5e7eb; padding:16px 18px; color:#111827;">${item.quantity} szt. · ${formatMoney(item.totalNet)} zł netto</td>
+                </tr>`)
+          .join("")
       : "";
 
     const publicSignatureText = [
@@ -486,11 +525,12 @@ ${offerIntro}
 ${sellerNoteText}
 
 Zakres wyceny:
-${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${offerPdfTextLine}${catalogCardsTextLine}
+${customItemsTextLine}${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${offerPdfTextLine}${catalogCardsTextLine}
 Cena netto: ${formatMoney(body.finalNet)} zł
 Cena brutto ${vatRate}%: ${formatMoney(finalGross)} zł
+${customPaymentTextLine}
 ${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł (dotacja ME: ${formatMoney(storageSubsidy)} zł${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)} zł` : ""})\n` : ""}
-Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami).
+${isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
 
 Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
 
@@ -524,6 +564,7 @@ ${emailSignatureText}`;
 
               <table style="border-collapse:separate; border-spacing:0; width:100%; margin:20px 0 26px; font-size:15px; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden;">
                 ${pvTableRows}
+                ${customOfferTableRows}
                 ${panelTableRow}
                 ${inverterTableRow}
                 ${storageTableRow}
@@ -541,7 +582,7 @@ ${emailSignatureText}`;
                     <div style="border:1px solid #fed7aa; background:#fff7ed; border-radius:16px; padding:18px; min-height:92px;">
                       <p style="margin:0 0 10px; font-size:13px; color:#c2410c; font-weight:800;">Cena brutto ${vatRate}%</p>
                       <p style="margin:0; font-size:26px; line-height:1.1; font-weight:900; color:#ea580c;">${formatMoney(finalGross)} zł</p>
-                      <p style="margin:8px 0 0; font-size:11px; line-height:1.35; color:#9a3412; font-weight:600;">Kwota przed dotacją</p>
+                      ${isCustomOffer ? "" : `<p style="margin:8px 0 0; font-size:11px; line-height:1.35; color:#9a3412; font-weight:600;">Kwota przed dotacją</p>`}
                     </div>
                   </td>
                   ${hasSubsidy ? `<td style="width:33.333%; vertical-align:top;">
@@ -556,16 +597,17 @@ ${emailSignatureText}`;
               </table>
 
               ${catalogCardsHtmlBox}
+              ${customPaymentHtmlBox}
 
               <div style="border-left:5px solid #16a34a; background:#f8faf9; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin:0 0 22px;">
                 <p style="margin:0; font-size:15px; color:#111827; line-height:1.65;">
-                  Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami).
+                  ${isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
                 </p>
               </div>
 
               <div style="background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; margin:0 0 26px;">
                 <p style="margin:0; color:#475569; font-size:13px; line-height:1.5;">
-                  Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
+                  ${isCustomOffer ? "Oferta ma charakter wstępny i wymaga potwierdzenia przed realizacją." : "Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych."}
                 </p>
               </div>
 
