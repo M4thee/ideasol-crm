@@ -8,6 +8,7 @@ import type {
   CreditOffer,
 } from "@/lib/calculator/creditCalculator";
 import {
+  CREDIT_BANK_LOGO_BUCKET,
   getCreditBankLogoUrl,
   readImageAsDataUrl,
 } from "@/lib/calculator/creditBankLogo";
@@ -270,13 +271,30 @@ export default function CreditAdminPanel() {
         return;
       }
 
-      const logoPath = await readImageAsDataUrl(file);
+      const logoPath = `${bank.id}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from(CREDIT_BANK_LOGO_BUCKET)
+        .upload(logoPath, file, {
+          cacheControl: "31536000",
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (uploadError) throw uploadError;
+
       const { error: updateError } = await supabase
         .from("credit_banks")
         .update({ logo_path: logoPath, updated_at: new Date().toISOString() })
         .eq("id", bank.id);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        await supabase.storage.from(CREDIT_BANK_LOGO_BUCKET).remove([logoPath]);
+        throw updateError;
+      }
+
+      if (bank.logo_path && !bank.logo_path.startsWith("data:") && !/^https?:\/\//i.test(bank.logo_path)) {
+        await supabase.storage.from(CREDIT_BANK_LOGO_BUCKET).remove([bank.logo_path]);
+      }
 
       await loadCatalog();
       setStatus("Logo banku zostało zapisane.");
@@ -305,11 +323,16 @@ export default function CreditAdminPanel() {
         return;
       }
 
+      const oldLogoPath = bank.logo_path;
       const { error: updateError } = await supabase
         .from("credit_banks")
         .update({ logo_path: null, updated_at: new Date().toISOString() })
         .eq("id", bank.id);
       if (updateError) throw updateError;
+
+      if (!oldLogoPath.startsWith("data:") && !/^https?:\/\//i.test(oldLogoPath)) {
+        await supabase.storage.from(CREDIT_BANK_LOGO_BUCKET).remove([oldLogoPath]);
+      }
 
       await loadCatalog();
       setStatus("Logo banku zostało usunięte.");

@@ -128,7 +128,20 @@ type UserProfile = {
   name?: string | null;
   username?: string | null;
   user_number?: number | string | null;
+  is_active?: boolean | null;
+  hidden_from_assignment?: boolean | null;
 };
+
+function getUserProfileLabel(profile: UserProfile | null | undefined) {
+  return (
+    profile?.display_name ||
+    profile?.full_name ||
+    profile?.name ||
+    profile?.username ||
+    profile?.email ||
+    "Nieznany sprzedawca"
+  );
+}
 
 function money(value: number | null | undefined) {
   if (value === null || value === undefined) return "Brak";
@@ -928,6 +941,9 @@ export default function OfferDetailsPage() {
   const [creator, setCreator] = useState<UserProfile | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [canChooseSaleSeller, setCanChooseSaleSeller] = useState(false);
+  const [sellerOptions, setSellerOptions] = useState<UserProfile[]>([]);
+  const [selectedSaleSellerId, setSelectedSaleSellerId] = useState("");
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
   const [showSaleForm, setShowSaleForm] = useState(false);
   const [showCancelSaleModal, setShowCancelSaleModal] = useState(false);
@@ -1070,6 +1086,38 @@ export default function OfferDetailsPage() {
     setCurrentUserRole(role);
     const visibleIds = await loadVisibleUserIds(user.id, role);
 
+    const { data: customModePermission, error: customModePermissionError } = await supabase
+      .from("user_permissions")
+      .select("custom_mode")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (customModePermissionError) {
+      console.error("Błąd ładowania uprawnienia Custom Mode:", customModePermissionError);
+    }
+
+    const customModeAccess = customModePermission?.custom_mode === true;
+    setCanChooseSaleSeller(customModeAccess);
+
+    if (customModeAccess) {
+      const { data: availableSellers, error: availableSellersError } = await supabase
+        .from("profiles")
+        .select("id, display_name, email, role, user_number, is_active, hidden_from_assignment")
+        .in("role", ["owner", "admin", "manager", "seller"])
+        .eq("is_active", true)
+        .eq("hidden_from_assignment", false)
+        .order("display_name", { ascending: true });
+
+      if (availableSellersError) {
+        console.error("Błąd ładowania listy sprzedawców:", availableSellersError);
+        setSellerOptions([]);
+      } else {
+        setSellerOptions((availableSellers as UserProfile[]) || []);
+      }
+    } else {
+      setSellerOptions([]);
+    }
+
     const { data: offerData, error: offerError } = await supabase
       .from("client_offers")
       .select("*")
@@ -1108,8 +1156,6 @@ export default function OfferDetailsPage() {
       return;
     }
 
-    setOffer(loadedOffer);
-
     if (loadedOffer.client_id) {
       const { data: clientData, error: clientError } = await supabase
         .from("clients")
@@ -1122,11 +1168,8 @@ export default function OfferDetailsPage() {
       }
 
       setClient((clientData as ClientData) || null);
-      if (autoCreateSale && clientData) {
-        setTimeout(() => {
-          openSaleFormFromOffer(clientData as ClientData);
-        }, 0);
-      }
+    } else {
+      setClient(null);
     }
 
     if (loadedOffer.created_by) {
@@ -1141,8 +1184,11 @@ export default function OfferDetailsPage() {
       }
 
       setCreator((creatorData as UserProfile) || null);
+    } else {
+      setCreator(null);
     }
 
+    setOffer(loadedOffer);
     setLoading(false);
   }
   async function getNextContractSequenceForUser(
@@ -1229,13 +1275,12 @@ export default function OfferDetailsPage() {
     const contractDate = todayLocalDate();
     const defaultContractPlace = address.city || "";
 
-    const userNumberRaw =
-      creator?.user_number ||
-      (creator as any)?.uid ||
-      (creator as any)?.userNumber ||
-      "00";
+    const defaultSeller = canChooseSaleSeller ? null : creator;
+    const nextContractSequence = defaultSeller
+      ? await getNextContractSequenceForUser(defaultSeller.user_number, contractDate)
+      : "01";
 
-    const nextContractSequence = await getNextContractSequenceForUser(userNumberRaw, contractDate);
+    setSelectedSaleSellerId(canChooseSaleSeller ? "" : offer.created_by);
 
     setSaleForm({
       ...emptySaleForm(),
@@ -1287,6 +1332,25 @@ export default function OfferDetailsPage() {
     setShowSaleForm(true);
   }
 
+  async function handleSaleSellerChange(sellerId: string) {
+    setSelectedSaleSellerId(sellerId);
+    setInvalidFields((current) => current.filter((field) => field !== "sellerId"));
+    setCreateSaleStatus("");
+
+    if (!sellerId) {
+      updateSaleForm("contractSequence", "01");
+      return;
+    }
+
+    const seller = sellerOptions.find((profile) => profile.id === sellerId);
+    const sequence = await getNextContractSequenceForUser(
+      seller?.user_number,
+      saleForm.contractDate
+    );
+
+    updateSaleForm("contractSequence", sequence);
+  }
+
   function validateSaleForm() {
     const errors: string[] = [];
 
@@ -1295,6 +1359,12 @@ export default function OfferDetailsPage() {
       saleForm.contractBuildingNumber.trim() &&
       saleForm.contractPostalCode.trim() &&
       saleForm.contractCity.trim();
+
+    if (canChooseSaleSeller && !selectedSaleSellerId) {
+      errors.push("sellerId");
+      setInvalidFields(errors);
+      return "Wybierz sprzedawcę prowadzącego sprzedaż.";
+    }
 
     if (!saleForm.contractSequence.trim()) {
       errors.push("contractSequence");
@@ -1677,14 +1747,11 @@ export default function OfferDetailsPage() {
   }
 
   function getTeamsSaleSellerName() {
-    return (
-      creator?.display_name ||
-      creator?.full_name ||
-      creator?.name ||
-      creator?.username ||
-      creator?.email ||
-      "Nieznany sprzedawca"
-    );
+    const saleSeller = canChooseSaleSeller
+      ? sellerOptions.find((profile) => profile.id === selectedSaleSellerId)
+      : creator;
+
+    return getUserProfileLabel(saleSeller);
   }
 
   async function sendTeamsSaleCreatedNotification(saleId: string) {
@@ -1722,6 +1789,13 @@ export default function OfferDetailsPage() {
     conflictDetected: boolean;
   }) {
     if (!offer) return;
+
+    const effectiveSellerId = canChooseSaleSeller
+      ? selectedSaleSellerId
+      : offer.created_by;
+    const effectiveSeller = canChooseSaleSeller
+      ? sellerOptions.find((profile) => profile.id === effectiveSellerId) || null
+      : creator;
 
     const validationError = validateSaleForm();
 
@@ -1811,11 +1885,7 @@ export default function OfferDetailsPage() {
     const saleResult = (saleOfferSnapshot.offer_data?.result || {}) as Record<string, any>;
 
     // --- Contract number generation ---
-    const userNumberRaw =
-      creator?.user_number ||
-      (creator as any)?.uid ||
-      (creator as any)?.userNumber ||
-      "00";
+    const userNumberRaw = effectiveSeller?.user_number || "00";
 
     const contractNumber = buildContractNumberPreview(
       userNumberRaw,
@@ -1866,7 +1936,7 @@ export default function OfferDetailsPage() {
         postal_code: saleForm.contractPostalCode,
         city: saleForm.contractCity,
         status: "Klient aktywny",
-        assigned_user_id: offer.created_by,
+        assigned_user_id: effectiveSellerId,
       };
 
       const { data: newClient, error: newClientError } = await supabase
@@ -1887,7 +1957,7 @@ export default function OfferDetailsPage() {
 
     const salePayload = {
       client_id: effectiveClientId,
-      seller_id: offer.created_by,
+      seller_id: effectiveSellerId,
       source_offer_id: offer.id,
       contract_number: contractNumber,
       sale_date: new Date().toISOString(),
@@ -2172,8 +2242,11 @@ if (updateClientStatusError) {
   const technicalRows = getTechnicalRows(result);
   const savedBreakdownRows = getSavedBreakdownRows(result);
   const formData = (offer.offer_data?.form || {}) as Record<string, any>;
+  const selectedSaleSeller = canChooseSaleSeller
+    ? sellerOptions.find((profile) => profile.id === selectedSaleSellerId) || null
+    : creator;
   const contractNumberPreview = buildContractNumberPreview(
-    creator?.user_number || (creator as any)?.uid || (creator as any)?.userNumber || "00",
+    selectedSaleSeller?.user_number || "00",
     saleForm.contractSequence,
     saleForm.contractDate
   );
@@ -2258,6 +2331,30 @@ if (updateClientStatusError) {
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {canChooseSaleSeller && (
+                <label className="md:col-span-2 block rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+                  <span className="text-sm font-black text-emerald-950">
+                    Sprzedawca prowadzący sprzedaż
+                  </span>
+                  <span className="mt-1 block text-xs font-medium text-emerald-800">
+                    To przypisanie określa właściciela sprzedaży, nowego klienta oraz numer doradcy w numerze umowy.
+                  </span>
+                  <select
+                    value={selectedSaleSellerId}
+                    onChange={(event) => void handleSaleSellerChange(event.target.value)}
+                    className={inputClass("sellerId")}
+                  >
+                    <option value="">Wybierz sprzedawcę</option>
+                    {sellerOptions.map((seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {getUserProfileLabel(seller)}
+                        {seller.user_number ? ` · nr ${formatTwoDigits(seller.user_number)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Typ klienta</span>
                 <select
