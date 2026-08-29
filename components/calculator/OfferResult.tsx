@@ -108,21 +108,26 @@ type QuickEditOption = {
   label: string;
 };
 
+type EquipmentCatalogCard = Pick<CatalogCardEmailAttachment, "title" | "url">;
+
 export type EquipmentQuickEdit = {
   panel?: {
     value: string;
     options: QuickEditOption[];
     onChange: (value: string) => void;
+    catalogCard?: EquipmentCatalogCard;
   };
   storage?: {
     value: string;
     options: QuickEditOption[];
     onChange: (value: string) => void;
+    catalogCard?: EquipmentCatalogCard;
   };
   inverter?: {
     value: string;
     options: QuickEditOption[];
     onChange: (value: string) => void;
+    catalogCard?: EquipmentCatalogCard;
   };
 };
 
@@ -635,6 +640,25 @@ export default function OfferResult({
     );
   }
 
+  function renderCatalogCardButton(target: "panel" | "storage" | "inverter", label: string) {
+    const catalogCard = equipmentQuickEdit?.[target]?.catalogCard;
+
+    if (!catalogCard?.url) return null;
+
+    return (
+      <a
+        href={catalogCard.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Otwórz kartę katalogową ${label}: ${catalogCard.title}`}
+        title={`Otwórz kartę katalogową: ${catalogCard.title}`}
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-sky-200 bg-white text-sky-500 shadow-sm transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-100 dark:border-sky-700 dark:bg-slate-900 dark:text-sky-300 dark:hover:border-sky-500 dark:hover:bg-sky-950/40"
+      >
+        <span className="[&>svg]:h-3.5 [&>svg]:w-3.5"><FileTextIcon /></span>
+      </a>
+    );
+  }
+
   return (
     <section className={compact ? "relative" : "relative overflow-hidden rounded-2xl border border-emerald-100 bg-white p-4 shadow-lg shadow-slate-200/70 ring-1 ring-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30 dark:ring-slate-800 sm:p-6"}>
       {compact ? (
@@ -668,7 +692,7 @@ export default function OfferResult({
               {result.offerType !== "storage" && result.offerType !== "custom" && (
                 <div className={`${wide ? "p-4" : "p-3"} rounded-xl border border-sky-100 bg-sky-50/65 dark:border-sky-900/40 dark:bg-sky-950/20`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-sky-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Fotowoltaika</p>{renderEditButton("panel", "fotowoltaikę")}</div><p className={`${wide ? "mt-1.5 text-sm" : "mt-1 text-[10px]"} truncate text-slate-500`}>{panelCount} × {panelPowerWp} Wp · {panelName}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-sky-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Fotowoltaika</p>{renderEditButton("panel", "fotowoltaikę")}{renderCatalogCardButton("panel", "panelu")}</div><p className={`${wide ? "mt-1.5 text-sm" : "mt-1 text-[10px]"} truncate text-slate-500`}>{panelCount} × {panelPowerWp} Wp · {panelName}</p></div>
                     <p className={`${wide ? "text-xl" : "text-sm"} shrink-0 font-black text-sky-700 dark:text-sky-300`}>{result.pvPowerKw} kWp</p>
                   </div>
                   {renderQuickEditor("panel")}
@@ -677,7 +701,7 @@ export default function OfferResult({
               {storageDisplayName !== "Brak" && (
                 <div className={`${wide ? "p-4" : "p-3"} rounded-xl border border-violet-100 bg-violet-50/60 dark:border-violet-900/40 dark:bg-violet-950/20`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-violet-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Magazyn energii</p>{renderEditButton("storage", "magazyn energii")}</div><p className={`${wide ? "mt-1.5 text-sm" : "mt-1 text-[10px]"} break-words text-slate-500`}>{storageDisplayName}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-violet-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Magazyn energii</p>{renderEditButton("storage", "magazyn energii")}{renderCatalogCardButton("storage", "magazynu energii")}</div><p className={`${wide ? "mt-1.5 text-sm" : "mt-1 text-[10px]"} break-words text-slate-500`}>{storageDisplayName}</p></div>
                     <p className={`${wide ? "text-sm" : "text-xs"} shrink-0 font-bold text-violet-700 dark:text-violet-300`}>{result.storageVoltageLabel || ""}</p>
                   </div>
                   {renderQuickEditor("storage")}
@@ -685,7 +709,7 @@ export default function OfferResult({
               )}
               {result.inverter !== "Brak" && (
                 <div className={`${wide ? "p-4" : "p-3"} rounded-xl border border-amber-100 bg-amber-50/65 dark:border-amber-900/40 dark:bg-amber-950/20`}>
-                  <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Falownik</p>{renderEditButton("inverter", "falownik")}</div>
+                  <div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Falownik</p>{renderEditButton("inverter", "falownik")}{renderCatalogCardButton("inverter", "falownika")}</div>
                   <p className={`${wide ? "mt-1.5 text-sm leading-5" : "mt-1 text-[10px] leading-4"} break-words text-slate-500`}>{result.inverter}</p>
                   {renderQuickEditor("inverter")}
                 </div>

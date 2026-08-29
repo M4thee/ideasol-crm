@@ -1067,6 +1067,53 @@ export default function Home() {
     return offerResult.energyStorage || offerResult.storage || "Brak";
   }
 
+  function getSelectedPanelCatalogCard() {
+    const selectedPanel = panels.find((panel) => panel.code === panelModel);
+    const url = selectedPanel?.catalog_card_url || selectedPanel?.catalogCardUrl || null;
+
+    if (!selectedPanel || !url) return undefined;
+
+    return {
+      title: selectedPanel.display_name || selectedPanel.name || selectedPanel.code,
+      url,
+    };
+  }
+
+  function getSelectedStorageCatalogCard() {
+    if (!storage || storage === "none") return undefined;
+
+    const selectedStorage = storages.find((storageItem) => storageItem.code === storage);
+    const url = selectedStorage?.catalog_card_url || selectedStorage?.catalogCardUrl || null;
+
+    if (!selectedStorage || !url) return undefined;
+
+    return {
+      title: selectedStorage.display_name || selectedStorage.name || selectedStorage.code,
+      url,
+    };
+  }
+
+  function getSelectedInverterCatalogCard(offerResult: Result) {
+    if (!offerResult.inverter || offerResult.inverter === "Brak") return undefined;
+
+    const selectedInverter =
+      selectedInverterName !== "auto"
+        ? inverters.find((inverter) => inverter.name === selectedInverterName)
+        : inverters.find(
+          (inverter) =>
+            inverter.name === offerResult.inverter ||
+            inverter.display_name === offerResult.inverter
+        );
+    const url = selectedInverter?.catalog_card_url || selectedInverter?.catalogCardUrl || null;
+
+    if (!selectedInverter || !url) return undefined;
+
+    return {
+      title: selectedInverter.display_name || selectedInverter.name,
+      url,
+    };
+  }
+
   function inferStorageVoltageType(storageItem: {
     code?: string | null;
     name?: string | null;
@@ -3323,6 +3370,7 @@ IdeaSol`;
                   equipmentQuickEdit={customModeActive || customProductMode ? undefined : {
                     panel: result.offerType === "storage" ? undefined : {
                       value: panelModel,
+                      catalogCard: getSelectedPanelCatalogCard(),
                       options: panels.map((panel) => ({
                         value: panel.code,
                         label: `${panel.display_name || panel.name} · ${panel.power_wp} Wp`,
@@ -3334,6 +3382,7 @@ IdeaSol`;
                     },
                     storage: result.energyStorage === "Brak" ? undefined : {
                       value: storage,
+                      catalogCard: getSelectedStorageCatalogCard(),
                       options: storages.map((storageItem) => ({
                         value: storageItem.code,
                         label: `${storageItem.display_name || storageItem.name} · ${storageItem.capacity_kwh.toLocaleString("pl-PL")} kWh · ${getCatalogStorageVoltageType(storageItem) === "high_voltage" ? "HV" : getCatalogStorageVoltageType(storageItem) === "low_voltage" ? "LV" : "brak danych"}`,
@@ -3346,6 +3395,7 @@ IdeaSol`;
                     },
                     inverter: result.inverter === "Brak" || clientHasOwnHybridInverter ? undefined : {
                       value: selectedInverterName,
+                      catalogCard: getSelectedInverterCatalogCard(result),
                       options: [
                         { value: "auto", label: "Dobierz automatycznie" },
                         ...quickEditInverters.map((inverterItem) => ({

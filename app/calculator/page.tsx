@@ -2639,6 +2639,7 @@ IdeaSol`;
                   equipmentQuickEdit={customModeActive || customProductMode ? undefined : {
                     panel: result.offerType === "storage" ? undefined : {
                       value: panelModel,
+                      catalogCard: getSelectedPanelCatalogCard() || undefined,
                       options: panels.map((panel) => ({
                         value: panel.code,
                         label: `${panel.display_name || panel.name} · ${panel.power_wp} Wp`,
@@ -2650,6 +2651,7 @@ IdeaSol`;
                     },
                     storage: result.energyStorage === "Brak" ? undefined : {
                       value: storage,
+                      catalogCard: getSelectedStorageCatalogCard() || undefined,
                       options: storages.map((storageItem) => ({
                         value: storageItem.code,
                         label: `${storageItem.display_name || storageItem.name} · ${storageItem.capacity_kwh.toLocaleString("pl-PL")} kWh · ${getCatalogStorageVoltageType(storageItem) === "high_voltage" ? "HV" : getCatalogStorageVoltageType(storageItem) === "low_voltage" ? "LV" : "brak danych"}`,
@@ -2662,6 +2664,7 @@ IdeaSol`;
                     },
                     inverter: result.inverter === "Brak" || clientHasOwnHybridInverter ? undefined : {
                       value: selectedInverterName,
+                      catalogCard: getSelectedInverterCatalogCard(result) || undefined,
                       options: [
                         { value: "auto", label: "Dobierz automatycznie" },
                         ...quickEditInverters.map((inverterItem) => ({
