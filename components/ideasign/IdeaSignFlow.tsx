@@ -277,7 +277,6 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   useEffect(() => {
     if (!demo || window.location.hash !== "#pdf-preview") return;
     const frame = window.requestAnimationFrame(() => {
-      setOpenedIds([demoDocuments[0].id]);
       setPreview(demoDocuments[0]);
     });
     return () => window.cancelAnimationFrame(frame);
@@ -395,7 +394,6 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
     setError("");
     try {
       if (demo) {
-        setOpenedIds((current) => [...new Set([...current, document.id])]);
         setPreview(document);
         return;
       }
@@ -405,7 +403,6 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
         throw new Error(result?.error || "Nie udało się otworzyć dokumentu.");
       }
       const blobUrl = URL.createObjectURL(await response.blob());
-      setOpenedIds((current) => [...new Set([...current, document.id])]);
       setPreview({ ...document, previewUrl: blobUrl });
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : "Nie udało się otworzyć dokumentu.");
@@ -622,7 +619,12 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label={`Podgląd: ${preview.title}`}>
           <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 text-slate-950"><div className="min-w-0"><p className="truncate font-black">{preview.title}</p><p className="truncate text-xs text-slate-500">{preview.fileName}</p></div><button onClick={closePreview} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black hover:bg-slate-50">Zamknij</button></div>
-            <PdfPreview key={preview.id} file={preview.previewUrl} title={preview.title} />
+            <PdfPreview
+              key={preview.id}
+              file={preview.previewUrl}
+              title={preview.title}
+              onRendered={() => setOpenedIds((current) => [...new Set([...current, preview.id])])}
+            />
           </div>
         </div>
       )}
