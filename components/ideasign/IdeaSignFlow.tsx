@@ -389,26 +389,19 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
     }
   }
 
-  async function openDocument(document: IdeaSignDocumentDto) {
-    setBusy(true);
+  function openDocument(document: IdeaSignDocumentDto) {
     setError("");
-    try {
-      if (demo) {
-        setPreview(document);
-        return;
-      }
-      const response = await fetch(document.previewUrl, { cache: "no-store", credentials: "include" });
-      if (!response.ok) {
-        const result = await response.json().catch(() => null);
-        throw new Error(result?.error || "Nie udało się otworzyć dokumentu.");
-      }
-      const blobUrl = URL.createObjectURL(await response.blob());
-      setPreview({ ...document, previewUrl: blobUrl });
-    } catch (openError) {
-      setError(openError instanceof Error ? openError.message : "Nie udało się otworzyć dokumentu.");
-    } finally {
-      setBusy(false);
+
+    if (demo) {
+      setPreview(document);
+      return;
     }
+
+    // Osadzony podgląd PDF jest zawodny w części przeglądarek (szczególnie
+    // w webview). Zabezpieczony endpoint otwieramy jako główną treść bieżącej
+    // karty. Po powrocie historia przeglądarki odtwarza flow, a stan sesji
+    // odblokowuje checkbox na podstawie zapisanego zdarzenia otwarcia.
+    window.location.assign(document.previewUrl);
   }
 
   function closePreview() {
@@ -512,7 +505,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                 <div className="border-b border-slate-200 p-7 sm:p-10">
                   <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-700">Tożsamość potwierdzona</span>
                   <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">Zapoznaj się z dokumentami</h1>
-                  <p className="mt-3 max-w-2xl leading-7 text-slate-600">Otwórz każdy dokument i potwierdź go osobno. Akceptujesz dokładnie wskazane wersje oznaczone skrótem SHA-256.</p>
+                  <p className="mt-3 max-w-2xl leading-7 text-slate-600">Otwórz każdy dokument i potwierdź go osobno. Dokument wyświetli się w tej samej karcie — po zapoznaniu się z nim wróć przyciskiem Wstecz. Akceptujesz dokładnie wskazane wersje oznaczone skrótem SHA-256.</p>
                   {session.signerCount > 1 && <p className="mt-3 text-sm font-bold text-sky-700">Podpisujący {session.signerOrder} z {session.signerCount} · podpisano: {session.signedSignerCount}/{session.signerCount}</p>}
                 </div>
 
@@ -531,7 +524,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                         </div>
                         <label className={`mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 ${opened ? "cursor-pointer border-slate-200 bg-slate-50" : "cursor-not-allowed border-slate-100 bg-slate-100/70"}`}>
                           <input type="checkbox" disabled={!opened} checked={checked} onChange={(event) => setAcceptedIds((current) => event.target.checked ? [...new Set([...current, document.id])] : current.filter((id) => id !== document.id))} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600 disabled:opacity-40" />
-                          <span className={`text-sm font-semibold leading-6 ${opened ? "text-slate-700" : "text-slate-400"}`}>{opened ? `Zapoznałem/am się z treścią dokumentu „${document.title}” i akceptuję jego treść.` : "Checkbox uaktywni się po faktycznym otwarciu PDF."}</span>
+                          <span className={`text-sm font-semibold leading-6 ${opened ? "text-slate-700" : "text-slate-400"}`}>{opened ? `Zapoznałem/am się z treścią dokumentu „${document.title}” i akceptuję jego treść.` : "Aby móc zaakceptować treść dokumentu, najpierw zapoznaj się z nim."}</span>
                         </label>
                       </article>
                     );
