@@ -137,8 +137,8 @@ function Progress({ step }: { step: IdeaSignFlowStep }) {
         const reached = number <= active;
         return (
           <div key={label} className="min-w-0">
-            <div className={`h-1.5 rounded-full transition ${reached ? "bg-gradient-to-r from-sky-500 to-amber-400" : "bg-white/10"}`} />
-            <p className={`mt-2 truncate text-[10px] font-bold uppercase tracking-[0.13em] sm:text-xs ${reached ? "text-white" : "text-white/35"}`}>
+            <div className={`h-1.5 rounded-full transition ${reached ? "bg-gradient-to-r from-sky-500 to-amber-400" : "bg-slate-200"}`} />
+            <p className={`mt-2 truncate text-[10px] font-bold uppercase tracking-[0.13em] sm:text-xs ${reached ? "text-slate-900" : "text-slate-400"}`}>
               {label}
             </p>
           </div>
@@ -207,6 +207,17 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [contractConcluded, setContractConcluded] = useState(true);
   const [successAnimationConfirmed, setSuccessAnimationConfirmed] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const inheritedDarkMode = root.classList.contains("dark");
+    root.classList.remove("dark");
+    root.style.colorScheme = "light";
+    return () => {
+      root.style.removeProperty("color-scheme");
+      if (inheritedDarkMode) root.classList.add("dark");
+    };
+  }, []);
 
   const allAccepted = useMemo(() => {
     const required = session?.documents.filter((document) => document.acceptanceRequired) || [];
@@ -420,10 +431,10 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#04111f] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_15%,rgba(0,139,255,0.24),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(255,174,0,0.2),transparent_28%),linear-gradient(145deg,#020914_0%,#06233d_50%,#071321_100%)]" />
-      <div className="pointer-events-none absolute -left-32 top-1/3 h-80 w-80 rounded-full bg-sky-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 h-96 w-96 rounded-full bg-amber-400/10 blur-3xl" />
+    <main className="relative min-h-screen overflow-hidden bg-[#f4f7fb] text-slate-950 [color-scheme:light]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(14,165,233,0.12),transparent_30%),radial-gradient(circle_at_82%_16%,rgba(251,191,36,0.10),transparent_28%),linear-gradient(145deg,#f8fafc_0%,#eef6fb_52%,#f8fafc_100%)]" />
+      <div className="pointer-events-none absolute -left-32 top-1/3 h-80 w-80 rounded-full bg-sky-200/30 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 bottom-0 h-96 w-96 rounded-full bg-amber-100/40 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-8 sm:py-8">
         <header className="flex items-center justify-between gap-4">
@@ -433,11 +444,11 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
             </div>
             <div>
               <p className="text-lg font-black tracking-tight sm:text-xl">IdeaSign</p>
-              <p className="text-xs font-medium text-white/45">Bezpieczne zawieranie umów IdeaSol</p>
+              <p className="text-xs font-medium text-slate-500">Bezpieczne zawieranie umów IdeaSol</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-[11px] font-bold text-emerald-200 sm:text-xs">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />
+          <div className="flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-2 text-[11px] font-bold text-emerald-700 sm:text-xs">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
             Połączenie chronione
           </div>
         </header>
@@ -446,13 +457,13 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
 
         <section className="mx-auto my-auto w-full max-w-4xl py-8">
           {demo && (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <span><strong>Podgląd lokalny.</strong> Żaden SMS ani e-mail nie zostanie wysłany.</span>
-              <span className="hidden rounded-full bg-black/20 px-3 py-1 font-mono text-xs sm:inline">DEMO</span>
+              <span className="hidden rounded-full bg-amber-100 px-3 py-1 font-mono text-xs sm:inline">DEMO</span>
             </div>
           )}
 
-          <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white text-slate-950 shadow-2xl shadow-black/30">
+          <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white text-slate-950 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
             {step === "loading" && (
               <div className="p-10 text-center sm:p-16">
                 <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-sky-100 border-t-sky-600" />
@@ -533,8 +544,8 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                   <div className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-black text-blue-700">SMS</div>
                     <div>
-                      <p className="text-sm font-black text-slate-950">Potwierdzenie podpisu</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">Po kliknięciu wyślemy na Twój numer drugi kod SMS przypisany do dokładnie tej wersji dokumentów. Wpisanie kodu zapisze Twój podpis elektroniczny i potwierdzi zgodę na zawarcie umowy z obowiązkiem zapłaty.</p>
+                      <p className="text-sm font-black text-slate-950">Zanim podpiszesz</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">Zawierasz umowę elektronicznie w formie dokumentowej. Po kliknięciu „Podpisuję umowę z obowiązkiem zapłaty” poprosimy Cię o wpisanie kodu, który otrzymasz SMS-em. Wpisanie kodu potwierdzi Twój podpis; złożenie wszystkich wymaganych podpisów oznacza zawarcie umowy. Nadal przysługuje Ci prawo odstąpienia od umowy zawartej na odległość zgodnie z obowiązującymi przepisami.</p>
                     </div>
                   </div>
                   <button disabled={!allAccepted || busy} onClick={() => void acceptAndSign()} className="w-full rounded-2xl border border-orange-600/20 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-5 py-4 text-base font-black text-white transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-40">
@@ -604,7 +615,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
           </div>
         </section>
 
-        <footer className="flex flex-col items-center justify-between gap-3 border-t border-white/10 pt-5 text-center text-xs text-white/40 sm:flex-row sm:text-left"><p>IdeaSol Sp. z o.o. · IdeaSign</p><p>Nie udostępniaj kodów SMS innym osobom.</p></footer>
+        <footer className="flex flex-col items-center justify-between gap-3 border-t border-slate-200 pt-5 text-center text-xs text-slate-400 sm:flex-row sm:text-left"><p>IdeaSol Sp. z o.o. · IdeaSign</p><p>Nie udostępniaj kodów SMS innym osobom.</p></footer>
       </div>
 
       {preview && (
