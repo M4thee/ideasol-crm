@@ -244,6 +244,10 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
     const required = session?.documents.filter((document) => document.acceptanceRequired) || [];
     return required.length > 0 && required.every((document) => acceptedIds.includes(document.id));
   }, [acceptedIds, session]);
+  const signatureButtonLabel =
+    session?.contractSigningLocation === "distance"
+      ? "Podpisuję umowę z obowiązkiem zapłaty"
+      : "Podpisuję umowę";
 
   useEffect(() => {
     if (demo) return;
@@ -565,11 +569,11 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-black text-blue-700">SMS</div>
                     <div>
                       <p className="text-sm font-black text-slate-950">Zanim podpiszesz</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">Podpisujesz umowę elektronicznie w formie dokumentowej. Po kliknięciu „Podpisuję umowę z obowiązkiem zapłaty” poprosimy Cię o wpisanie kodu, który otrzymasz SMS-em. Wpisanie kodu potwierdzi Twój podpis; złożenie wszystkich wymaganych podpisów oznacza zawarcie umowy. {signingCircumstancesText(session.contractSigningLocation)}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">Podpisujesz umowę elektronicznie w formie dokumentowej. Po kliknięciu „{signatureButtonLabel}” poprosimy Cię o wpisanie kodu, który otrzymasz SMS-em. Wpisanie kodu potwierdzi Twój podpis; złożenie wszystkich wymaganych podpisów oznacza zawarcie umowy. {signingCircumstancesText(session.contractSigningLocation)}</p>
                     </div>
                   </div>
                   <button disabled={!allAccepted || busy} onClick={() => void acceptAndSign()} className="w-full rounded-2xl border border-orange-600/20 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-5 py-4 text-base font-black text-white transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-40">
-                    {busy ? "Przygotowujemy potwierdzenie…" : "Podpisuję umowę z obowiązkiem zapłaty"}
+                    {busy ? "Przygotowujemy potwierdzenie…" : signatureButtonLabel}
                   </button>
                 </div>
               </div>
