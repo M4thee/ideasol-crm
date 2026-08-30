@@ -11,6 +11,7 @@ import {
   formatIdeaSignPolishPhone,
   normalizeIdeaSignPolishPhone,
 } from "@/lib/ideasign/phone";
+import { isIdeaSignContractSigningLocation } from "@/lib/ideasign/types";
 import {
   createEmptyCustomPaymentSchedule,
   formatCustomPaymentInstallment,
@@ -600,9 +601,9 @@ export default function SaleContractPage() {
     setLocalIdeaSignLinks([]);
     setLocalIdeaSignDemoOtp("");
 
-    if (form.contractSigningLocation !== "distance") {
+    if (!isIdeaSignContractSigningLocation(form.contractSigningLocation)) {
       setIdeaSignStatus(
-        "Przed wysłaniem wybierz: na odległość, bez jednoczesnej fizycznej obecności Stron."
+        "Przed wysłaniem wybierz rzeczywisty sposób i okoliczności zawarcia umowy."
       );
       return;
     }
@@ -1499,11 +1500,11 @@ export default function SaleContractPage() {
             <button
               type="button"
               onClick={() => void sendToIdeaSign()}
-              disabled={sendingIdeaSign || Boolean(offerorAuthorization) || form.contractSigningLocation !== "distance"}
+              disabled={sendingIdeaSign || Boolean(offerorAuthorization) || !isIdeaSignContractSigningLocation(form.contractSigningLocation)}
               title={
-                form.contractSigningLocation === "distance"
+                isIdeaSignContractSigningLocation(form.contractSigningLocation)
                   ? "Prześlij zatwierdzoną wersję umowy do IdeaSign"
-                  : "Najpierw wybierz zawarcie umowy na odległość"
+                  : "Najpierw wybierz sposób i okoliczności zawarcia umowy"
               }
               className="group inline-flex items-center gap-3 rounded-2xl border border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-3 text-left text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-md dark:shadow-black/30 dark:hover:shadow-black/40 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-45 disabled:hover:translate-y-0"
             >
@@ -1525,9 +1526,9 @@ export default function SaleContractPage() {
             </button>
           )}
           </div>
-          {hasIdeaSignSendAccess && form.contractSigningLocation !== "distance" && (
+          {hasIdeaSignSendAccess && !isIdeaSignContractSigningLocation(form.contractSigningLocation) && (
             <p className="text-right text-xs font-semibold text-amber-700">
-              IdeaSign wymaga wariantu „na odległość, bez jednoczesnej fizycznej obecności Stron”.
+              Przed wysłaniem do IdeaSign wybierz rzeczywisty sposób i okoliczności zawarcia umowy.
             </p>
           )}
         </div>

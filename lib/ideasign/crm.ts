@@ -31,6 +31,7 @@ import {
   sha256,
 } from "./security";
 import { renderIdeaSignInvitationEmail } from "./email";
+import { isIdeaSignContractSigningLocation } from "./types";
 import {
   areIdeaSignPhonesEqual,
   formatIdeaSignPolishPhone,
@@ -518,11 +519,15 @@ export async function createAndSendIdeaSignSession(params: {
   }
 
   const contractNumber = cleanText(params.contractData.contractNumber, 120);
-  if (params.contractData.contractSigningLocation !== "distance") {
+  const contractSigningLocation = cleanText(
+    params.contractData.contractSigningLocation,
+    80
+  );
+  if (!isIdeaSignContractSigningLocation(contractSigningLocation)) {
     return {
       ok: false as const,
       status: 422,
-      error: "IdeaSign wymaga zaznaczenia: na odległość, bez jednoczesnej fizycznej obecności Stron.",
+      error: "Wybierz rzeczywisty sposób i okoliczności zawarcia umowy przed wysłaniem do IdeaSign.",
     };
   }
   if (!contractNumber) {
@@ -656,6 +661,7 @@ export async function createAndSendIdeaSignSession(params: {
     offeror_name: params.actor.displayName,
     offeror_capacity: "Ekspert ds. energetyki odnawialnej",
     offeror_phone: params.actor.phone,
+    contract_signing_location: contractSigningLocation,
     client_name: clientName,
     client_email: clientEmail,
     client_phone: clientPhone,
@@ -708,7 +714,12 @@ export async function createAndSendIdeaSignSession(params: {
       signatureSessionId: sessionId,
       eventType: "offer_prepared",
       request: params.request,
-      eventData: { transactionId: transaction, manifestSha256, documentCount: documents.length },
+      eventData: {
+        transactionId: transaction,
+        manifestSha256,
+        documentCount: documents.length,
+        contractSigningLocation,
+      },
     });
 
     const challenge = await requestIdeaSignOfferorOtpChallenge({

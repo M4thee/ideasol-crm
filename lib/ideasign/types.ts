@@ -13,6 +13,24 @@ export const IDEA_SIGN_STATUSES = [
 export type IdeaSignStatus = (typeof IDEA_SIGN_STATUSES)[number];
 export type IdeaSignOtpPurpose = "entry" | "signature";
 
+export const IDEA_SIGN_CONTRACT_SIGNING_LOCATIONS = [
+  "business_premises",
+  "scheduled_home_visit",
+  "unscheduled_home_visit",
+  "distance",
+] as const;
+
+export type IdeaSignContractSigningLocation =
+  (typeof IDEA_SIGN_CONTRACT_SIGNING_LOCATIONS)[number];
+
+export function isIdeaSignContractSigningLocation(
+  value: unknown
+): value is IdeaSignContractSigningLocation {
+  return IDEA_SIGN_CONTRACT_SIGNING_LOCATIONS.includes(
+    value as IdeaSignContractSigningLocation
+  );
+}
+
 export type IdeaSignDocumentDto = {
   id: string;
   title: string;
@@ -36,6 +54,7 @@ export type IdeaSignSessionDto = {
   manifestSha256: string;
   offerorName: string;
   offerorCapacity: string;
+  contractSigningLocation: IdeaSignContractSigningLocation;
   entryVerified: boolean;
   signerSigned: boolean;
   signerOrder: number;

@@ -3,7 +3,12 @@
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import type { IdeaSignDocumentDto, IdeaSignFlowStep, IdeaSignSessionDto } from "@/lib/ideasign/types";
+import type {
+  IdeaSignContractSigningLocation,
+  IdeaSignDocumentDto,
+  IdeaSignFlowStep,
+  IdeaSignSessionDto,
+} from "@/lib/ideasign/types";
 
 const DEMO_ENTRY_OTP = "482913";
 const DEMO_SIGNATURE_OTP = "739204";
@@ -84,6 +89,7 @@ const demoSession: IdeaSignSessionDto = {
   manifestSha256: "23c3dc291bb2986f3789988dbbfb7adb7e9c5803802f54a4ab5d2ddaa76514ec",
   offerorName: "Mateusz Rapczewski",
   offerorCapacity: "Ekspert ds. energetyki odnawialnej",
+  contractSigningLocation: "scheduled_home_visit",
   entryVerified: false,
   signerSigned: false,
   signerOrder: 2,
@@ -124,6 +130,19 @@ function formatDate(value: string) {
     timeZone: "Europe/Warsaw",
   }).format(date);
   return `${datePart}, ${timePart}`;
+}
+
+function signingCircumstancesText(location: IdeaSignContractSigningLocation) {
+  if (location === "scheduled_home_visit") {
+    return "Umowa jest zawierana poza lokalem przedsiębiorstwa podczas wcześniej umówionej wizyty doradcy u Ciebie. Przysługuje Ci 14 dni na odstąpienie od umowy zgodnie z obowiązującymi przepisami.";
+  }
+  if (location === "unscheduled_home_visit") {
+    return "Umowa jest zawierana poza lokalem przedsiębiorstwa podczas wizyty, która nie była wcześniej umówiona. Przysługuje Ci 30 dni na odstąpienie od umowy zgodnie z obowiązującymi przepisami.";
+  }
+  if (location === "distance") {
+    return "Umowa jest zawierana na odległość, bez jednoczesnej fizycznej obecności Stron. Przysługuje Ci 14 dni na odstąpienie od umowy zgodnie z obowiązującymi przepisami.";
+  }
+  return "Umowa jest zawierana w lokalu przedsiębiorstwa. Elektroniczny sposób podpisania nie oznacza, że umowa jest zawierana na odległość.";
 }
 
 function Progress({ step }: { step: IdeaSignFlowStep }) {
@@ -200,6 +219,8 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   const [acceptedIds, setAcceptedIds] = useState<string[]>([]);
   const [openedIds, setOpenedIds] = useState<string[]>(demo ? demoSession.openedDocumentIds : []);
   const [preview, setPreview] = useState<IdeaSignDocumentDto | null>(null);
+  const [previewData, setPreviewData] = useState<ArrayBuffer | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [completedAt, setCompletedAt] = useState<string | null>(null);
@@ -389,24 +410,33 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
     }
   }
 
-  function openDocument(document: IdeaSignDocumentDto) {
+  async function openDocument(document: IdeaSignDocumentDto) {
     setError("");
-
-    if (demo) {
-      setPreview(document);
-      return;
+    setPreview(document);
+    setPreviewData(null);
+    setPreviewLoadingId(document.id);
+    try {
+      const response = await fetch(document.previewUrl, { cache: "no-store" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || "Nie udało się pobrać dokumentu.");
+      }
+      setPreviewData(await response.arrayBuffer());
+    } catch (previewError) {
+      setPreview(null);
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Nie udało się otworzyć dokumentu."
+      );
+    } finally {
+      setPreviewLoadingId("");
     }
-
-    // Osadzony podgląd PDF jest zawodny w części przeglądarek (szczególnie
-    // w webview). Zabezpieczony endpoint otwieramy jako główną treść bieżącej
-    // karty. Po powrocie historia przeglądarki odtwarza flow, a stan sesji
-    // odblokowuje checkbox na podstawie zapisanego zdarzenia otwarcia.
-    window.location.assign(document.previewUrl);
   }
 
   function closePreview() {
-    if (preview?.previewUrl.startsWith("blob:")) URL.revokeObjectURL(preview.previewUrl);
     setPreview(null);
+    setPreviewData(null);
   }
 
   function downloadPassword() {
@@ -505,7 +535,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                 <div className="border-b border-slate-200 p-7 sm:p-10">
                   <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wider text-emerald-700">Tożsamość potwierdzona</span>
                   <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">Zapoznaj się z dokumentami</h1>
-                  <p className="mt-3 max-w-2xl leading-7 text-slate-600">Otwórz każdy dokument i potwierdź go osobno. Dokument wyświetli się w tej samej karcie — po zapoznaniu się z nim wróć przyciskiem Wstecz. Akceptujesz dokładnie wskazane wersje oznaczone skrótem SHA-256.</p>
+                  <p className="mt-3 max-w-2xl leading-7 text-slate-600">Otwórz każdy dokument w oknie podglądu i potwierdź go osobno. Akceptujesz dokładnie wskazane wersje oznaczone skrótem SHA-256.</p>
                   {session.signerCount > 1 && <p className="mt-3 text-sm font-bold text-sky-700">Podpisujący {session.signerOrder} z {session.signerCount} · podpisano: {session.signedSignerCount}/{session.signerCount}</p>}
                 </div>
 
@@ -520,7 +550,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sm font-black text-sky-700">{index + 1}</div>
                             <div className="min-w-0"><h2 className="font-black text-slate-950">{document.title}</h2><p className="mt-1 text-sm text-slate-500">{document.fileName} · {formatBytes(document.byteSize)}</p><p className="mt-2 break-all font-mono text-[10px] leading-4 text-slate-400">SHA-256: {document.sha256}</p></div>
                           </div>
-                          <button disabled={busy} onClick={() => void openDocument(document)} className="shrink-0 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-black text-sky-700 hover:bg-sky-100 disabled:opacity-50">{opened ? "Otwórz ponownie" : "Otwórz PDF"}</button>
+                          <button disabled={busy || Boolean(previewLoadingId)} onClick={() => void openDocument(document)} className="shrink-0 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-black text-sky-700 hover:bg-sky-100 disabled:opacity-50">{previewLoadingId === document.id ? "Wczytujemy…" : opened ? "Otwórz ponownie" : "Otwórz PDF"}</button>
                         </div>
                         <label className={`mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 ${opened ? "cursor-pointer border-slate-200 bg-slate-50" : "cursor-not-allowed border-slate-100 bg-slate-100/70"}`}>
                           <input type="checkbox" disabled={!opened} checked={checked} onChange={(event) => setAcceptedIds((current) => event.target.checked ? [...new Set([...current, document.id])] : current.filter((id) => id !== document.id))} className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600 disabled:opacity-40" />
@@ -535,7 +565,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-black text-blue-700">SMS</div>
                     <div>
                       <p className="text-sm font-black text-slate-950">Zanim podpiszesz</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">Zawierasz umowę elektronicznie w formie dokumentowej. Po kliknięciu „Podpisuję umowę z obowiązkiem zapłaty” poprosimy Cię o wpisanie kodu, który otrzymasz SMS-em. Wpisanie kodu potwierdzi Twój podpis; złożenie wszystkich wymaganych podpisów oznacza zawarcie umowy. Nadal przysługuje Ci prawo odstąpienia od umowy zawartej na odległość zgodnie z obowiązującymi przepisami.</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">Podpisujesz umowę elektronicznie w formie dokumentowej. Po kliknięciu „Podpisuję umowę z obowiązkiem zapłaty” poprosimy Cię o wpisanie kodu, który otrzymasz SMS-em. Wpisanie kodu potwierdzi Twój podpis; złożenie wszystkich wymaganych podpisów oznacza zawarcie umowy. {signingCircumstancesText(session.contractSigningLocation)}</p>
                     </div>
                   </div>
                   <button disabled={!allAccepted || busy} onClick={() => void acceptAndSign()} className="w-full rounded-2xl border border-orange-600/20 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-5 py-4 text-base font-black text-white transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-40">
@@ -612,12 +642,18 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true" aria-label={`Podgląd: ${preview.title}`}>
           <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 text-slate-950"><div className="min-w-0"><p className="truncate font-black">{preview.title}</p><p className="truncate text-xs text-slate-500">{preview.fileName}</p></div><button onClick={closePreview} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black hover:bg-slate-50">Zamknij</button></div>
-            <PdfPreview
-              key={preview.id}
-              file={preview.previewUrl}
-              title={preview.title}
-              onRendered={() => setOpenedIds((current) => [...new Set([...current, preview.id])])}
-            />
+            {previewData ? (
+              <PdfPreview
+                key={preview.id}
+                file={previewData}
+                title={preview.title}
+                onRendered={() => setOpenedIds((current) => [...new Set([...current, preview.id])])}
+              />
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-200 p-8">
+                <p className="font-bold text-slate-500">Wczytujemy dokument PDF…</p>
+              </div>
+            )}
           </div>
         </div>
       )}

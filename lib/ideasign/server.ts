@@ -4,7 +4,12 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { normalizePolishPhoneNumber, sendSmsApiMessage } from "@/lib/smsapi";
-import type { IdeaSignOtpPurpose, IdeaSignSessionDto, IdeaSignStatus } from "./types";
+import type {
+  IdeaSignContractSigningLocation,
+  IdeaSignOtpPurpose,
+  IdeaSignSessionDto,
+  IdeaSignStatus,
+} from "./types";
 import { expireIdeaSignSession } from "./lifecycle";
 import {
   IDEA_SIGN_ACCESS_COOKIE,
@@ -35,6 +40,7 @@ type SignatureSessionRow = {
   expires_at: string;
   offeror_name: string;
   offeror_capacity: string;
+  contract_signing_location: IdeaSignContractSigningLocation;
 };
 
 type AccessSessionRow = {
@@ -129,7 +135,7 @@ export async function getIdeaSignAccessContext(): Promise<IdeaSignAccessContext 
   const [{ data: signature, error: signatureError }, { data: signer, error: signerError }] = await Promise.all([
     supabaseAdmin
     .from("contract_signature_sessions")
-    .select("id, transaction_id, sale_id, client_id, client_name, client_email, client_phone, status, manifest_sha256, offered_at, expires_at, offeror_name, offeror_capacity")
+    .select("id, transaction_id, sale_id, client_id, client_name, client_email, client_phone, status, manifest_sha256, offered_at, expires_at, offeror_name, offeror_capacity, contract_signing_location")
     .eq("id", access.signature_session_id)
     .maybeSingle(),
     supabaseAdmin
@@ -308,6 +314,7 @@ export async function getIdeaSignSessionDto(
     manifestSha256: context.signature.manifest_sha256,
     offerorName: context.signature.offeror_name,
     offerorCapacity: context.signature.offeror_capacity,
+    contractSigningLocation: context.signature.contract_signing_location,
     entryVerified: Boolean(context.access.entry_verified_at),
     signerSigned: context.signer.status === "podpisany",
     signerOrder: context.signer.signer_order,
