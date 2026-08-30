@@ -374,10 +374,22 @@ export async function createAndSendIdeaSignSession(params: {
 
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
-    .select("id, client_id, seller_id, contract_number, public_id, sale_public_id, customer_name, client_name, customer_email, customer_phone, customer_data")
+    .select("id, client_id, seller_id, contract_number, public_id, sale_public_id, customer_email, customer_phone, customer_data")
     .eq("id", params.saleId)
     .maybeSingle();
-  if (saleError || !sale) return { ok: false as const, status: 404, error: "Nie znaleziono sprzedaży." };
+  if (saleError) {
+    console.error("[IdeaSign] Failed to load sale for session creation", {
+      saleId: params.saleId,
+      code: saleError.code,
+      message: saleError.message,
+    });
+    return {
+      ok: false as const,
+      status: 500,
+      error: "Nie udało się odczytać sprzedaży. Spróbuj ponownie.",
+    };
+  }
+  if (!sale) return { ok: false as const, status: 404, error: "Nie znaleziono sprzedaży." };
   if (!(await actorCanAccessSale(params.actor, sale.seller_id))) {
     return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
   }
@@ -436,7 +448,10 @@ export async function createAndSendIdeaSignSession(params: {
 
   const client = clientResponse.data;
   const customer: Record<string, unknown> = persistedCustomerData;
-  const clientName = cleanText(customer.full_name || customer.name || sale.customer_name || sale.client_name || client?.full_name || client?.company_name, 200);
+  const clientName = cleanText(
+    customer.full_name || customer.name || client?.full_name || client?.company_name,
+    200
+  );
   const clientEmail = cleanText(customer.email || sale.customer_email || client?.email, 320).toLowerCase();
   const clientPhone = cleanText(customer.phone || sale.customer_phone || client?.phone, 32);
   if (clientName.length < 2 || !/^\S+@\S+\.\S+$/.test(clientEmail) || clientPhone.replace(/\D/g, "").length < 9) {
