@@ -71,6 +71,10 @@ function isHiddenAssignmentUser(profile: {
 
 function getSaleStatusClass(status: string) {
   switch (status) {
+    case "Oczekuj na podpis elektroniczny":
+      return "bg-[#087AB8] text-white border-[#087AB8]";
+    case "IdeaSign - upłynął czas na podpis":
+      return "bg-[#F97316] text-white border-[#F97316]";
     case "Oczekuje na sprawdzenie dokumentów":
       return "bg-[#95FCFC] !text-slate-950 border-[#95FCFC]";
     case "Oczekiwanie na zaliczkę":

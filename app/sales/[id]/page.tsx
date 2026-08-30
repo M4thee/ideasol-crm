@@ -320,6 +320,8 @@ type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 
 const SALE_STATUSES = [
+  "Oczekuj na podpis elektroniczny",
+  "IdeaSign - upłynął czas na podpis",
   "Oczekuje na sprawdzenie dokumentów",
   "Oczekiwanie na zaliczkę",
   "Oczekuje na umówienie montażu",
@@ -634,6 +636,7 @@ export default function SalePage() {
       resolvedRealizationAccess = Boolean(permissionData?.realization);
       setHasRealizationAccess(resolvedRealizationAccess);
       setHasSmsAccess(Boolean(permissionData?.sms));
+
     } else {
       setHasRealizationAccess(false);
       setHasSmsAccess(false);
@@ -1575,6 +1578,7 @@ export default function SalePage() {
       alert("Wystąpił nieoczekiwany błąd podczas usuwania sprzedaży.");
     }
   }
+
   if (loading) {
     return (
       <main>
@@ -2544,6 +2548,11 @@ export default function SalePage() {
                                         <span className="break-words">
                                           {document.description || document.file_name}
                                         </span>
+                                        {document.file_path.includes("/ideasign/") && (
+                                          <span className="ml-2 inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
+                                            ✓ Podpis IdeaSign
+                                          </span>
+                                        )}
                                       </button>
 
                                       <div className="flex shrink-0 items-center gap-2">

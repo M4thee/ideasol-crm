@@ -33,6 +33,8 @@ type Profile = {
   hidden_from_assignment?: boolean | null;
   realization_access: boolean;
   sms_access: boolean;
+  ideasign_prepare_access: boolean;
+  ideasign_send_access: boolean;
   custom_mode_access: boolean;
   sticky_note_color: StickyNoteColor;
 };
@@ -440,7 +442,7 @@ export default function AdminUsersPage() {
 
     const { data: permissionsData, error: permissionsError } = await supabase
       .from("user_permissions")
-      .select("user_id, realization, sms, custom_mode");
+      .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode");
 
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
@@ -464,12 +466,26 @@ export default function AdminUsersPage() {
         Boolean(permission.custom_mode),
       ])
     );
+    const ideaSignPrepareByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.ideasign_prepare),
+      ])
+    );
+    const ideaSignSendByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.ideasign_send),
+      ])
+    );
 
     setProfiles(
       (data ?? []).map((profile) => ({
         ...profile,
         realization_access: realizationByUserId.get(profile.id) || false,
         sms_access: smsByUserId.get(profile.id) || false,
+        ideasign_prepare_access: ideaSignPrepareByUserId.get(profile.id) || false,
+        ideasign_send_access: ideaSignSendByUserId.get(profile.id) || false,
         custom_mode_access: customModeByUserId.get(profile.id) || false,
       })) as Profile[]
     );
@@ -485,6 +501,8 @@ export default function AdminUsersPage() {
     const {
       realization_access: realizationAccess,
       sms_access: smsAccess,
+      ideasign_prepare_access: ideaSignPrepareAccess,
+      ideasign_send_access: ideaSignSendAccess,
       custom_mode_access: customModeAccess,
       ...profileValues
     } = values;
@@ -525,6 +543,8 @@ export default function AdminUsersPage() {
     if (
       realizationAccess !== undefined ||
       smsAccess !== undefined ||
+      ideaSignPrepareAccess !== undefined ||
+      ideaSignSendAccess !== undefined ||
       customModeAccess !== undefined
     ) {
       const {
@@ -546,6 +566,10 @@ export default function AdminUsersPage() {
             realization:
               realizationAccess ?? currentProfile?.realization_access ?? false,
             sms: smsAccess ?? currentProfile?.sms_access ?? false,
+            ideasign_prepare:
+              ideaSignPrepareAccess ?? currentProfile?.ideasign_prepare_access ?? false,
+            ideasign_send:
+              ideaSignSendAccess ?? currentProfile?.ideasign_send_access ?? false,
             custom_mode:
               customModeAccess ?? currentProfile?.custom_mode_access ?? false,
             updated_by: user.id,
@@ -1094,6 +1118,22 @@ export default function AdminUsersPage() {
         `Uprawnienie SMS: ${profile.sms_access ? "Tak" : "Nie"} → ${
           changes.sms_access ? "Tak" : "Nie"
         }`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "ideasign_prepare_access") &&
+      changes.ideasign_prepare_access !== profile.ideasign_prepare_access
+    ) {
+      changeLines.push(
+        `IdeaSign — przygotowanie: ${profile.ideasign_prepare_access ? "Tak" : "Nie"} → ${changes.ideasign_prepare_access ? "Tak" : "Nie"}`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "ideasign_send_access") &&
+      changes.ideasign_send_access !== profile.ideasign_send_access
+    ) {
+      changeLines.push(
+        `IdeaSign — wysyłka: ${profile.ideasign_send_access ? "Tak" : "Nie"} → ${changes.ideasign_send_access ? "Tak" : "Nie"}`
       );
     }
     if (
@@ -1943,6 +1983,8 @@ export default function AdminUsersPage() {
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
                     <th className="px-4 py-3">Kolor karteczek</th>
+                    <th className="px-4 py-3 text-center">IdeaSign: przygotuj</th>
+                    <th className="px-4 py-3 text-center">IdeaSign: wyślij</th>
                     <th className="px-4 py-3 text-center">SMS</th>
                     <th className="px-4 py-3 text-center">Custom Mode</th>
                     <th className="px-4 py-3">Manager</th>
@@ -2088,6 +2130,34 @@ export default function AdminUsersPage() {
                                 <option key={value} value={value}>{label}</option>
                               ))}
                             </select>
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.ideasign_prepare_access ?? profile.ideasign_prepare_access}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                ideasign_prepare_access: event.target.checked,
+                              })}
+                              className="h-4 w-4 rounded border-slate-300 accent-sky-700"
+                            />
+                            {(editedProfile.ideasign_prepare_access ?? profile.ideasign_prepare_access) ? "Tak" : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.ideasign_send_access ?? profile.ideasign_send_access}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                ideasign_send_access: event.target.checked,
+                              })}
+                              className="h-4 w-4 rounded border-slate-300 accent-blue-700"
+                            />
+                            {(editedProfile.ideasign_send_access ?? profile.ideasign_send_access) ? "Tak" : "Nie"}
                           </label>
                         </td>
 

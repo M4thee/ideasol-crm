@@ -2,17 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import dynamic from "next/dynamic";
 import {
   emitCrmResume,
   type CrmResumeReason,
 } from "@/lib/useCrmResumeRefresh";
-import AppHeader from "@/app/components/AppHeader";
-import {
-  getAuditContextFromPath,
-  getCrmAuditSessionId,
-  recordCrmAuditEvent,
-} from "@/lib/crmAudit";
+
+const AppHeader = dynamic(() => import("@/app/components/AppHeader"), { ssr: false });
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -64,6 +60,8 @@ export default function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const isCalculatorApp = pathname?.startsWith("/calculator-app");
+  const isIdeaSignApp = pathname?.startsWith("/sign");
+  const isPublicStandaloneApp = isCalculatorApp || isIdeaSignApp;
 
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -124,14 +122,15 @@ export default function AppShell({ children }: AppShellProps) {
 
   useEffect(() => {
     let mounted = true;
+    let unsubscribeAuth: (() => void) | null = null;
 
-    if (isCalculatorApp) {
-      setIsLoggedIn(true);
+    if (isPublicStandaloneApp) {
       return;
     }
 
     async function loadSession() {
       try {
+        const { supabase } = await import("@/lib/supabase");
         const {
           data: { session },
           error,
@@ -159,83 +158,79 @@ export default function AppShell({ children }: AppShellProps) {
       }
     }
 
-    loadSession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    async function bootstrapAuth() {
+      await loadSession();
       if (!mounted) return;
+      const { supabase } = await import("@/lib/supabase");
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if (!mounted) return;
 
-      if (event === "SIGNED_OUT") {
-        setIsLoggedIn(false);
-
-        if (pathname !== "/") {
-          router.replace("/");
+        if (event === "SIGNED_OUT") {
+          setIsLoggedIn(false);
+          if (pathname !== "/") router.replace("/");
+          return;
         }
 
-        return;
-      }
-
-      if (session?.user) {
-        setIsLoggedIn(true);
-      } else {
-        setIsLoggedIn(false);
-
-        if (pathname !== "/") {
-          router.replace("/");
+        if (session?.user) {
+          setIsLoggedIn(true);
+        } else {
+          setIsLoggedIn(false);
+          if (pathname !== "/") router.replace("/");
         }
-      }
-    });
+      });
+      unsubscribeAuth = () => data.subscription.unsubscribe();
+    }
+
+    void bootstrapAuth();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      unsubscribeAuth?.();
     };
-  }, [isCalculatorApp, pathname, router]);
+  }, [isPublicStandaloneApp, pathname, router]);
 
   useEffect(() => {
-    if (isCalculatorApp || !isLoggedIn || !pathname) return;
+    if (isPublicStandaloneApp || !isLoggedIn || !pathname) return;
 
-    const sessionId = getCrmAuditSessionId();
+    void (async () => {
+      const { getAuditContextFromPath, getCrmAuditSessionId, recordCrmAuditEvent } =
+        await import("@/lib/crmAudit");
+      const sessionId = getCrmAuditSessionId();
+      if (!sessionId) return;
+      const sessionStartedKey = `ideasol:crm-audit-started:${sessionId}`;
 
-    if (!sessionId) return;
+      if (!window.sessionStorage.getItem(sessionStartedKey)) {
+        window.sessionStorage.setItem(sessionStartedKey, new Date().toISOString());
+        void recordCrmAuditEvent({
+          eventType: "session_started",
+          action: "login",
+          module: "crm",
+          summary: "Użytkownik wszedł do CRM",
+          path: pathname,
+          sessionId,
+        });
+      }
 
-    const sessionStartedKey = `ideasol:crm-audit-started:${sessionId}`;
-
-    if (!window.sessionStorage.getItem(sessionStartedKey)) {
-      window.sessionStorage.setItem(sessionStartedKey, new Date().toISOString());
+      if (lastAuditedPathRef.current === pathname) return;
+      lastAuditedPathRef.current = pathname;
+      const context = getAuditContextFromPath(pathname);
       void recordCrmAuditEvent({
-        eventType: "session_started",
-        action: "login",
-        module: "crm",
-        summary: "Użytkownik wszedł do CRM",
+        eventType: "page_view",
+        action: "view",
+        module: context.moduleName,
+        summary: `Otwarto widok ${pathname}`,
         path: pathname,
+        clientId: context.clientId,
+        saleId: context.saleId,
+        offerId: context.offerId,
         sessionId,
+        metadata: { page_title: document.title },
       });
-    }
-
-    if (lastAuditedPathRef.current === pathname) return;
-    lastAuditedPathRef.current = pathname;
-
-    const context = getAuditContextFromPath(pathname);
-    void recordCrmAuditEvent({
-      eventType: "page_view",
-      action: "view",
-      module: context.moduleName,
-      summary: `Otwarto widok ${pathname}`,
-      path: pathname,
-      clientId: context.clientId,
-      saleId: context.saleId,
-      offerId: context.offerId,
-      sessionId,
-      metadata: {
-        page_title: document.title,
-      },
-    });
-  }, [isCalculatorApp, isLoggedIn, pathname]);
+    })();
+  }, [isPublicStandaloneApp, isLoggedIn, pathname]);
 
   useEffect(() => {
-    if (isCalculatorApp) return;
+    if (isPublicStandaloneApp) return;
 
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -269,6 +264,7 @@ export default function AppShell({ children }: AppShellProps) {
       lastResumeAtRef.current = now;
 
       try {
+        const { supabase } = await import("@/lib/supabase");
         const {
           data: { session: storedSession },
           error: sessionError,
@@ -311,6 +307,8 @@ export default function AppShell({ children }: AppShellProps) {
         setIsLoggedIn(true);
         backgroundedAtRef.current = null;
         emitCrmResume(reason);
+        const { getAuditContextFromPath, getCrmAuditSessionId, recordCrmAuditEvent } =
+          await import("@/lib/crmAudit");
         const context = getAuditContextFromPath(pathname || "/");
         void recordCrmAuditEvent({
           eventType: "session_resumed",
@@ -387,13 +385,13 @@ export default function AppShell({ children }: AppShellProps) {
         clearTimeout(retryTimer);
       }
     };
-  }, [isCalculatorApp, pathname, router]);
+  }, [isPublicStandaloneApp, pathname, router]);
 
-  if (isCalculatorApp) {
+  if (isPublicStandaloneApp) {
     return (
-      <main className="min-h-screen w-full overflow-x-clip bg-slate-100 text-slate-950">
+      <div className="min-h-screen w-full overflow-x-clip bg-slate-100 text-slate-950">
         {children}
-      </main>
+      </div>
     );
   }
 

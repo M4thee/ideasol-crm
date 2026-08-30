@@ -36,6 +36,8 @@ const contractPdfPositions = {
     installationAddress: { x: 40, y: 488, size: 9 },
     email: { x: 40, y: 459, size: 9 },
     phone: { x: 400, y: 459, size: 9 },
+    secondClientEmail: { x: 40, y: 461, size: 6.6 },
+    secondClientPhone: { x: 400, y: 461, size: 6.6 },
     salesRepresentative: { x: 140, y: 308, size: 9 },
     businessPremisesCheck: { x: 39.5, y: 253.7 },
     scheduledVisitCheck: { x: 301, y: 253 },
@@ -391,6 +393,8 @@ function getCustomerData(sale: Record<string, any>, client: Record<string, any> 
       customerData.usable_area_m2 || customerData.usable_area || customerData.property_area_m2 || "",
     secondClientName: customerData.second_client_name || "",
     secondClientPesel: customerData.second_client_pesel || "",
+    secondClientPhone: customerData.second_client_phone || "",
+    secondClientEmail: customerData.second_client_email || "",
     client1MeterOwner: customerData.client1_meter_owner === true,
     client2MeterOwner: customerData.client2_meter_owner === true,
     osdOperator: customerData.osd_operator || "",
@@ -1395,6 +1399,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     usableAreaM2: getQueryValue(request, "usableAreaM2") || customerFromDb.usableAreaM2,
     secondClientName: getQueryValue(request, "secondClientName") || customerFromDb.secondClientName,
     secondClientPesel: getQueryValue(request, "secondClientPesel") || customerFromDb.secondClientPesel,
+    secondClientPhone: getQueryValue(request, "secondClientPhone") || customerFromDb.secondClientPhone,
+    secondClientEmail: getQueryValue(request, "secondClientEmail") || customerFromDb.secondClientEmail,
     client1MeterOwner:
       readBooleanLike(getQueryValue(request, "client1MeterOwner")) ??
       customerFromDb.client1MeterOwner,
@@ -1862,20 +1868,37 @@ export async function GET(request: NextRequest, context: RouteContext) {
     contractPdfPositions.page1.installationAddress.y,
     { size: contractPdfPositions.page1.installationAddress.size }
   );
+  const hasSecondClientContact = Boolean(customer.secondClientEmail || customer.secondClientPhone);
   drawOnPage(
     0,
-    customer.email,
+    hasSecondClientContact ? `Klient 1: ${customer.email}` : customer.email,
     contractPdfPositions.page1.email.x,
-    contractPdfPositions.page1.email.y,
-    { size: contractPdfPositions.page1.email.size }
+    hasSecondClientContact ? contractPdfPositions.page1.email.y + 12 : contractPdfPositions.page1.email.y,
+    { size: hasSecondClientContact ? 6.6 : contractPdfPositions.page1.email.size }
   );
   drawOnPage(
     0,
-    customer.phone,
+    hasSecondClientContact ? `Klient 1: ${customer.phone}` : customer.phone,
     contractPdfPositions.page1.phone.x,
-    contractPdfPositions.page1.phone.y,
-    { size: contractPdfPositions.page1.phone.size }
+    hasSecondClientContact ? contractPdfPositions.page1.phone.y + 12 : contractPdfPositions.page1.phone.y,
+    { size: hasSecondClientContact ? 6.6 : contractPdfPositions.page1.phone.size }
   );
+  if (hasSecondClientContact) {
+    drawOnPage(
+      0,
+      `Klient 2: ${customer.secondClientEmail}`,
+      contractPdfPositions.page1.secondClientEmail.x,
+      contractPdfPositions.page1.secondClientEmail.y,
+      { size: contractPdfPositions.page1.secondClientEmail.size }
+    );
+    drawOnPage(
+      0,
+      `Klient 2: ${customer.secondClientPhone}`,
+      contractPdfPositions.page1.secondClientPhone.x,
+      contractPdfPositions.page1.secondClientPhone.y,
+      { size: contractPdfPositions.page1.secondClientPhone.size }
+    );
+  }
   drawOnPage(
     0,
     salesRepresentativeName,
@@ -2450,8 +2473,8 @@ if (hasOptimizers) {
       name: customer.secondClientName,
       pesel: customer.secondClientPesel,
       address: customer.contractAddress,
-      email: customer.email,
-      phone: customer.phone,
+      email: customer.secondClientEmail,
+      phone: customer.secondClientPhone,
     },
   ].filter((prosument) => prosument.name || prosument.pesel);
   const selectedProsuments = allProsuments.filter((prosument) => prosument.selected);

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { canAccessSaleForSms, requireSmsRequest } from "@/lib/auth/requireSmsRequest";
+import {
+  canAccessSaleForAccounting,
+  requireSaleAccountingRequest,
+} from "@/lib/auth/requireSaleAccountingRequest";
 import { isValidDateOnly } from "@/lib/polishDateTime";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -10,9 +13,14 @@ type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
   try {
-    const profile = await requireSmsRequest(request);
+    const profile = await requireSaleAccountingRequest(request, {
+      requireRealization: true,
+    });
     if (!profile) {
-      return NextResponse.json({ ok: false, error: "Brak uprawnienia SMS." }, { status: 403 });
+      return NextResponse.json(
+        { ok: false, error: "Brak uprawnienia Realizacja." },
+        { status: 403 }
+      );
     }
 
     const { id: saleId } = await context.params;
@@ -26,7 +34,7 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ ok: false, error: "Nie znaleziono sprzedaży." }, { status: 404 });
     }
 
-    const canAccess = await canAccessSaleForSms({
+    const canAccess = await canAccessSaleForAccounting({
       userId: profile.id,
       role: profile.role,
       sellerId: sale.seller_id,

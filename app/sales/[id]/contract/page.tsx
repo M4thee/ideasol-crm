@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
@@ -24,6 +25,8 @@ type ContractForm = {
   contractNumber: string;
   secondClientName: string;
   secondClientPesel: string;
+  secondClientPhone: string;
+  secondClientEmail: string;
   client1MeterOwner: boolean;
   client2MeterOwner: boolean;
   osdOperator: OsdOperator | "";
@@ -56,6 +59,21 @@ type ContractForm = {
   client2MarketingEmail: boolean;
   client2MarketingPhone: boolean;
   client2PhotoConsent: boolean;
+};
+
+type LocalIdeaSignLink = {
+  signerOrder: number;
+  signerName: string;
+  url: string;
+};
+
+type IdeaSignSendResponse = {
+  error?: string;
+  transactionId?: string;
+  localTest?: boolean;
+  deliveryMode?: "live" | "simulated";
+  demoOtp?: string;
+  signerLinks?: unknown;
 };
 
 function todayLocalDate() {
@@ -110,9 +128,17 @@ export default function SaleContractPage() {
   const saleId = params.id;
 
   const [loading, setLoading] = useState(true);
+  const [fatalError, setFatalError] = useState("");
   const [error, setError] = useState("");
   const [saleNumber, setSaleNumber] = useState("");
   const [installationCount, setInstallationCount] = useState(1);
+  const [hasIdeaSignSendAccess, setHasIdeaSignSendAccess] = useState(false);
+  const [sendingIdeaSign, setSendingIdeaSign] = useState(false);
+  const [ideaSignStatus, setIdeaSignStatus] = useState("");
+  const [hasSecondClient, setHasSecondClient] = useState(false);
+  const [localIdeaSignLinks, setLocalIdeaSignLinks] = useState<LocalIdeaSignLink[]>([]);
+  const [localIdeaSignDeliveryMode, setLocalIdeaSignDeliveryMode] = useState<"live" | "simulated">("simulated");
+  const [localIdeaSignDemoOtp, setLocalIdeaSignDemoOtp] = useState("");
   const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
     createEmptyCustomPaymentSchedule
   );
@@ -129,6 +155,8 @@ export default function SaleContractPage() {
     contractNumber: "",
     secondClientName: "",
     secondClientPesel: "",
+    secondClientPhone: "",
+    secondClientEmail: "",
     client1MeterOwner: false,
     client2MeterOwner: false,
     osdOperator: "",
@@ -163,27 +191,48 @@ export default function SaleContractPage() {
     client2PhotoConsent: false,
   });
 
-  useEffect(() => {
-    loadContractData();
-  }, [saleId]);
-
-  async function loadContractData() {
+  const loadContractData = useCallback(async () => {
     setLoading(true);
+    setFatalError("");
     setError("");
 
-    const { data: sale, error: saleError } = await supabase
-      .from("sales")
-      .select("*")
-      .eq("id", saleId)
-      .maybeSingle();
+    const [saleResponse, userResponse] = await Promise.all([
+      supabase.from("sales").select("*").eq("id", saleId).maybeSingle(),
+      supabase.auth.getUser(),
+    ]);
+    const { data: sale, error: saleError } = saleResponse;
+    const user = userResponse.data.user;
 
     if (saleError || !sale) {
       console.error("Błąd ładowania sprzedaży do umowy:", saleError);
-      setError("Nie udało się załadować danych sprzedaży.");
+      setFatalError("Nie udało się załadować danych sprzedaży.");
       setLoading(false);
       return;
     }
 
+    if (user) {
+      const [{ data: permission }, { data: profile }] = await Promise.all([
+        supabase
+          .from("user_permissions")
+          .select("ideasign_send")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle(),
+      ]);
+      const role = String(profile?.role || "").toLowerCase();
+      setHasIdeaSignSendAccess(
+        permission?.ideasign_send === true || role === "admin" || role === "owner"
+      );
+    } else {
+      setHasIdeaSignSendAccess(false);
+    }
+
+    // Supabase types for this legacy, schemaless client payload are not generated yet.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let client: Record<string, any> | null = null;
 
     if (sale.client_id) {
@@ -196,6 +245,8 @@ export default function SaleContractPage() {
       client = clientData;
     }
 
+    // The historical JSON payload contains fields from several contract versions.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const customerData = (sale.customer_data || {}) as Record<string, any>;
 
     const contractAddress =
@@ -233,6 +284,14 @@ export default function SaleContractPage() {
     setSaleNumber(contractNumber);
     setInstallationCount(getSaleInstallationCount(sale));
     setCustomPaymentSchedule(getCustomPaymentScheduleFromSale(sale));
+    setHasSecondClient(
+      Boolean(
+        customerData.second_client_name ||
+          customerData.second_client_pesel ||
+          customerData.second_client_phone ||
+          customerData.second_client_email
+      )
+    );
     setForm({
       clientName:
         customerData.full_name ||
@@ -255,6 +314,8 @@ export default function SaleContractPage() {
       contractNumber,
       secondClientName: customerData.second_client_name || "",
       secondClientPesel: customerData.second_client_pesel || "",
+      secondClientPhone: customerData.second_client_phone || "",
+      secondClientEmail: customerData.second_client_email || "",
       client1MeterOwner: customerData.client1_meter_owner === true,
       client2MeterOwner: customerData.client2_meter_owner === true,
       osdOperator: customerData.osd_operator || "",
@@ -305,7 +366,14 @@ export default function SaleContractPage() {
     });
 
     setLoading(false);
-  }
+  }, [saleId]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      void loadContractData();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loadContractData]);
 
   function updateField(field: keyof ContractForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -315,56 +383,86 @@ export default function SaleContractPage() {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  async function generatePdf() {
+  function removeSecondClient() {
+    setHasSecondClient(false);
+    setForm((current) => ({
+      ...current,
+      secondClientName: "",
+      secondClientPesel: "",
+      secondClientPhone: "",
+      secondClientEmail: "",
+      client2MeterOwner: false,
+      client2MarketingEmail: false,
+      client2MarketingPhone: false,
+      client2PhotoConsent: false,
+    }));
+  }
+
+  async function buildValidatedContractQuery() {
     setError("");
 
     const normalizedContractNumber = form.contractNumber.trim();
 
     if (!normalizedContractNumber) {
       setError("Uzupełnij numer umowy przed wygenerowaniem PDF.");
-      return;
+      return null;
     }
 
     if (!form.propertyType) {
       setError("Wybierz rodzaj nieruchomości przed wygenerowaniem PDF.");
-      return;
+      return null;
     }
 
     const usableArea = Number(form.usableAreaM2.replace(",", "."));
 
     if (!Number.isFinite(usableArea) || usableArea <= 0) {
       setError("Uzupełnij prawidłową powierzchnię użytkową nieruchomości.");
-      return;
+      return null;
     }
 
     if (!form.contractSigningLocation) {
       setError("Wybierz, gdzie i w jakich okolicznościach podpisano umowę.");
-      return;
+      return null;
     }
 
     if (form.contractSigningLocation === "scheduled_home_visit" && !form.meetingAgreedDate) {
       setError("Uzupełnij datę, kiedy zostało umówione spotkanie.");
-      return;
+      return null;
     }
 
     if (form.contractSigningLocation !== "business_premises" && !form.realizationVariant) {
       setError("Uzupełnij moment rozpoczęcia odpłatnych usług.");
-      return;
+      return null;
     }
 
     if (!form.client1MeterOwner && !form.client2MeterOwner) {
       setError("Zaznacz co najmniej jednego właściciela licznika.");
-      return;
+      return null;
     }
 
     if (form.client2MeterOwner && (!form.secondClientName.trim() || !form.secondClientPesel.trim())) {
       setError("Uzupełnij dane klienta 2, jeżeli jest właścicielem licznika.");
-      return;
+      return null;
+    }
+
+    if (hasSecondClient) {
+      if (!form.secondClientName.trim() || !form.secondClientPesel.trim()) {
+        setError("Uzupełnij imię i nazwisko oraz PESEL klienta 2.");
+        return null;
+      }
+      if (form.secondClientPhone.replace(/\D/g, "").length < 9 || !/^\S+@\S+\.\S+$/.test(form.secondClientEmail.trim())) {
+        setError("Przy umowie na dwie osoby uzupełnij osobny, poprawny telefon i e-mail klienta 2.");
+        return null;
+      }
+      if (form.secondClientPhone.replace(/\D/g, "") === form.phone.replace(/\D/g, "") || form.secondClientEmail.trim().toLowerCase() === form.email.trim().toLowerCase()) {
+        setError("Każdy podpisujący musi mieć własny numer telefonu i własny adres e-mail.");
+        return null;
+      }
     }
 
     if (!form.osdOperator) {
       setError("Wybierz operatora OSD.");
-      return;
+      return null;
     }
 
     const ppeError =
@@ -374,7 +472,7 @@ export default function SaleContractPage() {
 
     if (ppeError) {
       setError(ppeError);
-      return;
+      return null;
     }
 
     const { data: existingContract, error: duplicateCheckError } = await supabase
@@ -387,12 +485,12 @@ export default function SaleContractPage() {
     if (duplicateCheckError) {
       console.error("Błąd sprawdzania duplikatu numeru umowy:", duplicateCheckError);
       setError("Nie udało się sprawdzić numeru umowy. Spróbuj ponownie.");
-      return;
+      return null;
     }
 
     if (existingContract) {
       setError("Umowa o wskazanym numerze istnieje w systemie.");
-      return;
+      return null;
     }
     const query = new URLSearchParams({
       clientName: form.clientName,
@@ -405,8 +503,10 @@ export default function SaleContractPage() {
       propertyType: form.propertyType,
       usableAreaM2: form.usableAreaM2,
       contractNumber: normalizedContractNumber,
-      secondClientName: form.secondClientName,
-      secondClientPesel: form.secondClientPesel,
+      secondClientName: hasSecondClient ? form.secondClientName : "",
+      secondClientPesel: hasSecondClient ? form.secondClientPesel : "",
+      secondClientPhone: hasSecondClient ? form.secondClientPhone : "",
+      secondClientEmail: hasSecondClient ? form.secondClientEmail : "",
       client1MeterOwner: String(form.client1MeterOwner),
       client2MeterOwner: String(form.client2MeterOwner),
       osdOperator: form.osdOperator,
@@ -437,7 +537,93 @@ export default function SaleContractPage() {
       client2PhotoConsent: String(form.client2PhotoConsent),
     });
 
+    return query;
+  }
+
+  async function generatePdf() {
+    const query = await buildValidatedContractQuery();
+    if (!query) return;
     window.open(`/sales/${saleId}/contract-pdf?${query.toString()}`, "_blank");
+  }
+
+  async function sendToIdeaSign() {
+    if (sendingIdeaSign || !hasIdeaSignSendAccess) return;
+    setIdeaSignStatus("");
+    setLocalIdeaSignLinks([]);
+    setLocalIdeaSignDemoOtp("");
+
+    if (form.contractSigningLocation !== "distance") {
+      setIdeaSignStatus(
+        "Przed wysłaniem wybierz: na odległość, bez jednoczesnej fizycznej obecności Stron."
+      );
+      return;
+    }
+
+    const query = await buildValidatedContractQuery();
+    if (!query) return;
+
+    const confirmed = window.confirm(
+      "Zapisać tę wersję umowy, zamrozić dokumenty i wysłać klientowi jednorazowy link IdeaSign?"
+    );
+    if (!confirmed) return;
+
+    setSendingIdeaSign(true);
+    setIdeaSignStatus("Zapisujemy i zabezpieczamy wersję dokumentów…");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+
+      const response = await fetch(`/api/ideasign/sales/${saleId}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ contractData: Object.fromEntries(query.entries()) }),
+      });
+      const responseText = await response.text();
+      let result: IdeaSignSendResponse = {};
+      if (responseText) {
+        try {
+          result = JSON.parse(responseText) as IdeaSignSendResponse;
+        } catch {
+          if (!response.ok) {
+            throw new Error(
+              `IdeaSign zwrócił błąd serwera (${response.status}). Sprawdź konfigurację lokalną.`
+            );
+          }
+          throw new Error("IdeaSign zwrócił nieprawidłową odpowiedź serwera.");
+        }
+      }
+      if (!response.ok) throw new Error(result.error || "Nie udało się wysłać umowy do IdeaSign.");
+      const localLinks = Array.isArray(result.signerLinks)
+        ? result.signerLinks.filter(
+            (link: unknown): link is LocalIdeaSignLink =>
+              Boolean(
+                link &&
+                  typeof link === "object" &&
+                  typeof (link as LocalIdeaSignLink).signerOrder === "number" &&
+                  typeof (link as LocalIdeaSignLink).signerName === "string" &&
+                  typeof (link as LocalIdeaSignLink).url === "string"
+              )
+          )
+        : [];
+      setLocalIdeaSignLinks(localLinks);
+      setLocalIdeaSignDeliveryMode(result.deliveryMode === "live" ? "live" : "simulated");
+      setLocalIdeaSignDemoOtp(typeof result.demoOtp === "string" ? result.demoOtp : "");
+      setIdeaSignStatus(
+        result.localTest
+          ? `Tryb lokalny gotowy. ID transakcji: ${result.transactionId}`
+          : `Wysłano bezpieczny link. ID transakcji: ${result.transactionId}`
+      );
+    } catch (sendError) {
+      setIdeaSignStatus(
+        sendError instanceof Error ? sendError.message : "Nie udało się wysłać umowy do IdeaSign."
+      );
+    } finally {
+      setSendingIdeaSign(false);
+    }
   }
 
   if (loading) {
@@ -448,11 +634,11 @@ export default function SaleContractPage() {
     );
   }
 
-  if (error) {
+  if (fatalError) {
     return (
       <main className="min-h-screen bg-slate-100 p-6">
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
-          {error}
+          {fatalError}
         </div>
       </main>
     );
@@ -519,17 +705,58 @@ export default function SaleContractPage() {
             </label>
 
             <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-black text-slate-900">Drugi klient na umowie</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Uzupełnij tylko wtedy, gdy umowa ma być zawarta z dwiema osobami.
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-900">Druga osoba na umowie</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Opcjonalnie — dodaj ją tylko wtedy, gdy umowę zawierają dwie osoby.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => (hasSecondClient ? removeSecondClient() : setHasSecondClient(true))}
+                  className={`rounded-xl px-4 py-2 text-xs font-black transition ${
+                    hasSecondClient
+                      ? "border border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
+                      : "bg-sky-700 text-white hover:bg-sky-800"
+                  }`}
+                >
+                  {hasSecondClient ? "Usuń drugą osobę" : "+ Dodaj drugą osobę"}
+                </button>
+              </div>
 
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900">
+                Brak unikalnego numeru telefonu i adresu e-mail dla obu klientów uniemożliwi
+                elektroniczne zawarcie umowy przez IdeaSign.
+              </div>
+
+              {hasSecondClient && <>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <label className="block">
                   <span className="text-sm font-bold text-slate-700">Imię i nazwisko klienta 2</span>
                   <input
                     value={form.secondClientName}
                     onChange={(event) => updateField("secondClientName", event.target.value)}
+                    className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Telefon klienta 2</span>
+                  <input
+                    type="tel"
+                    value={form.secondClientPhone}
+                    onChange={(event) => updateField("secondClientPhone", event.target.value)}
+                    className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">E-mail klienta 2</span>
+                  <input
+                    type="email"
+                    value={form.secondClientEmail}
+                    onChange={(event) => updateField("secondClientEmail", event.target.value)}
                     className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                   />
                 </label>
@@ -552,6 +779,7 @@ export default function SaleContractPage() {
                 />
                 Klient 2 — właściciel licznika
               </label>
+              </>}
             </div>
 
             <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -767,7 +995,9 @@ export default function SaleContractPage() {
               )}
 
               <label className="block md:col-span-2">
-                <span className="text-sm font-bold text-slate-700">Gdzie podpisano umowę</span>
+                <span className="text-sm font-bold text-slate-700">
+                  Sposób i okoliczności zawarcia umowy
+                </span>
                 <select
                   value={form.contractSigningLocation}
                   onChange={(event) => {
@@ -803,7 +1033,9 @@ export default function SaleContractPage() {
                   <option value="unscheduled_home_visit">
                     poza lokalem podczas nie umówionej wcześniej wizyty u Klienta
                   </option>
-                  <option value="distance">na odległość, poza lokalem przedsiębiorcy</option>
+                  <option value="distance">
+                    na odległość, bez jednoczesnej fizycznej obecności Stron
+                  </option>
                 </select>
               </label>
 
@@ -895,7 +1127,7 @@ export default function SaleContractPage() {
                   </label>
                 </div>
 
-                {(form.secondClientName.trim() || form.secondClientPesel.trim()) && (
+                {hasSecondClient && (
                   <div className="mt-4 grid gap-4 md:grid-cols-3">
                     <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-700">
                       <input
@@ -1005,14 +1237,93 @@ export default function SaleContractPage() {
           </div>
         </section>
 
-        <div className="flex justify-end">
+        <div className="flex flex-col items-end gap-3">
+          {ideaSignStatus && (
+            <div
+              role="status"
+              className="w-full rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm font-bold text-sky-900"
+            >
+              {ideaSignStatus}
+            </div>
+          )}
+          {localIdeaSignLinks.length > 0 && (
+            <div className="w-full rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-900">Lokalny test IdeaSign</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {localIdeaSignDeliveryMode === "live" ? (
+                      <>Link wysłano e-mailem, a kody będą wysyłane SMS-em na zapisany numer.</>
+                    ) : (
+                      <>
+                        Wiadomości nie zostały wysłane. Kod dla obu etapów:{" "}
+                        <strong>{localIdeaSignDemoOtp || "482913"}</strong>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-amber-800">
+                  tylko localhost
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-3">
+                {localIdeaSignLinks.map((link) => (
+                  <a
+                    key={`${link.signerOrder}-${link.url}`}
+                    href={link.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center rounded-xl bg-blue-700 px-4 py-3 text-xs font-black text-white shadow-sm transition hover:bg-blue-800"
+                  >
+                    Otwórz jako klient {link.signerOrder}: {link.signerName}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-3">
           <button
             type="button"
             onClick={generatePdf}
             className="rounded-2xl bg-[#119182] px-7 py-4 text-sm font-black text-white shadow-sm transition hover:bg-[#0f7f72]"
           >
-            Generuj PDF umowy
+            Pobierz PDF
           </button>
+          {hasIdeaSignSendAccess && (
+            <button
+              type="button"
+              onClick={() => void sendToIdeaSign()}
+              disabled={sendingIdeaSign || form.contractSigningLocation !== "distance"}
+              title={
+                form.contractSigningLocation === "distance"
+                  ? "Prześlij zatwierdzoną wersję umowy do IdeaSign"
+                  : "Najpierw wybierz zawarcie umowy na odległość"
+              }
+              className="group inline-flex items-center gap-3 rounded-2xl border border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-3 text-left text-sm font-black text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-xl disabled:cursor-not-allowed disabled:grayscale disabled:opacity-45 disabled:hover:translate-y-0"
+            >
+              <span className="relative h-10 w-10 shrink-0">
+                <Image
+                  src="/images/ideasign-logo.png"
+                  alt=""
+                  fill
+                  sizes="40px"
+                  className="object-contain object-center"
+                />
+              </span>
+              <span>
+                <span className="block">Prześlij do IdeaSign</span>
+                <span className="mt-0.5 block text-[10px] font-semibold text-slate-300">
+                  Bezpieczne zawarcie elektroniczne
+                </span>
+              </span>
+            </button>
+          )}
+          </div>
+          {hasIdeaSignSendAccess && form.contractSigningLocation !== "distance" && (
+            <p className="text-right text-xs font-semibold text-amber-700">
+              IdeaSign wymaga wariantu „na odległość, bez jednoczesnej fizycznej obecności Stron”.
+            </p>
+          )}
         </div>
       </div>
     </main>

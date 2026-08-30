@@ -1,12 +1,6 @@
 import type { NextConfig } from "next";
 
-type ExtendedNextConfig = NextConfig & {
-  experimental?: NonNullable<NextConfig["experimental"]> & {
-    middlewareClientMaxBodySize?: string;
-  };
-};
-
-const nextConfig: ExtendedNextConfig = {
+const nextConfig: NextConfig = {
   allowedDevOrigins: ["192.168.50.17"],
   images: {
     remotePatterns: [
@@ -18,7 +12,7 @@ const nextConfig: ExtendedNextConfig = {
     ],
   },
   experimental: {
-    middlewareClientMaxBodySize: "50mb",
+    proxyClientMaxBodySize: "50mb",
   },
 };
 
