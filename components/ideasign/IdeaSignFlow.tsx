@@ -246,7 +246,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   }, [acceptedIds, session]);
   const signatureButtonLabel =
     session?.contractSigningLocation === "distance"
-      ? "Podpisuję umowę z obowiązkiem zapłaty"
+      ? "Podpisuję umowę i potwierdzam zakup"
       : "Podpisuję umowę";
 
   useEffect(() => {
