@@ -12,7 +12,12 @@ import { DOCUMENT_GROUPS, type DocumentGroupKey } from "@/lib/saleDocumentGroupi
 import { appendIdeaSignAuditEvent, type IdeaSignAccessContext, verifyIdeaSignOtp } from "./server";
 import { getIdeaSignDeliveryPassword, getIdeaSignOwnerPassword } from "./password";
 import { getRequestEvidence, sha256 } from "./security";
-import { SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE, SALE_STATUS_DOCUMENT_REVIEW } from "./lifecycle";
+import {
+  ACTIVE_IDEASIGN_SALE_STATUSES,
+  getConcludedIdeaSignSaleStatus,
+  SALE_STATUS_IDEASIGN_PARTIALLY_SIGNED,
+} from "./lifecycle";
+import { renderIdeaSignCompletedEmail } from "./email";
 
 type FrozenDocumentRow = {
   id: string; kind: string; title: string; file_name: string; storage_path: string;
@@ -196,6 +201,23 @@ export async function finalizeIdeaSignContractV2(params: { context: IdeaSignAcce
     mode?: string; signedAt?: string; waitingForSigners?: number;
   };
   if (claim.mode === "partial") {
+    const { error: saleStatusError } = await supabaseAdmin
+      .from("sales")
+      .update({ status: SALE_STATUS_IDEASIGN_PARTIALLY_SIGNED })
+      .eq("id", signature.sale_id)
+      .in("status", [...ACTIVE_IDEASIGN_SALE_STATUSES]);
+    if (saleStatusError) {
+      await supabaseAdmin
+        .from("contract_signature_sessions")
+        .update({ last_error: "SALE_STATUS_SYNC_FAILED", updated_at: new Date().toISOString() })
+        .eq("id", signature.id);
+      console.error("[IdeaSign] Failed to sync partial-signature sale status", {
+        signatureSessionId: signature.id,
+        saleId: signature.sale_id,
+        code: saleStatusError.code,
+        message: saleStatusError.message,
+      });
+    }
     return {
       ok: true as const,
       contractConcluded: false as const,
@@ -339,11 +361,12 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
   const { signature, documents, signers, contractNumber, clientAddress } = context;
 
   if (job.channel === "sale_status") {
+    const concludedSaleStatus = getConcludedIdeaSignSaleStatus(signers.length);
     const { error } = await supabaseAdmin
       .from("sales")
-      .update({ status: SALE_STATUS_DOCUMENT_REVIEW })
+      .update({ status: concludedSaleStatus })
       .eq("id", signature.sale_id)
-      .eq("status", SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE);
+      .in("status", [...ACTIVE_IDEASIGN_SALE_STATUSES]);
     if (error) throw new Error(`Nie udało się zmienić statusu sprzedaży: ${error.message}`);
     return;
   }
@@ -413,6 +436,13 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
       to: signer.email,
       subject: `Umowa ${contractNumber} została zawarta — IdeaSign`,
       text: `Dzień dobry,\n\nUmowa ${contractNumber} została zawarta drogą elektroniczną ${formatWarsawDate(signature.concluded_at!)}.\nID transakcji: ${signature.transaction_id}\nSHA-256 scalonego PDF: ${signature.final_pdf_sha256}\n\nW załączeniu znajduje się jeden scalony, zahasłowany PDF. Hasło zostało pokazane po złożeniu Twojego podpisu w IdeaSign i nie jest wysyłane e-mailem.\n\nIdeaSol Sp. z o.o.`,
+      html: renderIdeaSignCompletedEmail({
+        signerName: signer.name,
+        contractNumber,
+        concludedAt: formatWarsawDate(signature.concluded_at!),
+        transactionId: signature.transaction_id,
+        finalPdfSha256: signature.final_pdf_sha256 || "",
+      }),
       attachments: [{ filename: `umowa-zalaczniki-${signature.transaction_id}.pdf`, content: Buffer.from(encrypted), contentType: "application/pdf" }],
     });
     return;

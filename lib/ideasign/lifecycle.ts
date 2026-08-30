@@ -3,11 +3,32 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE =
-  "Oczekuj na podpis elektroniczny";
+  "IdeaSign - oczekuje na podpis klienta";
+export const SALE_STATUS_IDEASIGN_PARTIALLY_SIGNED =
+  "IdeaSign - umowa podpisana 1/2 - oczekiwania na drugiego klienta";
+export const SALE_STATUS_IDEASIGN_SIGNED_SINGLE =
+  "IdeaSign - umowa podpisana - oczekiwanie na zaliczkę";
+export const SALE_STATUS_IDEASIGN_SIGNED_DOUBLE =
+  "IdeaSign - umowa podpisana 2/2 - oczekiwanie na zaliczkę";
 export const SALE_STATUS_IDEASIGN_EXPIRED =
-  "IdeaSign - upłynął czas na podpis";
+  "IdeaSign - czas na podpisanie minął";
 export const SALE_STATUS_DOCUMENT_REVIEW =
   "Oczekuje na sprawdzenie dokumentów";
+
+const LEGACY_SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE =
+  "Oczekuj na podpis elektroniczny";
+
+export const ACTIVE_IDEASIGN_SALE_STATUSES = [
+  LEGACY_SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE,
+  SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE,
+  SALE_STATUS_IDEASIGN_PARTIALLY_SIGNED,
+] as const;
+
+export function getConcludedIdeaSignSaleStatus(signerCount: number) {
+  return signerCount > 1
+    ? SALE_STATUS_IDEASIGN_SIGNED_DOUBLE
+    : SALE_STATUS_IDEASIGN_SIGNED_SINGLE;
+}
 
 const TERMINAL_IDEASIGN_STATUSES = ["zawarta", "wygasła", "anulowana"];
 
@@ -33,7 +54,7 @@ export async function expireIdeaSignSession(params: {
     .from("sales")
     .update({ status: SALE_STATUS_IDEASIGN_EXPIRED })
     .eq("id", params.saleId)
-    .eq("status", SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE);
+    .in("status", [...ACTIVE_IDEASIGN_SALE_STATUSES]);
 
   if (saleError) throw new Error(`Nie udało się zaktualizować statusu sprzedaży: ${saleError.message}`);
   return true;

@@ -246,6 +246,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
 
         if (state.session.signerSigned || state.session.status === "zawarta") {
           setContractConcluded(state.session.status === "zawarta");
+          setSuccessAnimationConfirmed(true);
           setStep("completed");
         } else if (state.session.entryVerified) {
           setStep("documents");
@@ -331,14 +332,10 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
       setOtp("");
       if (purpose === "entry") setStep("documents");
       else {
-        const finalizationConfirmed = result.contractConcluded === true
-          && typeof result.concludedAt === "string"
-          && typeof result.finalPdfSha256 === "string"
-          && result.finalPdfSha256.length > 0;
         setCompletedAt(result.concludedAt || result.signedAt || new Date().toISOString());
         setDeliveryPassword(result.password || "");
         setContractConcluded(result.contractConcluded !== false);
-        setSuccessAnimationConfirmed(finalizationConfirmed);
+        setSuccessAnimationConfirmed(true);
         setSession((current) => current ? {
           ...current,
           status: result.contractConcluded === false ? "częściowo_podpisana" : "zawarta",
@@ -561,11 +558,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
 
             {step === "completed" && session && (
               <div className="p-7 text-center sm:p-12">
-                {contractConcluded ? (
-                  <SuccessVisual animate={successAnimationConfirmed} />
-                ) : (
-                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl text-emerald-700">✓</div>
-                )}
+                <SuccessVisual animate={successAnimationConfirmed} />
                 <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-emerald-600">{contractConcluded ? "Umowa zawarta" : "Twój podpis zapisany"}</p>
                 <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Dziękujemy, {session.clientDisplayName.split(" ")[0]}</h1>
                 <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600">{contractConcluded ? <>Umowa została zawarta drogą elektroniczną{completedAt ? ` ${formatDate(completedAt)}` : ""}. Jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</> : <>Twój podpis został zapisany{completedAt ? ` ${formatDate(completedAt)}` : ""}. Umowa zostanie zawarta, gdy podpisze ją druga osoba; wtedy jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</>}</p>

@@ -320,8 +320,11 @@ type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
 
 
 const SALE_STATUSES = [
-  "Oczekuj na podpis elektroniczny",
-  "IdeaSign - upłynął czas na podpis",
+  "IdeaSign - oczekuje na podpis klienta",
+  "IdeaSign - umowa podpisana 1/2 - oczekiwania na drugiego klienta",
+  "IdeaSign - umowa podpisana - oczekiwanie na zaliczkę",
+  "IdeaSign - umowa podpisana 2/2 - oczekiwanie na zaliczkę",
+  "IdeaSign - czas na podpisanie minął",
   "Oczekuje na sprawdzenie dokumentów",
   "Oczekiwanie na zaliczkę",
   "Oczekuje na umówienie montażu",
@@ -1844,6 +1847,9 @@ export default function SalePage() {
                   disabled={savingStatus}
                   className="w-full rounded-xl border border-slate-300 px-4 py-3 bg-white text-slate-950"
                 >
+                  {!SALE_STATUSES.includes(sale.status) && (
+                    <option value={sale.status}>{sale.status}</option>
+                  )}
                   {SALE_STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {status}

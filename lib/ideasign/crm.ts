@@ -13,6 +13,7 @@ import {
 import { GET as generateContractPdf } from "@/app/sales/[id]/contract-pdf/route";
 import { appendIdeaSignAuditEvent } from "./server";
 import {
+  ACTIVE_IDEASIGN_SALE_STATUSES,
   SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE,
   SALE_STATUS_DOCUMENT_REVIEW,
   expireOverdueIdeaSignSessions,
@@ -23,6 +24,12 @@ import {
   createSecretToken,
   sha256,
 } from "./security";
+import { renderIdeaSignInvitationEmail } from "./email";
+import {
+  areIdeaSignPhonesEqual,
+  formatIdeaSignPolishPhone,
+  normalizeIdeaSignPolishPhone,
+} from "./phone";
 
 type IdeaSignCrmActor = {
   id: string;
@@ -68,7 +75,7 @@ function buildCustomerDataForIdeaSign(
     ...current,
     full_name: cleanText(input.clientName, 200),
     pesel: cleanText(input.pesel, 32),
-    phone: cleanText(input.phone, 32),
+    phone: formatIdeaSignPolishPhone(input.phone) || cleanText(input.phone, 32),
     email: cleanText(input.email, 320).toLowerCase(),
     contract_address: cleanText(input.contractAddress, 500),
     correspondence_address: cleanText(input.correspondenceAddress, 500),
@@ -78,7 +85,8 @@ function buildCustomerDataForIdeaSign(
     contract_number: cleanText(input.contractNumber, 120),
     second_client_name: cleanText(input.secondClientName, 200),
     second_client_pesel: cleanText(input.secondClientPesel, 32),
-    second_client_phone: cleanText(input.secondClientPhone, 32),
+    second_client_phone:
+      formatIdeaSignPolishPhone(input.secondClientPhone) || cleanText(input.secondClientPhone, 32),
     second_client_email: cleanText(input.secondClientEmail, 320).toLowerCase(),
     second_client_enabled: Boolean(
       cleanText(input.secondClientName, 200) || cleanText(input.secondClientPesel, 32)
@@ -135,15 +143,6 @@ function getIdeaSignBaseUrl() {
   return process.env.NODE_ENV === "production"
     ? "https://sign.ideasol.pl/sign"
     : "http://localhost:3000/sign";
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 function isLocalDevelopmentRequest(request: Request) {
@@ -453,18 +452,20 @@ export async function createAndSendIdeaSignSession(params: {
     200
   );
   const clientEmail = cleanText(customer.email || sale.customer_email || client?.email, 320).toLowerCase();
-  const clientPhone = cleanText(customer.phone || sale.customer_phone || client?.phone, 32);
-  if (clientName.length < 2 || !/^\S+@\S+\.\S+$/.test(clientEmail) || clientPhone.replace(/\D/g, "").length < 9) {
+  const clientPhone = formatIdeaSignPolishPhone(
+    customer.phone || sale.customer_phone || client?.phone
+  );
+  if (clientName.length < 2 || !/^\S+@\S+\.\S+$/.test(clientEmail) || !normalizeIdeaSignPolishPhone(clientPhone)) {
     return { ok: false as const, status: 422, error: "Uzupełnij poprawne imię i nazwisko, e-mail oraz telefon klienta." };
   }
   const secondClientName = cleanText(customer.second_client_name, 200);
   const secondClientEmail = cleanText(customer.second_client_email, 320).toLowerCase();
-  const secondClientPhone = cleanText(customer.second_client_phone, 32);
+  const secondClientPhone = formatIdeaSignPolishPhone(customer.second_client_phone);
   const hasSecondSigner = Boolean(secondClientName || cleanText(customer.second_client_pesel, 32));
-  if (hasSecondSigner && (secondClientName.length < 2 || !/^\S+@\S+\.\S+$/.test(secondClientEmail) || secondClientPhone.replace(/\D/g, "").length < 9)) {
+  if (hasSecondSigner && (secondClientName.length < 2 || !/^\S+@\S+\.\S+$/.test(secondClientEmail) || !normalizeIdeaSignPolishPhone(secondClientPhone))) {
     return { ok: false as const, status: 422, error: "Przy umowie na dwie osoby uzupełnij poprawne imię i nazwisko, e-mail oraz telefon klienta 2." };
   }
-  if (hasSecondSigner && (secondClientEmail === clientEmail || secondClientPhone.replace(/\D/g, "") === clientPhone.replace(/\D/g, ""))) {
+  if (hasSecondSigner && (secondClientEmail === clientEmail || areIdeaSignPhonesEqual(secondClientPhone, clientPhone))) {
     return { ok: false as const, status: 422, error: "Każdy podpisujący musi mieć własny e-mail i własny numer telefonu." };
   }
 
@@ -587,7 +588,11 @@ export async function createAndSendIdeaSignSession(params: {
         to: signer.email,
         subject: `Umowa ${sale.contract_number || "IdeaSol"} — bezpieczne zawarcie w IdeaSign`,
         text: `Dzień dobry,\n\nIdeaSol przesłało umowę do zapoznania i zawarcia. Twój bezpieczny, jednorazowy link jest ważny przez 7 dni:\n${signerLinks[index].url}\n\nKażda osoba podpisująca korzysta z własnego linku i kodów SMS. Nie przekazuj tego linku ani kodów drugiej osobie.\n\nIdeaSol Sp. z o.o.`,
-        html: `<p>Dzień dobry, ${escapeHtml(signer.name)},</p><p>IdeaSol przesłało umowę do zapoznania i zawarcia.</p><p><a href="${escapeHtml(signerLinks[index].url)}" style="display:inline-block;padding:14px 22px;border-radius:12px;background:#087ab8;color:#fff;text-decoration:none;font-weight:700">Otwórz bezpiecznie w IdeaSign</a></p><p>Twój link jest jednorazowy i ważny przez 7 dni. Każda osoba podpisująca korzysta z własnego linku i kodów SMS.</p><p>IdeaSol Sp. z o.o.</p>`,
+        html: renderIdeaSignInvitationEmail({
+          signerName: signer.name,
+          contractNumber: sale.contract_number || "IdeaSol",
+          signUrl: signerLinks[index].url,
+        }),
       })));
     }
 
@@ -696,7 +701,7 @@ export async function cancelIdeaSignSaleSession(params: {
     .from("sales")
     .update({ status: SALE_STATUS_DOCUMENT_REVIEW })
     .eq("id", params.saleId)
-    .eq("status", SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE);
+    .in("status", [...ACTIVE_IDEASIGN_SALE_STATUSES]);
   await appendIdeaSignAuditEvent({
     signatureSessionId: active.id,
     eventType: "offer_cancelled",

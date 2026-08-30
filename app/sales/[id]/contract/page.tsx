@@ -7,6 +7,11 @@ import { supabase } from "@/lib/supabase";
 import { normalizePpe, OSD_OPTIONS, validatePpe, type OsdOperator } from "@/lib/ppeValidation";
 import { getSaleInstallationCount } from "@/lib/installationCount";
 import {
+  areIdeaSignPhonesEqual,
+  formatIdeaSignPolishPhone,
+  normalizeIdeaSignPolishPhone,
+} from "@/lib/ideasign/phone";
+import {
   createEmptyCustomPaymentSchedule,
   formatCustomPaymentInstallment,
   getCustomPaymentScheduleFromSale,
@@ -302,7 +307,12 @@ export default function SaleContractPage() {
         client?.company_name ||
         "",
       pesel: customerData.pesel || sale.customer_pesel || client?.pesel || "",
-      phone: customerData.phone || sale.customer_phone || client?.phone || "",
+      phone:
+        formatIdeaSignPolishPhone(customerData.phone || sale.customer_phone || client?.phone) ||
+        customerData.phone ||
+        sale.customer_phone ||
+        client?.phone ||
+        "",
       email: customerData.email || sale.customer_email || client?.email || "",
       contractAddress,
       correspondenceAddress: customerData.correspondence_address || contractAddress,
@@ -314,7 +324,10 @@ export default function SaleContractPage() {
       contractNumber,
       secondClientName: customerData.second_client_name || "",
       secondClientPesel: customerData.second_client_pesel || "",
-      secondClientPhone: customerData.second_client_phone || "",
+      secondClientPhone:
+        formatIdeaSignPolishPhone(customerData.second_client_phone) ||
+        customerData.second_client_phone ||
+        "",
       secondClientEmail: customerData.second_client_email || "",
       client1MeterOwner: customerData.client1_meter_owner === true,
       client2MeterOwner: customerData.client2_meter_owner === true,
@@ -398,10 +411,29 @@ export default function SaleContractPage() {
     }));
   }
 
+  function addSecondClient() {
+    setHasSecondClient(true);
+    setForm((current) => ({
+      ...current,
+      secondClientPhone: current.secondClientPhone || "+48 ",
+    }));
+  }
+
+  function normalizePhoneField(field: "phone" | "secondClientPhone") {
+    setForm((current) => {
+      const formatted = formatIdeaSignPolishPhone(current[field]);
+      return formatted ? { ...current, [field]: formatted } : current;
+    });
+  }
+
   async function buildValidatedContractQuery() {
     setError("");
 
     const normalizedContractNumber = form.contractNumber.trim();
+    const normalizedPrimaryPhone = normalizeIdeaSignPolishPhone(form.phone);
+    const normalizedSecondPhone = normalizeIdeaSignPolishPhone(form.secondClientPhone);
+    const formattedPrimaryPhone = formatIdeaSignPolishPhone(form.phone);
+    const formattedSecondPhone = formatIdeaSignPolishPhone(form.secondClientPhone);
 
     if (!normalizedContractNumber) {
       setError("Uzupełnij numer umowy przed wygenerowaniem PDF.");
@@ -450,11 +482,15 @@ export default function SaleContractPage() {
         setError("Uzupełnij imię i nazwisko oraz PESEL klienta 2.");
         return null;
       }
-      if (form.secondClientPhone.replace(/\D/g, "").length < 9 || !/^\S+@\S+\.\S+$/.test(form.secondClientEmail.trim())) {
+      if (!normalizedSecondPhone || !/^\S+@\S+\.\S+$/.test(form.secondClientEmail.trim())) {
         setError("Przy umowie na dwie osoby uzupełnij osobny, poprawny telefon i e-mail klienta 2.");
         return null;
       }
-      if (form.secondClientPhone.replace(/\D/g, "") === form.phone.replace(/\D/g, "") || form.secondClientEmail.trim().toLowerCase() === form.email.trim().toLowerCase()) {
+      if (!normalizedPrimaryPhone) {
+        setError("Uzupełnij poprawny polski numer telefonu klienta 1.");
+        return null;
+      }
+      if (areIdeaSignPhonesEqual(form.secondClientPhone, form.phone) || form.secondClientEmail.trim().toLowerCase() === form.email.trim().toLowerCase()) {
         setError("Każdy podpisujący musi mieć własny numer telefonu i własny adres e-mail.");
         return null;
       }
@@ -495,7 +531,7 @@ export default function SaleContractPage() {
     const query = new URLSearchParams({
       clientName: form.clientName,
       pesel: form.pesel,
-      phone: form.phone,
+      phone: formattedPrimaryPhone || form.phone,
       email: form.email,
       contractAddress: form.contractAddress,
       correspondenceAddress: form.correspondenceAddress,
@@ -505,7 +541,7 @@ export default function SaleContractPage() {
       contractNumber: normalizedContractNumber,
       secondClientName: hasSecondClient ? form.secondClientName : "",
       secondClientPesel: hasSecondClient ? form.secondClientPesel : "",
-      secondClientPhone: hasSecondClient ? form.secondClientPhone : "",
+      secondClientPhone: hasSecondClient ? formattedSecondPhone || form.secondClientPhone : "",
       secondClientEmail: hasSecondClient ? form.secondClientEmail : "",
       client1MeterOwner: String(form.client1MeterOwner),
       client2MeterOwner: String(form.client2MeterOwner),
@@ -714,7 +750,7 @@ export default function SaleContractPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => (hasSecondClient ? removeSecondClient() : setHasSecondClient(true))}
+                  onClick={() => (hasSecondClient ? removeSecondClient() : addSecondClient())}
                   className={`rounded-xl px-4 py-2 text-xs font-black transition ${
                     hasSecondClient
                       ? "border border-rose-200 bg-white text-rose-700 hover:bg-rose-50"
@@ -747,6 +783,8 @@ export default function SaleContractPage() {
                     type="tel"
                     value={form.secondClientPhone}
                     onChange={(event) => updateField("secondClientPhone", event.target.value)}
+                    onBlur={() => normalizePhoneField("secondClientPhone")}
+                    placeholder="+48 501 234 567"
                     className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
                   />
                 </label>
@@ -838,8 +876,11 @@ export default function SaleContractPage() {
             <label className="block">
               <span className="text-sm font-bold text-slate-700">Telefon</span>
               <input
+                type="tel"
                 value={form.phone}
                 onChange={(event) => updateField("phone", event.target.value)}
+                onBlur={() => normalizePhoneField("phone")}
+                placeholder="+48 501 234 567"
                 className="mt-2 h-11 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none focus:border-[#119182] focus:ring-4 focus:ring-[#119182]/10"
               />
             </label>
