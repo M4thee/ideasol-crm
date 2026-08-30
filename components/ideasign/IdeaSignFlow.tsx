@@ -162,6 +162,35 @@ function OtpInput({ value, onChange }: { value: string; onChange: (value: string
   );
 }
 
+function SuccessVisual({ animate }: { animate: boolean }) {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(true);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+
+    updatePreference();
+    mediaQuery.addEventListener("change", updatePreference);
+    return () => mediaQuery.removeEventListener("change", updatePreference);
+  }, []);
+
+  if (!animate || prefersReducedMotion) {
+    return (
+      <div className="relative mx-auto h-28 w-48 sm:h-32 sm:w-56" aria-hidden="true">
+        <Image src="/images/ideasign-logo.png" alt="" fill sizes="224px" className="object-contain object-center" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-md overflow-hidden rounded-2xl bg-white" aria-hidden="true">
+      <video autoPlay muted playsInline preload="auto" className="block aspect-video h-auto w-full object-contain">
+        <source src="/animations/ideasign-success.webm" type="video/webm" />
+      </video>
+    </div>
+  );
+}
+
 export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   const [step, setStep] = useState<IdeaSignFlowStep>(demo ? "link" : "loading");
   const [session, setSession] = useState<IdeaSignSessionDto | null>(demo ? demoSession : null);
@@ -176,6 +205,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
   const [deliveryPassword, setDeliveryPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [contractConcluded, setContractConcluded] = useState(true);
+  const [successAnimationConfirmed, setSuccessAnimationConfirmed] = useState(false);
 
   const allAccepted = useMemo(() => {
     const required = session?.documents.filter((document) => document.acceptanceRequired) || [];
@@ -282,6 +312,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
           setSession((current) => current ? { ...current, status: "zawarta" } : current);
           setDeliveryPassword("IDEA-7K9M-4Q2P");
           setContractConcluded(true);
+          setSuccessAnimationConfirmed(true);
           setStep("completed");
         }
         setOtp("");
@@ -300,9 +331,14 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
       setOtp("");
       if (purpose === "entry") setStep("documents");
       else {
+        const finalizationConfirmed = result.contractConcluded === true
+          && typeof result.concludedAt === "string"
+          && typeof result.finalPdfSha256 === "string"
+          && result.finalPdfSha256.length > 0;
         setCompletedAt(result.concludedAt || result.signedAt || new Date().toISOString());
         setDeliveryPassword(result.password || "");
         setContractConcluded(result.contractConcluded !== false);
+        setSuccessAnimationConfirmed(finalizationConfirmed);
         setSession((current) => current ? {
           ...current,
           status: result.contractConcluded === false ? "częściowo_podpisana" : "zawarta",
@@ -525,7 +561,11 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
 
             {step === "completed" && session && (
               <div className="p-7 text-center sm:p-12">
-                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl text-emerald-700">✓</div>
+                {contractConcluded ? (
+                  <SuccessVisual animate={successAnimationConfirmed} />
+                ) : (
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl text-emerald-700">✓</div>
+                )}
                 <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-emerald-600">{contractConcluded ? "Umowa zawarta" : "Twój podpis zapisany"}</p>
                 <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Dziękujemy, {session.clientDisplayName.split(" ")[0]}</h1>
                 <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600">{contractConcluded ? <>Umowa została zawarta drogą elektroniczną{completedAt ? ` ${formatDate(completedAt)}` : ""}. Jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</> : <>Twój podpis został zapisany{completedAt ? ` ${formatDate(completedAt)}` : ""}. Umowa zostanie zawarta, gdy podpisze ją druga osoba; wtedy jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</>}</p>
@@ -547,7 +587,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold text-slate-400">ID transakcji</p><p className="mt-1 font-mono text-sm font-bold text-slate-900">{session.transactionId}</p></div>
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold text-slate-400">Numer umowy</p><p className="mt-1 text-sm font-black text-slate-900">{session.contractNumber}</p></div>
                 </div>
-                {demo && <button onClick={() => { setSession(demoSession); setAcceptedIds([]); setOpenedIds([]); setCompletedAt(null); setDeliveryPassword(""); setPasswordVisible(false); setOtp(""); setError(""); setStep("link"); }} className="mt-8 rounded-xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Uruchom demo ponownie</button>}
+                {demo && <button onClick={() => { setSession(demoSession); setAcceptedIds([]); setOpenedIds([]); setCompletedAt(null); setDeliveryPassword(""); setPasswordVisible(false); setContractConcluded(true); setSuccessAnimationConfirmed(false); setOtp(""); setError(""); setStep("link"); }} className="mt-8 rounded-xl border border-slate-200 px-5 py-3 text-sm font-black text-slate-700 hover:bg-slate-50">Uruchom demo ponownie</button>}
               </div>
             )}
 
