@@ -3,10 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
+const PDF_WORKER_URL = "/pdf.worker.min.mjs";
+
+pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
 
 export default function PdfPreview({ file, title }: { file: string; title: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -26,6 +25,10 @@ export default function PdfPreview({ file, title }: { file: string; title: strin
       .then((buffer) => setPdfData(new Uint8Array(buffer)))
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("[IdeaSign] Failed to fetch PDF preview", {
+          name: error instanceof Error ? error.name : "UnknownError",
+          message: error instanceof Error ? error.message : String(error),
+        });
         setLoadError("Nie udało się wyświetlić dokumentu. Zamknij podgląd i spróbuj ponownie.");
       });
     return () => controller.abort();
@@ -49,6 +52,14 @@ export default function PdfPreview({ file, title }: { file: string; title: strin
         file={documentFile}
         loading={<p className="py-16 text-center font-bold text-slate-500">Wczytujemy dokument PDF…</p>}
         error={<p className="mx-auto my-12 max-w-md rounded-xl border border-red-200 bg-white p-5 text-center font-bold text-red-700">Nie udało się wyświetlić dokumentu. Zamknij podgląd i spróbuj ponownie.</p>}
+        onLoadError={(error) => {
+          console.error("[IdeaSign] PDF.js failed to render preview", {
+            name: error.name,
+            message: error.message,
+            workerSrc: PDF_WORKER_URL,
+          });
+          setLoadError("Nie udało się wyświetlić dokumentu. Zamknij podgląd i spróbuj ponownie.");
+        }}
         onLoadSuccess={({ numPages }) => setPageCount(numPages)}
       >
         <div className="mx-auto flex w-fit flex-col gap-4" aria-label={`Podgląd dokumentu: ${title}`}>
