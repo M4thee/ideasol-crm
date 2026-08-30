@@ -75,6 +75,10 @@ type LocalIdeaSignLink = {
 type IdeaSignSendResponse = {
   error?: string;
   transactionId?: string;
+  authorizationRequired?: boolean;
+  phoneMasked?: string;
+  expiresAt?: string;
+  demoCode?: string;
   localTest?: boolean;
   deliveryMode?: "live" | "simulated";
   demoOtp?: string;
@@ -139,7 +143,15 @@ export default function SaleContractPage() {
   const [installationCount, setInstallationCount] = useState(1);
   const [hasIdeaSignSendAccess, setHasIdeaSignSendAccess] = useState(false);
   const [sendingIdeaSign, setSendingIdeaSign] = useState(false);
+  const [authorizingIdeaSign, setAuthorizingIdeaSign] = useState(false);
+  const [resendingOfferorOtp, setResendingOfferorOtp] = useState(false);
   const [ideaSignStatus, setIdeaSignStatus] = useState("");
+  const [offerorOtp, setOfferorOtp] = useState("");
+  const [offerorDemoCode, setOfferorDemoCode] = useState("");
+  const [offerorAuthorization, setOfferorAuthorization] = useState<{
+    transactionId: string;
+    phoneMasked: string;
+  } | null>(null);
   const [hasSecondClient, setHasSecondClient] = useState(false);
   const [localIdeaSignLinks, setLocalIdeaSignLinks] = useState<LocalIdeaSignLink[]>([]);
   const [localIdeaSignDeliveryMode, setLocalIdeaSignDeliveryMode] = useState<"live" | "simulated">("simulated");
@@ -599,7 +611,7 @@ export default function SaleContractPage() {
     if (!query) return;
 
     const confirmed = window.confirm(
-      "Zapisać tę wersję umowy, zamrozić dokumenty i wysłać klientowi jednorazowy link IdeaSign?"
+      "Zapisać i zamrozić tę wersję umowy? Otrzymasz kod SMS do jej autoryzacji. Linki do klientów zostaną wysłane dopiero po wpisaniu poprawnego kodu."
     );
     if (!confirmed) return;
 
@@ -633,6 +645,17 @@ export default function SaleContractPage() {
         }
       }
       if (!response.ok) throw new Error(result.error || "Nie udało się wysłać umowy do IdeaSign.");
+      if (result.authorizationRequired && result.transactionId) {
+        setOfferorAuthorization({
+          transactionId: result.transactionId,
+          phoneMasked: result.phoneMasked || "numer z profilu CRM",
+        });
+        setOfferorDemoCode(typeof result.demoCode === "string" ? result.demoCode : "");
+        setIdeaSignStatus(
+          `Dokumenty zostały zamrożone. Wpisz kod SMS wysłany na ${result.phoneMasked || "numer z profilu CRM"}.`
+        );
+        return;
+      }
       const localLinks = Array.isArray(result.signerLinks)
         ? result.signerLinks.filter(
             (link: unknown): link is LocalIdeaSignLink =>
@@ -659,6 +682,92 @@ export default function SaleContractPage() {
       );
     } finally {
       setSendingIdeaSign(false);
+    }
+  }
+
+  async function authorizeIdeaSignOffer() {
+    if (!offerorAuthorization || authorizingIdeaSign || !/^\d{6}$/.test(offerorOtp)) return;
+    setAuthorizingIdeaSign(true);
+    setIdeaSignStatus("Sprawdzamy kod handlowca i uruchamiamy wysyłkę do klientów…");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+      const response = await fetch(`/api/ideasign/sales/${saleId}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "authorize",
+          transactionId: offerorAuthorization.transactionId,
+          code: offerorOtp,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as IdeaSignSendResponse;
+      if (!response.ok) throw new Error(result.error || "Nie udało się potwierdzić kodu handlowca.");
+
+      const localLinks = Array.isArray(result.signerLinks)
+        ? result.signerLinks.filter(
+            (link: unknown): link is LocalIdeaSignLink =>
+              Boolean(
+                link &&
+                  typeof link === "object" &&
+                  typeof (link as LocalIdeaSignLink).signerOrder === "number" &&
+                  typeof (link as LocalIdeaSignLink).signerName === "string" &&
+                  typeof (link as LocalIdeaSignLink).url === "string"
+              )
+          )
+        : [];
+      setLocalIdeaSignLinks(localLinks);
+      setLocalIdeaSignDeliveryMode(result.deliveryMode === "live" ? "live" : "simulated");
+      setLocalIdeaSignDemoOtp(typeof result.demoOtp === "string" ? result.demoOtp : "");
+      setOfferorAuthorization(null);
+      setOfferorOtp("");
+      setOfferorDemoCode("");
+      setIdeaSignStatus(
+        result.localTest
+          ? `Autoryzacja handlowca poprawna. Tryb lokalny gotowy. ID transakcji: ${result.transactionId}`
+          : `Autoryzacja handlowca poprawna. Linki wysłano klientom. ID transakcji: ${result.transactionId}`
+      );
+    } catch (authorizationError) {
+      setIdeaSignStatus(
+        authorizationError instanceof Error
+          ? authorizationError.message
+          : "Nie udało się potwierdzić kodu handlowca."
+      );
+    } finally {
+      setAuthorizingIdeaSign(false);
+    }
+  }
+
+  async function resendOfferorOtp() {
+    if (!offerorAuthorization || resendingOfferorOtp) return;
+    setResendingOfferorOtp(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+      const response = await fetch(`/api/ideasign/sales/${saleId}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "resend-offeror-otp",
+          transactionId: offerorAuthorization.transactionId,
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as IdeaSignSendResponse;
+      if (!response.ok) throw new Error(result.error || "Nie udało się wysłać nowego kodu.");
+      setOfferorDemoCode(typeof result.demoCode === "string" ? result.demoCode : "");
+      setIdeaSignStatus(`Nowy kod wysłano na ${result.phoneMasked || offerorAuthorization.phoneMasked}.`);
+    } catch (resendError) {
+      setIdeaSignStatus(resendError instanceof Error ? resendError.message : "Nie udało się wysłać nowego kodu.");
+    } finally {
+      setResendingOfferorOtp(false);
     }
   }
 
@@ -1287,6 +1396,62 @@ export default function SaleContractPage() {
               {ideaSignStatus}
             </div>
           )}
+          {offerorAuthorization && (
+            <div className="w-full rounded-3xl border border-blue-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">
+                    Autoryzacja oferty przez handlowca
+                  </p>
+                  <h3 className="mt-2 text-xl font-black text-slate-950">
+                    Wpisz kod SMS, aby wysłać linki klientom
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    Kod został wysłany na {offerorAuthorization.phoneMasked}. Potwierdza dokładnie
+                    zamrożoną wersję dokumentów w transakcji {offerorAuthorization.transactionId}.
+                  </p>
+                  {offerorDemoCode && (
+                    <p className="mt-2 text-xs font-black text-amber-700">
+                      Tryb lokalny — kod testowy: {offerorDemoCode}
+                    </p>
+                  )}
+                </div>
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-blue-700">
+                  linki jeszcze niewysłane
+                </span>
+              </div>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <input
+                  value={offerorOtp}
+                  onChange={(event) => setOfferorOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void authorizeIdeaSignOffer();
+                  }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  aria-label="Kod SMS handlowca"
+                  placeholder="000000"
+                  className="h-12 w-44 rounded-xl border border-slate-300 px-4 text-center font-mono text-xl font-black tracking-[0.35em] text-slate-950 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => void authorizeIdeaSignOffer()}
+                  disabled={authorizingIdeaSign || !/^\d{6}$/.test(offerorOtp)}
+                  className="h-12 rounded-xl bg-blue-700 px-5 text-sm font-black text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {authorizingIdeaSign ? "Autoryzuję…" : "Autoryzuj i wyślij klientom"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void resendOfferorOtp()}
+                  disabled={resendingOfferorOtp}
+                  className="h-12 rounded-xl border border-slate-300 bg-white px-4 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-45"
+                >
+                  {resendingOfferorOtp ? "Wysyłam…" : "Wyślij nowy kod"}
+                </button>
+              </div>
+            </div>
+          )}
           {localIdeaSignLinks.length > 0 && (
             <div className="w-full rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1334,13 +1499,13 @@ export default function SaleContractPage() {
             <button
               type="button"
               onClick={() => void sendToIdeaSign()}
-              disabled={sendingIdeaSign || form.contractSigningLocation !== "distance"}
+              disabled={sendingIdeaSign || Boolean(offerorAuthorization) || form.contractSigningLocation !== "distance"}
               title={
                 form.contractSigningLocation === "distance"
                   ? "Prześlij zatwierdzoną wersję umowy do IdeaSign"
                   : "Najpierw wybierz zawarcie umowy na odległość"
               }
-              className="group inline-flex items-center gap-3 rounded-2xl border border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-3 text-left text-sm font-black text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-xl disabled:cursor-not-allowed disabled:grayscale disabled:opacity-45 disabled:hover:translate-y-0"
+              className="group inline-flex items-center gap-3 rounded-2xl border border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-800 px-5 py-3 text-left text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-md dark:shadow-black/30 dark:hover:shadow-black/40 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-45 disabled:hover:translate-y-0"
             >
               <span className="relative h-10 w-10 shrink-0">
                 <Image

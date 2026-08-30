@@ -53,7 +53,37 @@ export async function POST(request: Request, context: RouteContext) {
   if (!actor) return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
   const { saleId } = await context.params;
   try {
-    const body = (await request.json().catch(() => null)) as { contractData?: unknown } | null;
+    const body = (await request.json().catch(() => null)) as {
+      action?: unknown;
+      transactionId?: unknown;
+      code?: unknown;
+      contractData?: unknown;
+    } | null;
+    const action = String(body?.action || "prepare");
+    if (action === "authorize") {
+      const result = await crm.authorizeAndSendIdeaSignSession({
+        saleId,
+        actor,
+        request,
+        transactionId: String(body?.transactionId || ""),
+        code: String(body?.code || ""),
+      });
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (action === "resend-offeror-otp") {
+      const result = await crm.resendIdeaSignOfferorOtp({
+        saleId,
+        actor,
+        request,
+        transactionId: String(body?.transactionId || ""),
+      });
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (action !== "prepare") {
+      return NextResponse.json({ error: "Nieprawidłowa akcja IdeaSign." }, { status: 400 });
+    }
     const contractData = body?.contractData;
     if (!contractData || typeof contractData !== "object" || Array.isArray(contractData)) {
       return NextResponse.json({ error: "Brak danych zatwierdzonej wersji umowy." }, { status: 400 });

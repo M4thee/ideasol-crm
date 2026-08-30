@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { normalizePolishPhoneNumber, sendSmsApiMessage } from "@/lib/smsapi";
 import {
   getSaleDocumentGroupKey,
   normalizeDocumentText,
@@ -19,9 +20,14 @@ import {
   expireOverdueIdeaSignSessions,
 } from "./lifecycle";
 import {
+  IDEA_SIGN_OTP_TTL_SECONDS,
   IDEA_SIGN_LINK_TTL_SECONDS,
   canonicalJson,
+  createOtpCode,
   createSecretToken,
+  hashOtp,
+  phoneSuffix,
+  safeEqualHex,
   sha256,
 } from "./security";
 import { renderIdeaSignInvitationEmail } from "./email";
@@ -35,6 +41,7 @@ type IdeaSignCrmActor = {
   id: string;
   role: string;
   displayName: string;
+  phone: string;
   canPrepare: boolean;
   canSend: boolean;
 };
@@ -170,6 +177,115 @@ function mailTransport() {
   });
 }
 
+type OfferorOtpSession = {
+  id: string;
+  transaction_id: string;
+  manifest_sha256: string;
+};
+
+function getLocalIdeaSignOtp(request: Request) {
+  if (!isLocalDevelopmentRequest(request) || process.env.IDEASIGN_LOCAL_DELIVERY === "live") {
+    return null;
+  }
+  const configured = cleanText(process.env.IDEASIGN_DEMO_OTP || "", 6);
+  return /^\d{6}$/.test(configured) ? configured : "482913";
+}
+
+function maskIdeaSignPhone(value: string) {
+  const normalized = normalizePolishPhoneNumber(value);
+  return normalized ? `+48 ••• ••• ${normalized.slice(-3)}` : "numer z profilu CRM";
+}
+
+async function requestIdeaSignOfferorOtpChallenge(params: {
+  session: OfferorOtpSession;
+  actor: IdeaSignCrmActor;
+  request: Request;
+}) {
+  const normalizedPhone = normalizePolishPhoneNumber(params.actor.phone);
+  if (!normalizedPhone) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: "Uzupełnij prawidłowy numer telefonu handlowca w profilu CRM przed użyciem IdeaSign.",
+    };
+  }
+
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: recentChallenges, error: rateError } = await supabaseAdmin
+    .from("contract_signature_offeror_otp_challenges")
+    .select("id, sent_at")
+    .eq("signature_session_id", params.session.id)
+    .eq("actor_id", params.actor.id)
+    .gte("sent_at", tenMinutesAgo)
+    .order("sent_at", { ascending: false });
+  if (rateError) throw new Error(`Nie udało się sprawdzić limitu kodów handlowca: ${rateError.message}`);
+
+  const latestSentAt = recentChallenges?.[0]?.sent_at
+    ? new Date(recentChallenges[0].sent_at).getTime()
+    : 0;
+  const retryAfterSeconds = Math.max(0, 60 - Math.floor((Date.now() - latestSentAt) / 1000));
+  if ((recentChallenges || []).length >= 3 || retryAfterSeconds > 0) {
+    await appendIdeaSignAuditEvent({
+      signatureSessionId: params.session.id,
+      eventType: "offeror_otp_rate_limited",
+      request: params.request,
+      eventData: { actorId: params.actor.id, retryAfterSeconds },
+    });
+    return {
+      ok: false as const,
+      status: 429,
+      error: "Zbyt wiele próśb o kod. Spróbuj ponownie później.",
+      retryAfterSeconds: retryAfterSeconds || 600,
+    };
+  }
+
+  const challengeId = randomUUID();
+  const demoCode = getLocalIdeaSignOtp(params.request);
+  const code = demoCode || createOtpCode();
+  const expiresAt = new Date(Date.now() + IDEA_SIGN_OTP_TTL_SECONDS * 1000).toISOString();
+  const suffix = phoneSuffix(normalizedPhone);
+  const { error: insertError } = await supabaseAdmin
+    .from("contract_signature_offeror_otp_challenges")
+    .insert({
+      id: challengeId,
+      signature_session_id: params.session.id,
+      actor_id: params.actor.id,
+      code_hash: hashOtp(challengeId, code),
+      document_manifest_sha256: params.session.manifest_sha256,
+      expires_at: expiresAt,
+      recipient_phone_suffix: suffix,
+    });
+  if (insertError) throw new Error(`Nie udało się utworzyć kodu handlowca: ${insertError.message}`);
+
+  if (!demoCode) {
+    await sendSmsApiMessage({
+      to: normalizedPhone,
+      message: `IdeaSign: kod autoryzacji oferty ${code}. Kod wazny 5 minut. Nie udostepniaj go nikomu.`,
+    });
+  }
+
+  await appendIdeaSignAuditEvent({
+    signatureSessionId: params.session.id,
+    eventType: "offeror_otp_sent",
+    request: params.request,
+    eventData: {
+      actorId: params.actor.id,
+      challengeId,
+      manifestSha256: params.session.manifest_sha256,
+      phoneSuffix: suffix,
+    },
+  });
+
+  return {
+    ok: true as const,
+    transactionId: params.session.transaction_id,
+    authorizationRequired: true as const,
+    phoneMasked: maskIdeaSignPhone(normalizedPhone),
+    expiresAt,
+    ...(demoCode ? { demoCode } : {}),
+  };
+}
+
 export async function requireIdeaSignCrmActor(request: Request) {
   const token = bearerToken(request);
   if (!token) return null;
@@ -179,7 +295,7 @@ export async function requireIdeaSignCrmActor(request: Request) {
   const [{ data: profile }, { data: permission }] = await Promise.all([
     supabaseAdmin
       .from("profiles")
-      .select("id, role, display_name")
+      .select("id, role, display_name, phone")
       .eq("id", authData.user.id)
       .maybeSingle(),
     supabaseAdmin
@@ -196,6 +312,7 @@ export async function requireIdeaSignCrmActor(request: Request) {
     id: profile.id,
     role,
     displayName: cleanText(profile.display_name || authData.user.email || "IdeaSol", 160),
+    phone: formatIdeaSignPolishPhone(profile.phone) || cleanText(profile.phone, 32),
     canPrepare: permission?.ideasign_prepare === true || isPrivilegedRole,
     canSend: permission?.ideasign_send === true || isPrivilegedRole,
   } satisfies IdeaSignCrmActor;
@@ -370,6 +487,13 @@ export async function createAndSendIdeaSignSession(params: {
   if (!params.actor.canSend) {
     return { ok: false as const, status: 403, error: "Brak uprawnienia do wysyłki umów IdeaSign." };
   }
+  if (!normalizePolishPhoneNumber(params.actor.phone)) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: "Uzupełnij prawidłowy numer telefonu handlowca w profilu CRM przed użyciem IdeaSign.",
+    };
+  }
 
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
@@ -423,7 +547,7 @@ export async function createAndSendIdeaSignSession(params: {
   const [{ data: active }, clientResponse] = await Promise.all([
     supabaseAdmin
       .from("contract_signature_sessions")
-      .select("id, transaction_id, status")
+      .select("id, transaction_id, status, created_by, manifest_sha256, offeror_authorized_at")
       .eq("sale_id", sale.id)
       .not("status", "in", "(zawarta,wygasła,anulowana)")
       .order("created_at", { ascending: false })
@@ -438,6 +562,17 @@ export async function createAndSendIdeaSignSession(params: {
       : Promise.resolve({ data: null }),
   ]);
   if (active) {
+    if (
+      active.status === "przygotowana" &&
+      active.created_by === params.actor.id &&
+      !active.offeror_authorized_at
+    ) {
+      return requestIdeaSignOfferorOtpChallenge({
+        session: active as OfferorOtpSession,
+        actor: params.actor,
+        request: params.request,
+      });
+    }
     return {
       ok: false as const,
       status: 409,
@@ -512,12 +647,6 @@ export async function createAndSendIdeaSignSession(params: {
   const transaction = transactionId();
   const localTest = isLocalDevelopmentRequest(params.request);
   const localLiveDelivery = localTest && process.env.IDEASIGN_LOCAL_DELIVERY === "live";
-  const signerLinks = signerDrafts.map((signer) => ({
-    signerOrder: signer.order,
-    signerName: signer.name,
-    url: `${getIdeaSignBaseUrl()}/#token=${encodeURIComponent(signer.token)}`,
-  }));
-
   const { error: insertError } = await supabaseAdmin.from("contract_signature_sessions").insert({
     id: sessionId,
     transaction_id: transaction,
@@ -526,6 +655,7 @@ export async function createAndSendIdeaSignSession(params: {
     created_by: params.actor.id,
     offeror_name: params.actor.displayName,
     offeror_capacity: "Ekspert ds. energetyki odnawialnej",
+    offeror_phone: params.actor.phone,
     client_name: clientName,
     client_email: clientEmail,
     client_phone: clientPhone,
@@ -581,63 +711,17 @@ export async function createAndSendIdeaSignSession(params: {
       eventData: { transactionId: transaction, manifestSha256, documentCount: documents.length },
     });
 
-    if (!localTest || localLiveDelivery) {
-      const from = process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER;
-      await Promise.all(signerDrafts.map((signer, index) => mailTransport().sendMail({
-        from,
-        to: signer.email,
-        subject: `Umowa ${sale.contract_number || "IdeaSol"} — bezpieczne zawarcie w IdeaSign`,
-        text: `Dzień dobry,\n\nIdeaSol przesłało umowę do zapoznania i zawarcia. Twój bezpieczny, jednorazowy link jest ważny przez 7 dni:\n${signerLinks[index].url}\n\nKażda osoba podpisująca korzysta z własnego linku i kodów SMS. Nie przekazuj tego linku ani kodów drugiej osobie.\n\nIdeaSol Sp. z o.o.`,
-        html: renderIdeaSignInvitationEmail({
-          signerName: signer.name,
-          contractNumber: sale.contract_number || "IdeaSol",
-          signUrl: signerLinks[index].url,
-        }),
-      })));
-    }
-
-    const sentAt = new Date().toISOString();
-    const [{ error: sentStatusError }, { error: saleStatusError }] = await Promise.all([
-      supabaseAdmin
-        .from("contract_signature_sessions")
-        .update({ status: "wysłana", sent_at: sentAt, updated_at: sentAt })
-        .eq("id", sessionId),
-      supabaseAdmin
-        .from("sales")
-        .update({ status: SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE })
-        .eq("id", sale.id),
-    ]);
-    if (sentStatusError) {
-      throw new Error(`Nie udało się oznaczyć procesu jako wysłanego: ${sentStatusError.message}`);
-    }
-    if (saleStatusError) {
-      await supabaseAdmin
-        .from("contract_signature_sessions")
-        .update({ last_error: "SALE_STATUS_SYNC_FAILED", updated_at: sentAt })
-        .eq("id", sessionId);
-    }
-    await appendIdeaSignAuditEvent({
-      signatureSessionId: sessionId,
-      eventType: "offer_sent",
+    const challenge = await requestIdeaSignOfferorOtpChallenge({
+      session: { id: sessionId, transaction_id: transaction, manifest_sha256: manifestSha256 },
+      actor: params.actor,
       request: params.request,
-      eventData: {
-        transactionId: transaction,
-        signerCount: signerDrafts.length,
-        delivery: localTest && !localLiveDelivery ? "local_simulation" : "email",
-      },
     });
+    if (!challenge.ok) return challenge;
     return {
-      ok: true as const,
-      transactionId: transaction,
-      status: "wysłana" as const,
-      ...(localTest
-        ? {
-            localTest: true as const,
-            deliveryMode: localLiveDelivery ? "live" as const : "simulated" as const,
-            demoOtp: localLiveDelivery ? undefined : "482913",
-            signerLinks,
-          }
-        : {}),
+      ...challenge,
+      status: "przygotowana" as const,
+      localTest,
+      deliveryMode: localLiveDelivery ? "live" as const : "simulated" as const,
     };
   } catch (error) {
     await supabaseAdmin
@@ -646,6 +730,298 @@ export async function createAndSendIdeaSignSession(params: {
       .eq("id", sessionId);
     throw error;
   }
+}
+
+export async function resendIdeaSignOfferorOtp(params: {
+  saleId: string;
+  transactionId: string;
+  actor: IdeaSignCrmActor;
+  request: Request;
+}) {
+  if (!params.actor.canSend) {
+    return { ok: false as const, status: 403, error: "Brak uprawnienia do wysyłki umów IdeaSign." };
+  }
+  const { data: sale } = await supabaseAdmin
+    .from("sales")
+    .select("seller_id")
+    .eq("id", params.saleId)
+    .maybeSingle();
+  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id))) {
+    return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
+  }
+  const { data: session } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .select("id, transaction_id, manifest_sha256, status, created_by, offeror_authorized_at")
+    .eq("sale_id", params.saleId)
+    .eq("transaction_id", cleanText(params.transactionId, 120))
+    .maybeSingle();
+  if (!session || session.status !== "przygotowana" || session.offeror_authorized_at) {
+    return { ok: false as const, status: 409, error: "Ten proces nie oczekuje już na kod handlowca." };
+  }
+  if (session.created_by !== params.actor.id) {
+    return { ok: false as const, status: 403, error: "Kod może potwierdzić wyłącznie handlowiec, który przygotował ofertę." };
+  }
+  return requestIdeaSignOfferorOtpChallenge({
+    session: session as OfferorOtpSession,
+    actor: params.actor,
+    request: params.request,
+  });
+}
+
+export async function authorizeAndSendIdeaSignSession(params: {
+  saleId: string;
+  transactionId: string;
+  code: string;
+  actor: IdeaSignCrmActor;
+  request: Request;
+}) {
+  if (!params.actor.canSend) {
+    return { ok: false as const, status: 403, error: "Brak uprawnienia do wysyłki umów IdeaSign." };
+  }
+  if (!/^\d{6}$/.test(params.code)) {
+    return { ok: false as const, status: 400, error: "Kod powinien zawierać 6 cyfr." };
+  }
+
+  const { data: sale } = await supabaseAdmin
+    .from("sales")
+    .select("seller_id, contract_number")
+    .eq("id", params.saleId)
+    .maybeSingle();
+  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id))) {
+    return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
+  }
+
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .select("id, transaction_id, manifest_sha256, status, created_by, offeror_phone, offeror_authorized_at, offeror_authorization_challenge_id")
+    .eq("sale_id", params.saleId)
+    .eq("transaction_id", cleanText(params.transactionId, 120))
+    .maybeSingle();
+  if (sessionError || !session) {
+    return { ok: false as const, status: 404, error: "Nie znaleziono przygotowanej oferty IdeaSign." };
+  }
+  if (session.created_by !== params.actor.id) {
+    return { ok: false as const, status: 403, error: "Ofertę może autoryzować wyłącznie handlowiec, który ją przygotował." };
+  }
+  if (session.status !== "przygotowana") {
+    return { ok: false as const, status: 409, error: "Ta oferta została już wysłana albo proces jest zakończony." };
+  }
+
+  let authorizationChallengeId = session.offeror_authorization_challenge_id as string | null;
+  if (!session.offeror_authorized_at) {
+    const { data: challenge, error: challengeError } = await supabaseAdmin
+      .from("contract_signature_offeror_otp_challenges")
+      .select("id, code_hash, expires_at, consumed_at, attempt_count, max_attempts, document_manifest_sha256, recipient_phone_suffix")
+      .eq("signature_session_id", session.id)
+      .eq("actor_id", params.actor.id)
+      .is("consumed_at", null)
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (challengeError || !challenge || new Date(challenge.expires_at).getTime() <= Date.now()) {
+      return { ok: false as const, status: 410, error: "Kod wygasł. Wyślij nowy kod." };
+    }
+    if (challenge.attempt_count >= challenge.max_attempts) {
+      return { ok: false as const, status: 429, error: "Przekroczono limit prób. Wyślij nowy kod." };
+    }
+
+    const nextAttemptCount = challenge.attempt_count + 1;
+    const valid =
+      challenge.document_manifest_sha256 === session.manifest_sha256 &&
+      safeEqualHex(hashOtp(challenge.id, params.code), challenge.code_hash);
+    const authorizedAt = new Date().toISOString();
+    const { data: updatedChallenge } = await supabaseAdmin
+      .from("contract_signature_offeror_otp_challenges")
+      .update({
+        attempt_count: nextAttemptCount,
+        consumed_at: valid ? authorizedAt : null,
+      })
+      .eq("id", challenge.id)
+      .eq("attempt_count", challenge.attempt_count)
+      .is("consumed_at", null)
+      .select("id")
+      .maybeSingle();
+    if (!updatedChallenge) {
+      return { ok: false as const, status: 409, error: "Kod został już użyty. Wyślij nowy kod." };
+    }
+
+    await appendIdeaSignAuditEvent({
+      signatureSessionId: session.id,
+      eventType: valid ? "offeror_otp_verified" : "offeror_otp_rejected",
+      request: params.request,
+      eventData: {
+        actorId: params.actor.id,
+        challengeId: challenge.id,
+        manifestSha256: session.manifest_sha256,
+        attempt: nextAttemptCount,
+      },
+    });
+    if (!valid) {
+      return { ok: false as const, status: 401, error: "Nieprawidłowy kod SMS." };
+    }
+
+    const { data: authorizedSession, error: authorizeError } = await supabaseAdmin
+      .from("contract_signature_sessions")
+      .update({
+        offeror_authorized_at: authorizedAt,
+        offeror_authorization_challenge_id: challenge.id,
+        updated_at: authorizedAt,
+      })
+      .eq("id", session.id)
+      .eq("status", "przygotowana")
+      .is("offeror_authorized_at", null)
+      .select("id")
+      .maybeSingle();
+    if (authorizeError) throw new Error(`Nie udało się zapisać autoryzacji handlowca: ${authorizeError.message}`);
+    if (!authorizedSession) {
+      return { ok: false as const, status: 409, error: "Autoryzacja została już przetworzona w innej sesji." };
+    }
+    authorizationChallengeId = challenge.id;
+
+    await appendIdeaSignAuditEvent({
+      signatureSessionId: session.id,
+      eventType: "offeror_authorized",
+      request: params.request,
+      eventData: {
+        actorId: params.actor.id,
+        challengeId: challenge.id,
+        manifestSha256: session.manifest_sha256,
+        phoneSuffix: challenge.recipient_phone_suffix,
+      },
+    });
+  }
+
+  const { data: confirmedAuthorization, error: confirmedAuthorizationError } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .select("id, offeror_authorized_at, offeror_authorization_challenge_id")
+    .eq("id", session.id)
+    .eq("created_by", params.actor.id)
+    .not("offeror_authorized_at", "is", null)
+    .maybeSingle();
+  if (confirmedAuthorizationError || !confirmedAuthorization?.offeror_authorized_at) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Brak potwierdzonej autoryzacji SMS handlowca. Linki klientów nie zostały wysłane.",
+    };
+  }
+  authorizationChallengeId = confirmedAuthorization.offeror_authorization_challenge_id;
+
+  const { data: signers, error: signersError } = await supabaseAdmin
+    .from("contract_signature_signers")
+    .select("id, signer_order, name, email")
+    .eq("signature_session_id", session.id)
+    .order("signer_order");
+  if (signersError || !signers?.length) {
+    throw new Error("Nie udało się odczytać osób podpisujących.");
+  }
+
+  const linkExpiresAt = new Date(Date.now() + IDEA_SIGN_LINK_TTL_SECONDS * 1000).toISOString();
+  const signerLinks = signers.map((signer) => {
+    const token = createSecretToken();
+    return {
+      signerId: signer.id,
+      signerOrder: signer.signer_order,
+      signerName: signer.name,
+      signerEmail: signer.email,
+      tokenHash: sha256(token),
+      url: `${getIdeaSignBaseUrl()}/#token=${encodeURIComponent(token)}`,
+    };
+  });
+
+  for (const link of signerLinks) {
+    const { error: linkError } = await supabaseAdmin
+      .from("contract_signature_signers")
+      .update({ link_token_hash: link.tokenHash, link_expires_at: linkExpiresAt, updated_at: new Date().toISOString() })
+      .eq("id", link.signerId)
+      .eq("signature_session_id", session.id);
+    if (linkError) throw new Error(`Nie udało się przygotować linku klienta: ${linkError.message}`);
+  }
+  const { data: activatedSession, error: sessionLinkError } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .update({
+      link_token_hash: signerLinks[0].tokenHash,
+      link_expires_at: linkExpiresAt,
+      expires_at: linkExpiresAt,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", session.id)
+    .eq("status", "przygotowana")
+    .not("offeror_authorized_at", "is", null)
+    .select("id")
+    .maybeSingle();
+  if (sessionLinkError) throw new Error(`Nie udało się aktywować linków klienta: ${sessionLinkError.message}`);
+  if (!activatedSession) {
+    return { ok: false as const, status: 409, error: "Linki nie zostały aktywowane bez autoryzacji handlowca." };
+  }
+
+  const localTest = isLocalDevelopmentRequest(params.request);
+  const localLiveDelivery = localTest && process.env.IDEASIGN_LOCAL_DELIVERY === "live";
+  if (!localTest || localLiveDelivery) {
+    const from = process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER;
+    await Promise.all(signerLinks.map((signer) => mailTransport().sendMail({
+      from,
+      to: signer.signerEmail,
+      subject: `Umowa ${sale.contract_number || "IdeaSol"} — bezpieczne zawarcie w IdeaSign`,
+      text: `Dzień dobry,\n\nIdeaSol przesłało umowę do zapoznania i zawarcia. Twój bezpieczny, jednorazowy link jest ważny przez 7 dni:\n${signer.url}\n\nKażda osoba podpisująca korzysta z własnego linku i kodów SMS. Nie przekazuj tego linku ani kodów drugiej osobie.\n\nIdeaSol Sp. z o.o.`,
+      html: renderIdeaSignInvitationEmail({
+        signerName: signer.signerName,
+        contractNumber: sale.contract_number || "IdeaSol",
+        signUrl: signer.url,
+      }),
+    })));
+  }
+
+  const sentAt = new Date().toISOString();
+  const [{ data: sentSession, error: sentStatusError }, { error: saleStatusError }] = await Promise.all([
+    supabaseAdmin
+      .from("contract_signature_sessions")
+      .update({ status: "wysłana", sent_at: sentAt, updated_at: sentAt })
+      .eq("id", session.id)
+      .eq("status", "przygotowana")
+      .not("offeror_authorized_at", "is", null)
+      .select("id")
+      .maybeSingle(),
+    supabaseAdmin
+      .from("sales")
+      .update({ status: SALE_STATUS_AWAITING_IDEASIGN_SIGNATURE })
+      .eq("id", params.saleId),
+  ]);
+  if (sentStatusError) throw new Error(`Nie udało się oznaczyć procesu jako wysłanego: ${sentStatusError.message}`);
+  if (!sentSession) throw new Error("Nie wysłano oferty bez potwierdzonej autoryzacji handlowca.");
+  if (saleStatusError) {
+    await supabaseAdmin
+      .from("contract_signature_sessions")
+      .update({ last_error: "SALE_STATUS_SYNC_FAILED", updated_at: sentAt })
+      .eq("id", session.id);
+  }
+
+  await appendIdeaSignAuditEvent({
+    signatureSessionId: session.id,
+    eventType: "offer_sent",
+    request: params.request,
+    eventData: {
+      transactionId: session.transaction_id,
+      offerorChallengeId: authorizationChallengeId,
+      signerCount: signerLinks.length,
+      delivery: localTest && !localLiveDelivery ? "local_simulation" : "email",
+    },
+  });
+
+  return {
+    ok: true as const,
+    transactionId: session.transaction_id,
+    status: "wysłana" as const,
+    ...(localTest
+      ? {
+          localTest: true as const,
+          deliveryMode: localLiveDelivery ? "live" as const : "simulated" as const,
+          demoOtp: localLiveDelivery ? undefined : "482913",
+          signerLinks: signerLinks.map(({ signerOrder, signerName, url }) => ({ signerOrder, signerName, url })),
+        }
+      : {}),
+  };
 }
 
 export async function getIdeaSignSaleStatus(saleId: string, actor: IdeaSignCrmActor) {

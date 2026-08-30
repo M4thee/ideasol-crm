@@ -119,6 +119,7 @@ function formatDate(value: string) {
   const timePart = new Intl.DateTimeFormat("pl-PL", {
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false,
     timeZone: "Europe/Warsaw",
   }).format(date);
@@ -469,7 +470,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                   </p>
 
                   {step === "link" ? (
-                    <button disabled={busy} onClick={() => void requestOtp("entry")} className="mt-8 w-full rounded-2xl bg-gradient-to-r from-sky-600 to-blue-700 px-5 py-4 text-base font-black text-white shadow-lg shadow-sky-200 transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-50 sm:w-auto sm:min-w-64">
+                    <button disabled={busy} onClick={() => void requestOtp("entry")} className="mt-8 w-full rounded-2xl border border-blue-800/20 bg-gradient-to-r from-sky-600 to-blue-700 px-5 py-4 text-base font-black text-white transition hover:-translate-y-0.5 hover:brightness-105 disabled:opacity-50 sm:w-auto sm:min-w-64">
                       {busy ? "Wysyłamy kod…" : "Wyślij kod SMS"}
                     </button>
                   ) : (
@@ -529,11 +530,14 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                   })}
 
                   {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p>}
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                    <p className="text-sm font-black text-amber-950">Skutek kliknięcia</p>
-                    <p className="mt-1 text-sm leading-6 text-amber-900">Po kliknięciu poprosimy o drugi kod SMS. Jego poprawne wpisanie oznacza przyjęcie oferty IdeaSol i zawarcie umowy z obowiązkiem zapłaty.</p>
+                  <div className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-xs font-black text-blue-700">SMS</div>
+                    <div>
+                      <p className="text-sm font-black text-slate-950">Potwierdzenie podpisu</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">Po kliknięciu wyślemy na Twój numer drugi kod SMS przypisany do dokładnie tej wersji dokumentów. Wpisanie kodu zapisze Twój podpis elektroniczny i potwierdzi zgodę na zawarcie umowy z obowiązkiem zapłaty.</p>
+                    </div>
                   </div>
-                  <button disabled={!allAccepted || busy} onClick={() => void acceptAndSign()} className="w-full rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-5 py-4 text-base font-black text-white shadow-lg shadow-amber-200 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-40">
+                  <button disabled={!allAccepted || busy} onClick={() => void acceptAndSign()} className="w-full rounded-2xl border border-orange-600/20 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 px-5 py-4 text-base font-black text-white transition hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-40">
                     {busy ? "Przygotowujemy potwierdzenie…" : "Podpisuję umowę z obowiązkiem zapłaty"}
                   </button>
                 </div>
@@ -561,15 +565,25 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
                 <SuccessVisual animate={successAnimationConfirmed} />
                 <p className="mt-6 text-xs font-black uppercase tracking-[0.16em] text-emerald-600">{contractConcluded ? "Umowa zawarta" : "Twój podpis zapisany"}</p>
                 <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Dziękujemy, {session.clientDisplayName.split(" ")[0]}</h1>
-                <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600">{contractConcluded ? <>Umowa została zawarta drogą elektroniczną{completedAt ? ` ${formatDate(completedAt)}` : ""}. Jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</> : <>Twój podpis został zapisany{completedAt ? ` ${formatDate(completedAt)}` : ""}. Umowa zostanie zawarta, gdy podpisze ją druga osoba; wtedy jeden scalony PDF zostanie wysłany na adres {session.emailMasked}.</>}</p>
+                <p className="mx-auto mt-4 max-w-xl leading-7 text-slate-600">{contractConcluded ? <>Umowa została zawarta drogą elektroniczną{completedAt ? ` ${formatDate(completedAt)}` : ""}. Obustronnie podpisana umowa zostanie wysłana na adres {session.emailMasked}.</> : <>Twój podpis został zapisany{completedAt ? ` ${formatDate(completedAt)}` : ""}. Umowa zostanie zawarta, gdy podpisze ją druga osoba; wtedy obustronnie podpisana umowa zostanie wysłana na adres {session.emailMasked}.</>}</p>
                 {deliveryPassword && (
-                  <div className="mx-auto mt-7 max-w-xl rounded-2xl border border-amber-200 bg-amber-50 p-5 text-left">
-                    <p className="font-black text-amber-950">Zapisz hasło do PDF teraz</p>
-                    <p className="mt-1 text-sm leading-6 text-amber-900">Dokument jest zabezpieczony hasłem. Hasło nie jest wysyłane e-mailem i nie będzie można go później wyświetlić.</p>
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                      <div className="flex-1 rounded-xl border border-amber-200 bg-white px-4 py-3 font-mono text-lg font-black tracking-wider text-slate-950">{passwordVisible ? deliveryPassword : "••••-••••-••••-••••"}</div>
-                      <button type="button" onClick={() => setPasswordVisible((value) => !value)} className="rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-black text-amber-900">{passwordVisible ? "Ukryj hasło" : "Pokaż hasło"}</button>
-                      <button type="button" onClick={downloadPassword} className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Pobierz hasło</button>
+                  <div className="mx-auto mt-7 max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-sky-50/70 p-5 text-left shadow-sm sm:p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="1.8">
+                          <rect x="5" y="10" width="14" height="10" rx="3" />
+                          <path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="font-black text-slate-950">Zapisz hasło do dokumentu</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">Ze względów bezpieczeństwa hasło nie trafi do wiadomości e-mail i nie będzie można go później ponownie wyświetlić.</p>
+                      </div>
+                    </div>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                      <div className="flex min-h-12 items-center rounded-2xl border border-slate-200 bg-white px-4 font-mono text-base font-black tracking-[0.16em] text-slate-950 shadow-inner shadow-slate-100">{passwordVisible ? deliveryPassword : "••••-••••-••••-••••"}</div>
+                      <button type="button" onClick={() => setPasswordVisible((value) => !value)} className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">{passwordVisible ? "Ukryj" : "Pokaż"}</button>
+                      <button type="button" onClick={downloadPassword} className="rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800">Pobierz hasło</button>
                     </div>
                   </div>
                 )}

@@ -1,11 +1,8 @@
 import "server-only";
 
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import nodemailer from "nodemailer";
 import { encryptPDF } from "@pdfsmaller/pdf-encrypt";
-import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument } from "pdf-lib";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendTeamsSaleChannelNotification } from "@/lib/microsoftTeams";
 import { DOCUMENT_GROUPS, type DocumentGroupKey } from "@/lib/saleDocumentGrouping";
@@ -18,6 +15,13 @@ import {
   SALE_STATUS_IDEASIGN_PARTIALLY_SIGNED,
 } from "./lifecycle";
 import { renderIdeaSignCompletedEmail } from "./email";
+import {
+  applyIdeaSignVisualSignatures,
+  appendIdeaSignCertificatePage,
+  loadIdeaSignCertificateAssets,
+  type IdeaSignCertificateSigner,
+  type IdeaSignCertificateParams,
+} from "./pdf-certificate";
 
 type FrozenDocumentRow = {
   id: string; kind: string; title: string; file_name: string; storage_path: string;
@@ -26,13 +30,15 @@ type FrozenDocumentRow = {
 };
 
 type SignerRow = {
-  id: string; signer_order: number; name: string; email: string;
+  id: string; signer_order: number; name: string; email: string; phone: string;
   status: string; signed_at: string | null;
 };
 
 type SignatureRow = {
   id: string; transaction_id: string; sale_id: string; client_id: string | null;
   created_by: string; offeror_name: string; offeror_capacity: string;
+  offeror_phone: string | null; offeror_authorized_at: string | null;
+  offered_at: string;
   manifest_sha256: string; status: string; concluded_at: string | null;
   final_pdf_storage_path: string | null; final_pdf_sha256: string | null;
 };
@@ -55,19 +61,6 @@ function formatWarsawDate(value: string) {
   return new Intl.DateTimeFormat("pl-PL", { dateStyle: "long", timeStyle: "medium", timeZone: "Europe/Warsaw" }).format(new Date(value));
 }
 
-function splitText(text: string, maxChars = 92) {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > maxChars && current) { lines.push(current); current = word; }
-    else current = candidate;
-  }
-  if (current) lines.push(current);
-  return lines;
-}
-
 async function downloadFrozenDocument(document: FrozenDocumentRow) {
   const { data, error } = await supabaseAdmin.storage.from("ideasign-documents").download(document.storage_path);
   if (error || !data) throw new Error(`Nie udało się pobrać dokumentu ${document.id}.`);
@@ -78,87 +71,95 @@ async function downloadFrozenDocument(document: FrozenDocumentRow) {
   return bytes;
 }
 
-async function embedCertificateFont(pdf: PDFDocument) {
-  pdf.registerFontkit(fontkit);
-  return pdf.embedFont(await readFile(path.join(process.cwd(), "public", "fonts", "NotoSans-Regular.ttf")), { subset: true });
-}
-
-function appendCertificatePage(params: {
-  pdf: PDFDocument; font: PDFFont; heading: string; documentTitle: string;
-  concludedAt: string; transactionId: string; contractNumber: string;
-  clientAddress: string; offerorName: string; offerorCapacity: string;
-  manifestSha256: string; documentSha256?: string; signers: SignerRow[];
-}) {
-  const page = params.pdf.addPage([595.28, 841.89]);
-  let y = page.getHeight() - 58;
-  const draw = (text: string, size = 10, color = rgb(0.15, 0.2, 0.28), gap = 16) => {
-    for (const line of splitText(text, size >= 16 ? 60 : 94)) {
-      page.drawText(line, { x: 52, y, size, font: params.font, color });
-      y -= gap;
-    }
-  };
-  draw(params.heading, 18, rgb(0.02, 0.39, 0.65), 25);
-  draw(params.documentTitle, 10, rgb(0.3, 0.36, 0.44), 19);
-  y -= 8;
-  draw(`Data i godzina zawarcia: ${formatWarsawDate(params.concludedAt)} (Europe/Warsaw)`);
-  draw(`ID transakcji: ${params.transactionId}`);
-  draw(`Numer umowy: ${params.contractNumber}`);
-  y -= 8;
-  draw("STRONY I OŚWIADCZENIA", 12, rgb(0.05, 0.12, 0.2), 21);
-  draw("IdeaSol Sp. z o.o. — oferent");
-  draw(`Osoba składająca ofertę: ${params.offerorName}`);
-  draw(`Rola w procesie: ${params.offerorCapacity}`);
-  y -= 4;
-  params.signers.forEach((signer) => {
-    draw(`${signer.name} — osoba podpisująca ${signer.signer_order}; potwierdzenie SMS: ${formatWarsawDate(signer.signed_at || params.concludedAt)}`);
-  });
-  if (params.clientAddress) draw(`Adres klientów: ${params.clientAddress}`);
-  y -= 8;
-  draw("Klienci otworzyli i zaakceptowali osobno każdy wymagany dokument, a następnie potwierdzili przyjęcie oferty własnymi kodami SMS przypisanymi do niezmiennego manifestu. Z chwilą potwierdzenia przez ostatnią wymaganą osobę umowa została zawarta z obowiązkiem zapłaty.");
-  y -= 8;
-  draw("INTEGRALNOŚĆ", 12, rgb(0.05, 0.12, 0.2), 21);
-  if (params.documentSha256) draw(`SHA-256 źródłowej wersji dokumentu: ${params.documentSha256}`, 8, rgb(0.3, 0.36, 0.44), 13);
-  draw(`SHA-256 manifestu pakietu: ${params.manifestSha256}`, 8, rgb(0.3, 0.36, 0.44), 13);
-  y -= 10;
-  draw("Dokument wygenerowany automatycznie przez IdeaSign. Ślad audytowy obejmuje znaczniki czasu, niezależne sesje podpisujących, adresy IP, metadane przeglądarek, otwarcia dokumentów i łańcuch hashy zdarzeń.", 8, rgb(0.42, 0.47, 0.54), 13);
-}
-
 async function buildSignedDocument(params: {
   bytes: Buffer; document: FrozenDocumentRow; concludedAt: string; transactionId: string;
-  contractNumber: string; clientAddress: string; offerorName: string;
-  offerorCapacity: string; manifestSha256: string; signers: SignerRow[];
+  contractNumber: string; clientAddress: string; contractPlace: string; offerorName: string;
+  offerorCapacity: string; offerorPhone: string | null; offerorAuthorizedAt: string | null;
+  offeredAt: string; manifestSha256: string; signers: SignerRow[];
 }) {
   const pdf = await PDFDocument.load(params.bytes);
-  const font = await embedCertificateFont(pdf);
-  appendCertificatePage({
-    pdf, font,
+  const assets = await loadIdeaSignCertificateAssets(pdf);
+  const certificate = toCertificateParams(params, params.document.title, params.document.sha256);
+  applyIdeaSignVisualSignatures(pdf, assets, {
+    kind: params.document.kind,
+    title: params.document.title,
+    fileName: params.document.file_name,
+  }, certificate);
+  appendIdeaSignCertificatePage(pdf, assets, {
+    ...certificate,
     heading: params.document.kind === "agreement" ? "UMOWA ZAWARTA DROGĄ ELEKTRONICZNĄ" : "DOKUMENT ZAAKCEPTOWANY ELEKTRONICZNIE",
-    documentTitle: params.document.title, concludedAt: params.concludedAt,
-    transactionId: params.transactionId, contractNumber: params.contractNumber,
-    clientAddress: params.clientAddress, offerorName: params.offerorName,
-    offerorCapacity: params.offerorCapacity, manifestSha256: params.manifestSha256,
-    documentSha256: params.document.sha256, signers: params.signers,
   });
   return Buffer.from(await pdf.save());
 }
 
 async function buildMergedPackage(params: {
   documents: Array<{ document: FrozenDocumentRow; bytes: Buffer }>;
-  concludedAt: string; transactionId: string; contractNumber: string; clientAddress: string;
-  offerorName: string; offerorCapacity: string; manifestSha256: string; signers: SignerRow[];
+  concludedAt: string; transactionId: string; contractNumber: string; clientAddress: string; contractPlace: string;
+  offerorName: string; offerorCapacity: string; offerorPhone: string | null;
+  offerorAuthorizedAt: string | null; offeredAt: string;
+  manifestSha256: string; signers: SignerRow[];
 }) {
   const pdf = await PDFDocument.create();
   for (const item of params.documents) {
     const source = await PDFDocument.load(item.bytes);
+    const sourceAssets = await loadIdeaSignCertificateAssets(source);
+    applyIdeaSignVisualSignatures(source, sourceAssets, {
+      kind: item.document.kind,
+      title: item.document.title,
+      fileName: item.document.file_name,
+    }, toCertificateParams(params, item.document.title, item.document.sha256));
     const pages = await pdf.copyPages(source, source.getPageIndices());
     pages.forEach((page) => pdf.addPage(page));
   }
-  const font = await embedCertificateFont(pdf);
-  appendCertificatePage({
-    ...params, pdf, font, heading: "UMOWA ZAWARTA DROGĄ ELEKTRONICZNĄ",
+  const assets = await loadIdeaSignCertificateAssets(pdf);
+  appendIdeaSignCertificatePage(pdf, assets, {
+    ...toCertificateParams(
+      params,
+      "Scalony pakiet: umowa i wszystkie wymagane załączniki"
+    ),
+    heading: "UMOWA ZAWARTA DROGĄ ELEKTRONICZNĄ",
     documentTitle: "Scalony pakiet: umowa i wszystkie wymagane załączniki",
   });
   return Buffer.from(await pdf.save());
+}
+
+function toCertificateSigner(signer: SignerRow): IdeaSignCertificateSigner {
+  return {
+    signerOrder: signer.signer_order,
+    name: signer.name,
+    phone: signer.phone,
+    signedAt: signer.signed_at || new Date(0).toISOString(),
+  };
+}
+
+function toCertificateParams(
+  params: {
+    concludedAt: string; transactionId: string; contractNumber: string; clientAddress: string;
+    contractPlace: string;
+    offerorName: string; offerorCapacity: string; offerorPhone: string | null;
+    offerorAuthorizedAt: string | null; offeredAt: string; manifestSha256: string;
+    signers: SignerRow[];
+  },
+  documentTitle: string,
+  documentSha256?: string
+): IdeaSignCertificateParams {
+  return {
+    heading: "UMOWA ZAWARTA DROGĄ ELEKTRONICZNĄ",
+    documentTitle,
+    concludedAt: params.concludedAt,
+    offeredAt: params.offeredAt,
+    transactionId: params.transactionId,
+    contractNumber: params.contractNumber,
+    clientAddress: params.clientAddress,
+    contractPlace: params.contractPlace,
+    offerorName: params.offerorName,
+    offerorCapacity: params.offerorCapacity,
+    offerorPhone: params.offerorPhone,
+    offerorAuthorizedAt: params.offerorAuthorizedAt,
+    manifestSha256: params.manifestSha256,
+    documentSha256,
+    signers: params.signers.map(toCertificateSigner),
+  };
 }
 
 export async function finalizeIdeaSignContractV2(params: { context: IdeaSignAccessContext; code: string; request: Request }) {
@@ -166,7 +167,7 @@ export async function finalizeIdeaSignContractV2(params: { context: IdeaSignAcce
   if (!verified.ok) return verified;
 
   const [{ data: signature }, { data: documents, error: documentsError }, { data: acceptances }] = await Promise.all([
-    supabaseAdmin.from("contract_signature_sessions").select("id, transaction_id, sale_id, client_id, created_by, offeror_name, offeror_capacity, manifest_sha256, status").eq("id", params.context.signature.id).maybeSingle(),
+    supabaseAdmin.from("contract_signature_sessions").select("id, transaction_id, sale_id, client_id, created_by, offeror_name, offeror_capacity, offeror_phone, offeror_authorized_at, offered_at, manifest_sha256, status").eq("id", params.context.signature.id).maybeSingle(),
     supabaseAdmin.from("contract_signature_documents").select("id, kind, title, file_name, storage_path, crm_container_key, mime_type, byte_size, sha256, acceptance_required, sort_order").eq("signature_session_id", params.context.signature.id).order("sort_order", { ascending: true }),
     supabaseAdmin.from("contract_signature_acceptances").select("document_id, document_sha256").eq("signature_session_id", params.context.signature.id).eq("signer_id", params.context.signer.id),
   ]);
@@ -236,7 +237,7 @@ export async function finalizeIdeaSignContractV2(params: { context: IdeaSignAcce
 
   const signedAt = claim.signedAt || requestedSignedAt;
 
-  const { data: signersData } = await supabaseAdmin.from("contract_signature_signers").select("id, signer_order, name, email, status, signed_at").eq("signature_session_id", signature.id).order("signer_order");
+  const { data: signersData } = await supabaseAdmin.from("contract_signature_signers").select("id, signer_order, name, email, phone, status, signed_at").eq("signature_session_id", signature.id).order("signer_order");
   const signers = ((signersData || []) as SignerRow[]).map((signer) =>
     signer.id === params.context.signer.id
       ? { ...signer, status: "podpisany", signed_at: signedAt }
@@ -253,12 +254,15 @@ export async function finalizeIdeaSignContractV2(params: { context: IdeaSignAcce
     : { data: null };
   const customer = (sale?.customer_data || {}) as Record<string, unknown>;
   const clientAddress = String(customer.contract_address || client?.address || [client?.street, client?.building_number, client?.postal_code, client?.city].filter(Boolean).join(" ")).trim();
+  const contractPlace = String(customer.contract_place || client?.city || "").trim();
   const contractNumber = String(sale?.contract_number || sale?.sale_public_id || sale?.public_id || signature.transaction_id);
   const rawDocuments = await Promise.all(frozenDocuments.map(async (document) => ({ document, bytes: await downloadFrozenDocument(document) })));
   const mergedBytes = await buildMergedPackage({
     documents: rawDocuments, concludedAt: signedAt, transactionId: signature.transaction_id,
-    contractNumber, clientAddress, offerorName: signature.offeror_name,
-    offerorCapacity: signature.offeror_capacity, manifestSha256: signature.manifest_sha256, signers,
+    contractNumber, clientAddress, contractPlace, offerorName: signature.offeror_name,
+    offerorCapacity: signature.offeror_capacity, offerorPhone: signature.offeror_phone,
+    offerorAuthorizedAt: signature.offeror_authorized_at, offeredAt: signature.offered_at,
+    manifestSha256: signature.manifest_sha256, signers,
   });
   const finalHash = sha256(mergedBytes);
   const finalPath = `${signature.id}/final/umowa-zalaczniki-${signature.transaction_id}.pdf`;
@@ -311,7 +315,7 @@ function escapeHtml(value: string) {
 async function loadDeliveryContext(signatureSessionId: string) {
   const { data: signature, error: signatureError } = await supabaseAdmin
     .from("contract_signature_sessions")
-    .select("id, transaction_id, sale_id, client_id, created_by, offeror_name, offeror_capacity, manifest_sha256, status, concluded_at, final_pdf_storage_path, final_pdf_sha256")
+    .select("id, transaction_id, sale_id, client_id, created_by, offeror_name, offeror_capacity, offeror_phone, offeror_authorized_at, offered_at, manifest_sha256, status, concluded_at, final_pdf_storage_path, final_pdf_sha256")
     .eq("id", signatureSessionId)
     .maybeSingle();
   if (signatureError || !signature || signature.status !== "zawarta" || !signature.concluded_at) {
@@ -321,7 +325,7 @@ async function loadDeliveryContext(signatureSessionId: string) {
   const typedSignature = signature as SignatureRow;
   const [{ data: documents, error: documentsError }, { data: signers, error: signersError }, { data: sale, error: saleError }] = await Promise.all([
     supabaseAdmin.from("contract_signature_documents").select("id, kind, title, file_name, storage_path, crm_container_key, mime_type, byte_size, sha256, acceptance_required, sort_order").eq("signature_session_id", signatureSessionId).order("sort_order"),
-    supabaseAdmin.from("contract_signature_signers").select("id, signer_order, name, email, status, signed_at").eq("signature_session_id", signatureSessionId).order("signer_order"),
+    supabaseAdmin.from("contract_signature_signers").select("id, signer_order, name, email, phone, status, signed_at").eq("signature_session_id", signatureSessionId).order("signer_order"),
     supabaseAdmin.from("sales").select("contract_number, public_id, sale_public_id, customer_data").eq("id", typedSignature.sale_id).maybeSingle(),
   ]);
   if (documentsError || signersError || saleError || !documents?.length || !signers?.length) {
@@ -332,6 +336,7 @@ async function loadDeliveryContext(signatureSessionId: string) {
     : { data: null };
   const customer = (sale?.customer_data || {}) as Record<string, unknown>;
   const clientAddress = String(customer.contract_address || client?.address || [client?.street, client?.building_number, client?.postal_code, client?.city].filter(Boolean).join(" ")).trim();
+  const contractPlace = String(customer.contract_place || client?.city || "").trim();
   const contractNumber = String(sale?.contract_number || sale?.sale_public_id || sale?.public_id || typedSignature.transaction_id);
 
   return {
@@ -340,6 +345,7 @@ async function loadDeliveryContext(signatureSessionId: string) {
     signers: signers as SignerRow[],
     contractNumber,
     clientAddress,
+    contractPlace,
   };
 }
 
@@ -358,7 +364,7 @@ async function downloadFinalPackage(signature: SignatureRow) {
 
 async function deliverIdeaSignJob(job: DeliveryJobRow) {
   const context = await loadDeliveryContext(job.signature_session_id);
-  const { signature, documents, signers, contractNumber, clientAddress } = context;
+  const { signature, documents, signers, contractNumber, clientAddress, contractPlace } = context;
 
   if (job.channel === "sale_status") {
     const concludedSaleStatus = getConcludedIdeaSignSaleStatus(signers.length);
@@ -381,8 +387,12 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
         transactionId: signature.transaction_id,
         contractNumber,
         clientAddress,
+        contractPlace,
         offerorName: signature.offeror_name,
         offerorCapacity: signature.offeror_capacity,
+        offerorPhone: signature.offeror_phone,
+        offerorAuthorizedAt: signature.offeror_authorized_at,
+        offeredAt: signature.offered_at,
         manifestSha256: signature.manifest_sha256,
         signers,
       });
@@ -435,7 +445,7 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
       from: process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
       to: signer.email,
       subject: `Umowa ${contractNumber} została zawarta — IdeaSign`,
-      text: `Dzień dobry,\n\nUmowa ${contractNumber} została zawarta drogą elektroniczną ${formatWarsawDate(signature.concluded_at!)}.\nID transakcji: ${signature.transaction_id}\nSHA-256 scalonego PDF: ${signature.final_pdf_sha256}\n\nW załączeniu znajduje się jeden scalony, zahasłowany PDF. Hasło zostało pokazane po złożeniu Twojego podpisu w IdeaSign i nie jest wysyłane e-mailem.\n\nIdeaSol Sp. z o.o.`,
+      text: `Dzień dobry,\n\nUmowa ${contractNumber} została zawarta drogą elektroniczną ${formatWarsawDate(signature.concluded_at!)}.\nID transakcji: ${signature.transaction_id}\nSHA-256 scalonego PDF: ${signature.final_pdf_sha256}\n\nW załączeniu znajduje się obustronnie podpisana umowa wraz ze wszystkimi zaakceptowanymi załącznikami. Dokument PDF jest zabezpieczony hasłem, które zostało pokazane po złożeniu Twojego podpisu w IdeaSign i nie jest wysyłane e-mailem.\n\nIdeaSol Sp. z o.o.`,
       html: renderIdeaSignCompletedEmail({
         signerName: signer.name,
         contractNumber,
