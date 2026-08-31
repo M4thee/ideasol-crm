@@ -439,7 +439,9 @@ export default function SaleContractPage() {
     });
   }
 
-  async function buildValidatedContractQuery() {
+  async function buildValidatedContractQuery(options?: {
+    requireIdeaSignContacts?: boolean;
+  }) {
     setError("");
 
     const normalizedContractNumber = form.contractNumber.trim();
@@ -495,17 +497,20 @@ export default function SaleContractPage() {
         setError("Uzupełnij imię i nazwisko oraz PESEL klienta 2.");
         return null;
       }
-      if (!normalizedSecondPhone || !/^\S+@\S+\.\S+$/.test(form.secondClientEmail.trim())) {
-        setError("Przy umowie na dwie osoby uzupełnij osobny, poprawny telefon i e-mail klienta 2.");
-        return null;
-      }
-      if (!normalizedPrimaryPhone) {
-        setError("Uzupełnij poprawny polski numer telefonu klienta 1.");
-        return null;
-      }
-      if (areIdeaSignPhonesEqual(form.secondClientPhone, form.phone) || form.secondClientEmail.trim().toLowerCase() === form.email.trim().toLowerCase()) {
-        setError("Każdy podpisujący musi mieć własny numer telefonu i własny adres e-mail.");
-        return null;
+
+      if (options?.requireIdeaSignContacts) {
+        if (!normalizedSecondPhone || !/^\S+@\S+\.\S+$/.test(form.secondClientEmail.trim())) {
+          setError("Przy wysyłce do IdeaSign uzupełnij osobny, poprawny telefon i e-mail klienta 2.");
+          return null;
+        }
+        if (!normalizedPrimaryPhone) {
+          setError("Uzupełnij poprawny polski numer telefonu klienta 1.");
+          return null;
+        }
+        if (areIdeaSignPhonesEqual(form.secondClientPhone, form.phone) || form.secondClientEmail.trim().toLowerCase() === form.email.trim().toLowerCase()) {
+          setError("Każdy podpisujący w IdeaSign musi mieć własny numer telefonu i własny adres e-mail.");
+          return null;
+        }
       }
     }
 
@@ -608,7 +613,7 @@ export default function SaleContractPage() {
       return;
     }
 
-    const query = await buildValidatedContractQuery();
+    const query = await buildValidatedContractQuery({ requireIdeaSignContacts: true });
     if (!query) return;
 
     const confirmed = window.confirm(
@@ -872,8 +877,8 @@ export default function SaleContractPage() {
               </div>
 
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900">
-                Brak unikalnego numeru telefonu i adresu e-mail dla obu klientów uniemożliwi
-                elektroniczne zawarcie umowy przez IdeaSign.
+                Unikalny numer telefonu i adres e-mail są wymagane tylko przy wysyłce do
+                IdeaSign. Nie blokują wygenerowania umowy papierowej.
               </div>
 
               {hasSecondClient && <>
