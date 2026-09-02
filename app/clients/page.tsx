@@ -76,6 +76,17 @@ type ClientTagLink = {
 };
 
 const CLIENTS_FILTERS_STORAGE_KEY = "ideasol_clients_filters_v1";
+const RELATED_CLIENT_IDS_BATCH_SIZE = 100;
+
+function splitIntoBatches<T>(values: T[], batchSize = RELATED_CLIENT_IDS_BATCH_SIZE) {
+  const batches: T[][] = [];
+
+  for (let index = 0; index < values.length; index += batchSize) {
+    batches.push(values.slice(index, index + batchSize));
+  }
+
+  return batches;
+}
 
 function readPersistedString(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
@@ -765,6 +776,7 @@ function ClientsPageContent() {
       );
 
     const clientIds = clientsWithoutAssignedUsers.map((client) => client.id);
+    const clientIdBatches = splitIntoBatches(clientIds);
     let tagsByClientId: Record<string, ClientTag[]> = {};
     let tagIdsByClientId: Record<string, string[]> = {};
 
@@ -783,17 +795,25 @@ function ClientsPageContent() {
     const contactFollowUpStatusByClientId: Record<string, "active" | "overdue"> = {};
 
     if (clientIds.length > 0) {
-      const { data: activitiesData, error: activitiesError } = await supabase
-        .from("client_activities")
-        .select("client_id, status, created_at")
-        .in("client_id", clientIds)
-        .gte("created_at", activityRangeStart.toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1000);
+      const activityResponses = await Promise.all(
+        clientIdBatches.map((clientIdBatch) =>
+          supabase
+            .from("client_activities")
+            .select("client_id, status, created_at")
+            .in("client_id", clientIdBatch)
+            .gte("created_at", activityRangeStart.toISOString())
+            .order("created_at", { ascending: false })
+            .limit(1000)
+        )
+      );
 
-      if (activitiesError) {
-        console.error("Błąd ładowania ostatnich aktywności klientów:", activitiesError);
-      }
+      activityResponses.forEach(({ error }) => {
+        if (error) {
+          console.error("Błąd ładowania ostatnich aktywności klientów:", error);
+        }
+      });
+
+      const activitiesData = activityResponses.flatMap(({ data }) => data || []);
 
       lastActivityByClientId = ((activitiesData || []) as ClientActivitySummary[]).reduce(
         (accumulator, activity) => {
@@ -806,17 +826,25 @@ function ClientsPageContent() {
         {} as Record<string, ClientActivitySummary>
       );
 
-      const { data: calendarEventsData, error: calendarEventsError } = await supabase
-        .from("calendar_events")
-        .select("client_id, title, event_type, event_at, status")
-        .in("client_id", clientIds)
-        .gte("event_at", followUpRangeStart.toISOString())
-        .lte("event_at", followUpRangeEnd.toISOString())
-        .limit(1000);
+      const calendarEventResponses = await Promise.all(
+        clientIdBatches.map((clientIdBatch) =>
+          supabase
+            .from("calendar_events")
+            .select("client_id, title, event_type, event_at, status")
+            .in("client_id", clientIdBatch)
+            .gte("event_at", followUpRangeStart.toISOString())
+            .lte("event_at", followUpRangeEnd.toISOString())
+            .limit(1000)
+        )
+      );
 
-      if (calendarEventsError) {
-        console.error("Błąd ładowania statusów kontaktu klientów:", calendarEventsError);
-      }
+      calendarEventResponses.forEach(({ error }) => {
+        if (error) {
+          console.error("Błąd ładowania statusów kontaktu klientów:", error);
+        }
+      });
+
+      const calendarEventsData = calendarEventResponses.flatMap(({ data }) => data || []);
 
       const nowTimestamp = Date.now();
       const contactEventsByClientId = ((calendarEventsData || []) as CalendarEventSummary[]).reduce(
@@ -860,14 +888,22 @@ function ClientsPageContent() {
     }
 
     if (clientIds.length > 0) {
-      const { data: clientTagLinksData, error: clientTagLinksError } = await supabase
-        .from("client_tag_links")
-        .select("client_id, tag_id")
-        .in("client_id", clientIds);
+      const clientTagLinkResponses = await Promise.all(
+        clientIdBatches.map((clientIdBatch) =>
+          supabase
+            .from("client_tag_links")
+            .select("client_id, tag_id")
+            .in("client_id", clientIdBatch)
+        )
+      );
 
-      if (clientTagLinksError) {
-        console.error("Błąd ładowania powiązań tagów klientów:", clientTagLinksError);
-      }
+      clientTagLinkResponses.forEach(({ error }) => {
+        if (error) {
+          console.error("Błąd ładowania powiązań tagów klientów:", error);
+        }
+      });
+
+      const clientTagLinksData = clientTagLinkResponses.flatMap(({ data }) => data || []);
 
       const clientTagLinks = (clientTagLinksData || []) as ClientTagLink[];
       tagIdsByClientId = clientTagLinks.reduce((accumulator, link) => {
