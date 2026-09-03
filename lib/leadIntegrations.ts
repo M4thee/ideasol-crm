@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getNearbyLeadCandidates } from "@/lib/leadAssignment";
 
 export type LeadAssignmentRule = "random" | "postal_code" | "round_robin";
 
@@ -256,7 +257,7 @@ async function findNearestParticipants(
   const eligibleIds = new Set(eligibleUsers.map((user) => user.id));
   const { data: serviceLocations, error } = await supabaseAdmin
     .from("user_service_locations")
-    .select("user_id,postal_code,radius_km")
+    .select("user_id,postal_code")
     .in("user_id", [...eligibleIds]);
 
   if (error) {
@@ -283,14 +284,7 @@ async function findNearestParticipants(
     .map(([userId, distanceKm]) => ({ userId, distanceKm }))
     .sort((first, second) => first.distanceKm - second.distanceKm);
 
-  for (const user of eligibleUsers) {
-    if (rankedUsers.length >= 3) break;
-    if (!rankedUsers.some((candidate) => candidate.userId === user.id)) {
-      rankedUsers.push({ userId: user.id, distanceKm: Number.POSITIVE_INFINITY });
-    }
-  }
-
-  return rankedUsers.slice(0, 3);
+  return getNearbyLeadCandidates(rankedUsers);
 }
 
 export async function assignLead(

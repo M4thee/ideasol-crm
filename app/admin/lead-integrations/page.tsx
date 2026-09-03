@@ -49,7 +49,7 @@ const RULES: Array<{
     value: "postal_code",
     title: "Według kodu pocztowego",
     description:
-      "Lead trafia do najbliższej wybranej osoby. Bez kodu lub dopasowania działa przydział na zmianę.",
+      "Lead trafia do najbliższej lokalnej grupy. Doradcy w odległości do 10 km od najbliższego dostają leady na zmianę. Bez kodu lub dopasowania działa ogólny przydział na zmianę.",
   },
 ];
 
