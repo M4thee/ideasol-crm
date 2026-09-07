@@ -18,13 +18,21 @@ export type CrmAuditEventInput = {
 
 const AUDIT_SESSION_KEY = "ideasol:crm-audit-session-id";
 
+export function createCrmAuditId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `crm-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export function getCrmAuditSessionId() {
   if (typeof window === "undefined") return null;
 
   let sessionId = window.sessionStorage.getItem(AUDIT_SESSION_KEY);
 
   if (!sessionId) {
-    sessionId = crypto.randomUUID();
+    sessionId = createCrmAuditId();
     window.sessionStorage.setItem(AUDIT_SESSION_KEY, sessionId);
   }
 

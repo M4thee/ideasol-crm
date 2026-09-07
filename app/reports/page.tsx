@@ -54,6 +54,7 @@ import {
 } from "./utils";
 import { MetricGrid } from "./components/MetricGrid";
 import { ReportSection } from "./components/ReportSection";
+import { Arimr2026ProgramReport } from "./components/Arimr2026ProgramReport";
 import {
   buildFinancialDetailRows,
   getFinancialDetailTitle,
@@ -62,6 +63,11 @@ import {
   summarizeFinancialSales,
 } from "./financial-utils";
 import { buildAdvisorDetailRows, summarizeAdvisorReport } from "./advisor-utils";
+import {
+  getArimr2026ProgramSettings,
+  summarizeArimr2026Program,
+  type Arimr2026ProgramSummary,
+} from "@/lib/calculator/arimr2026Sales";
 
 const emptyAdvisorSummary: AdvisorReportSummary = {
   remoteContacts: 0,
@@ -110,6 +116,16 @@ const emptyFinancialSummary: FinancialSummary = {
   managerOwnSalesCommissionForecast: 0,
   managerOwnSalesCommissionPayable: 0,
   salesCount: 0,
+};
+
+const emptyArimr2026ProgramSummary: Arimr2026ProgramSummary = {
+  salesCount: 0,
+  pvPowerKwp: 0,
+  storageUnits: 0,
+  storageCapacityKwh: 0,
+  planContributionKw: 0,
+  compensationNet: 0,
+  advisors: [],
 };
 
 type BoardAdvisorRankingSortKey =
@@ -289,6 +305,12 @@ export default function ReportsPage() {
   const [activeFinancialDetail, setActiveFinancialDetail] = useState<FinancialDetailType | null>(null);
   const [loadingFinancialReport, setLoadingFinancialReport] = useState(false);
   const [financialReportError, setFinancialReportError] = useState("");
+  const [arimr2026ProgramSummary, setArimr2026ProgramSummary] = useState(
+    emptyArimr2026ProgramSummary
+  );
+  const [loadingArimr2026ProgramReport, setLoadingArimr2026ProgramReport] = useState(false);
+  const [arimr2026ProgramReportError, setArimr2026ProgramReportError] = useState("");
+  const [hasArimrCalculatorAccess, setHasArimrCalculatorAccess] = useState(false);
   const [boardNewLeads, setBoardNewLeads] = useState(0);
   const [boardMeetingsCount, setBoardMeetingsCount] = useState(0);
   const [boardOffersCount, setBoardOffersCount] = useState(0);
@@ -634,6 +656,80 @@ export default function ReportsPage() {
     }
   }
 
+  async function loadArimr2026ProgramReport() {
+    setLoadingArimr2026ProgramReport(true);
+    setArimr2026ProgramReportError("");
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const userId = userData.user?.id || "";
+      if (!userId) throw new Error("Brak zalogowanego użytkownika.");
+
+      const { data: permission, error: permissionError } = await supabase
+        .from("user_permissions")
+        .select("arimr_calculator")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (permissionError) throw permissionError;
+
+      const hasAccess = permission?.arimr_calculator === true;
+      setHasArimrCalculatorAccess(hasAccess);
+
+      if (!hasAccess) {
+        setArimr2026ProgramSummary(emptyArimr2026ProgramSummary);
+        return;
+      }
+
+      const [profilesResponse, salesResponse, pricingResponse] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, display_name, email, role, manager_id"),
+        supabase
+          .from("sales")
+          .select("*")
+          .order("created_at", { ascending: true })
+          .limit(5000),
+        supabase
+          .from("pricing_settings")
+          .select("*")
+          .eq("id", 1)
+          .maybeSingle(),
+      ]);
+
+      if (profilesResponse.error) throw profilesResponse.error;
+      if (salesResponse.error) throw salesResponse.error;
+      if (pricingResponse.error) throw pricingResponse.error;
+
+      const profiles = (profilesResponse.data || []) as ProfileRow[];
+      const current = profiles.find((profile) => profile.id === userId) || null;
+      const role = normalizeText(current?.role || "seller");
+      const allowedAdvisors = getAllowedAdvisorUsers(profiles, userId, role);
+      const settings = getArimr2026ProgramSettings(pricingResponse.data);
+
+      setArimr2026ProgramSummary(
+        summarizeArimr2026Program(
+          (salesResponse.data || []) as FinancialSaleRow[],
+          allowedAdvisors.map((advisor) => ({ id: advisor.id, name: advisor.name })),
+          settings
+        )
+      );
+    } catch (error) {
+      console.error("Błąd ładowania raportu programu ARiMR 2026", error);
+      setHasArimrCalculatorAccess(false);
+      setArimr2026ProgramSummary(emptyArimr2026ProgramSummary);
+      setArimr2026ProgramReportError(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się załadować raportu ARiMR 2026."
+      );
+    } finally {
+      setLoadingArimr2026ProgramReport(false);
+    }
+  }
+
   // --- BOARD REPORT LOADER ---
 
   async function loadBoardReport() {
@@ -773,6 +869,14 @@ export default function ReportsPage() {
     loadAdvisorReport();
     loadBoardReport();
   }, [dateFrom, dateTo, selectedAdvisorId]);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      void loadArimr2026ProgramReport();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
 
   const currentRole = normalizeText(currentProfile?.role || "seller");
   const canSeeOwnerFinance = currentRole === "admin" || currentRole === "owner";
@@ -1358,7 +1462,7 @@ function getBoardAdvisorRankingSortIndicator(key: BoardAdvisorRankingSortKey) {
 
         <ReportSection
           title="Raport finansowy"
-          description=""
+          description="Sprzedaże standardowe i ARiMR są ujmowane łącznie w wybranym okresie."
         >
           {loadingFinancialReport ? (
             <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm">
@@ -1465,6 +1569,19 @@ function getBoardAdvisorRankingSortIndicator(key: BoardAdvisorRankingSortKey) {
             </div>
           ) : null}
         </ReportSection>
+
+        {canSeeAdvisorFinance && hasArimrCalculatorAccess ? (
+          <ReportSection
+            title="Raport ARiMR 2026"
+            description="Osobne rozliczenie sprzedaży ARiMR dla całego programu, niezależne od zakresu dat ustawionego wyżej."
+          >
+            <Arimr2026ProgramReport
+              summary={arimr2026ProgramSummary}
+              loading={loadingArimr2026ProgramReport}
+              error={arimr2026ProgramReportError}
+            />
+          </ReportSection>
+        ) : null}
 
         {canSeeRemoteActivityReport ? (
         <ReportSection

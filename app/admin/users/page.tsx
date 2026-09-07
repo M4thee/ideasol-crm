@@ -4,10 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import AdminPanel from "@/components/calculator/AdminPanel";
+import Arimr2026AdminPanel from "@/components/calculator/Arimr2026AdminPanel";
 import GrantAdminPanel from "@/components/calculator/GrantAdminPanel";
 import InstallersAdmin from "@/components/admin/InstallersAdmin";
 import SmsTemplatesAdmin from "@/components/admin/SmsTemplatesAdmin";
 import AuditLogsAdmin from "@/components/admin/AuditLogsAdmin";
+import {
+  DEFAULT_ARIMR_2026_SETTINGS,
+  type Arimr2026Settings,
+} from "@/lib/calculator/arimr2026";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
 const STICKY_NOTE_COLORS = [
@@ -36,6 +41,7 @@ type Profile = {
   ideasign_prepare_access: boolean;
   ideasign_send_access: boolean;
   custom_mode_access: boolean;
+  arimr_calculator_access: boolean;
   sticky_note_color: StickyNoteColor;
 };
 
@@ -102,6 +108,12 @@ export default function AdminUsersPage() {
   >("users");
   const [adminStatus, setAdminStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
+  const [calculatorAdminMode, setCalculatorAdminMode] = useState<
+    "standard" | "arimr2026"
+  >("standard");
+  const [arimr2026Settings, setArimr2026Settings] = useState(
+    DEFAULT_ARIMR_2026_SETTINGS
+  );
 
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -195,9 +207,7 @@ export default function AdminUsersPage() {
   async function loadPricingSettings() {
     const { data, error } = await supabase
       .from("pricing_settings")
-      .select(
-        "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, warranty_percent, pme_qualify_vat"
-      )
+      .select("*")
       .eq("id", 1)
       .maybeSingle();
 
@@ -245,6 +255,38 @@ export default function AdminUsersPage() {
       subsidy: {
         qualifyVat: Boolean(data.pme_qualify_vat ?? current.subsidy.qualifyVat),
       },
+    }));
+
+    setArimr2026Settings((current) => ({
+      pvReferenceRateNetPerKwp: Number(data.arimr_pv_reference_rate_net_per_kwp ?? current.pvReferenceRateNetPerKwp),
+      storageReferenceRateNetPerKwh: Number(data.arimr_storage_reference_rate_net_per_kwh ?? current.storageReferenceRateNetPerKwh),
+      supportPercent: Number(data.arimr_support_percent ?? current.supportPercent),
+      areaBGrantLimit: Number(data.arimr_area_b_grant_limit ?? current.areaBGrantLimit),
+      minimumStorageKwhPerPvKwp: Number(data.arimr_min_storage_kwh_per_pv_kwp ?? current.minimumStorageKwhPerPvKwp),
+      defaultVatRate: Number(data.arimr_default_vat_rate ?? current.defaultVatRate),
+      pvSaleRateNetPerKwp: Number(data.arimr_default_pv_sale_rate_net_per_kwp ?? data.arimr_sale_pv_flat_roof_net_per_kwp ?? current.pvSaleRateNetPerKwp),
+      storageSaleRateNetPerKwh: Number(data.arimr_default_storage_sale_rate_net_per_kwh ?? current.storageSaleRateNetPerKwh),
+      sellerMonthlyPlanKw: Number(data.arimr_seller_monthly_plan_kw ?? current.sellerMonthlyPlanKw),
+      sellerPvPlanKwPerKwp: Number(data.arimr_seller_pv_plan_kw_per_kwp ?? current.sellerPvPlanKwPerKwp),
+      sellerStoragePlanKwPerUnit: Number(data.arimr_seller_storage_plan_kw_per_unit ?? current.sellerStoragePlanKwPerUnit),
+      sellerPvCompensationNetPerKwp: Number(data.arimr_seller_pv_compensation_net_per_kwp ?? current.sellerPvCompensationNetPerKwp),
+      sellerStorageCompensationNetPerKwh: Number(data.arimr_seller_storage_compensation_net_per_kwh ?? current.sellerStorageCompensationNetPerKwh),
+      sellerMaxMultiplierPercent: Number(data.arimr_seller_max_multiplier_percent ?? current.sellerMaxMultiplierPercent),
+      pvInstallationCostNetPerKwp: Number(data.arimr_cost_pv_installation_net_per_kwp ?? current.pvInstallationCostNetPerKwp),
+      storageInstallationCostNet: Number(data.arimr_cost_storage_installation_net ?? current.storageInstallationCostNet),
+      flatRoofCostNetPerKwp: Number(data.arimr_cost_flat_roof_net ?? current.flatRoofCostNetPerKwp),
+      pitchedSheetCostNetPerKwp: Number(data.arimr_cost_pitched_sheet_net ?? current.pitchedSheetCostNetPerKwp) === 1500
+        ? DEFAULT_ARIMR_2026_SETTINGS.pitchedSheetCostNetPerKwp
+        : Number(data.arimr_cost_pitched_sheet_net ?? current.pitchedSheetCostNetPerKwp),
+      pitchedTileCostNetPerKwp: Number(data.arimr_cost_pitched_tile_net ?? current.pitchedTileCostNetPerKwp),
+      groundCostNetPerKwp: Number(data.arimr_cost_ground_net ?? current.groundCostNetPerKwp),
+      protectionsCostNet: Number(data.arimr_cost_protections_net ?? current.protectionsCostNet),
+      wiringCostNet: Number(data.arimr_cost_wiring_net ?? current.wiringCostNet),
+      transportElectronicsCostNet: Number(data.arimr_cost_transport_electronics_net ?? current.transportElectronicsCostNet),
+      transportPanelsCostNet: Number(data.arimr_cost_transport_panels_net ?? current.transportPanelsCostNet),
+      documentationCostNet: Number(data.arimr_cost_documentation_net ?? current.documentationCostNet),
+      marketingCostNet: Number(data.arimr_cost_marketing_net ?? current.marketingCostNet),
+      warrantyFundPercent: Number(data.arimr_cost_warranty_fund_percent ?? current.warrantyFundPercent),
     }));
   }
 
@@ -314,6 +356,80 @@ export default function AdminUsersPage() {
   function resetPricingOverrides() {
     setPricingOverrides(DEFAULT_PRICING_OVERRIDES);
     setAdminStatus("Przywrócono wartości domyślne — kliknij Zapisz ustawienia, żeby utrwalić je w bazie");
+  }
+
+  function updateArimr2026Setting(
+    key: keyof Arimr2026Settings,
+    value: string
+  ) {
+    const parsedValue = Number(value.replace(",", "."));
+    const isPercent = ["supportPercent", "defaultVatRate", "warrantyFundPercent"].includes(key);
+    const maximumValue = isPercent ? 100 : Infinity;
+    const minimumValue = key === "sellerMonthlyPlanKw" ? 0.1 : 0;
+    const safeValue = Number.isFinite(parsedValue)
+      ? Math.min(maximumValue, Math.max(minimumValue, parsedValue))
+      : minimumValue;
+
+    setArimr2026Settings((current) => ({
+      ...current,
+      [key]: safeValue,
+    }));
+    setAdminStatus("Masz niezapisane zmiany w ustawieniach ARiMR");
+  }
+
+  async function saveArimr2026Settings() {
+    setAdminStatus("Zapisywanie ustawień ARiMR...");
+
+    const { error } = await supabase
+      .from("pricing_settings")
+      .update({
+        arimr_pv_reference_rate_net_per_kwp: arimr2026Settings.pvReferenceRateNetPerKwp,
+        arimr_storage_reference_rate_net_per_kwh: arimr2026Settings.storageReferenceRateNetPerKwh,
+        arimr_support_percent: arimr2026Settings.supportPercent,
+        arimr_area_b_grant_limit: arimr2026Settings.areaBGrantLimit,
+        arimr_min_storage_kwh_per_pv_kwp: arimr2026Settings.minimumStorageKwhPerPvKwp,
+        arimr_default_vat_rate: arimr2026Settings.defaultVatRate,
+        arimr_default_pv_sale_rate_net_per_kwp: arimr2026Settings.pvSaleRateNetPerKwp,
+        arimr_sale_pv_flat_roof_net_per_kwp: arimr2026Settings.pvSaleRateNetPerKwp,
+        arimr_sale_pv_pitched_sheet_net_per_kwp: arimr2026Settings.pvSaleRateNetPerKwp,
+        arimr_sale_pv_pitched_tile_net_per_kwp: arimr2026Settings.pvSaleRateNetPerKwp,
+        arimr_sale_pv_ground_net_per_kwp: arimr2026Settings.pvSaleRateNetPerKwp,
+        arimr_default_storage_sale_rate_net_per_kwh: arimr2026Settings.storageSaleRateNetPerKwh,
+        arimr_seller_monthly_plan_kw: arimr2026Settings.sellerMonthlyPlanKw,
+        arimr_seller_pv_plan_kw_per_kwp: arimr2026Settings.sellerPvPlanKwPerKwp,
+        arimr_seller_storage_plan_kw_per_unit: arimr2026Settings.sellerStoragePlanKwPerUnit,
+        arimr_seller_pv_compensation_net_per_kwp: arimr2026Settings.sellerPvCompensationNetPerKwp,
+        arimr_seller_storage_compensation_net_per_kwh: arimr2026Settings.sellerStorageCompensationNetPerKwh,
+        arimr_seller_max_multiplier_percent: arimr2026Settings.sellerMaxMultiplierPercent,
+        arimr_cost_pv_installation_net_per_kwp: arimr2026Settings.pvInstallationCostNetPerKwp,
+        arimr_cost_storage_installation_net: arimr2026Settings.storageInstallationCostNet,
+        arimr_cost_flat_roof_net: arimr2026Settings.flatRoofCostNetPerKwp,
+        arimr_cost_pitched_sheet_net: arimr2026Settings.pitchedSheetCostNetPerKwp,
+        arimr_cost_pitched_tile_net: arimr2026Settings.pitchedTileCostNetPerKwp,
+        arimr_cost_ground_net: arimr2026Settings.groundCostNetPerKwp,
+        arimr_cost_protections_net: arimr2026Settings.protectionsCostNet,
+        arimr_cost_wiring_net: arimr2026Settings.wiringCostNet,
+        arimr_cost_transport_electronics_net: arimr2026Settings.transportElectronicsCostNet,
+        arimr_cost_transport_panels_net: arimr2026Settings.transportPanelsCostNet,
+        arimr_cost_documentation_net: arimr2026Settings.documentationCostNet,
+        arimr_cost_marketing_net: arimr2026Settings.marketingCostNet,
+        arimr_cost_warranty_fund_percent: arimr2026Settings.warrantyFundPercent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+
+    if (error) {
+      console.error("Błąd zapisu ustawień ARiMR 2026", error);
+      setAdminStatus("Błąd zapisu ustawień ARiMR");
+      return;
+    }
+
+    setAdminStatus("Zapisano globalne ustawienia ARiMR 2026");
+  }
+
+  function resetArimr2026Settings() {
+    setArimr2026Settings(DEFAULT_ARIMR_2026_SETTINGS);
+    setAdminStatus("Przywrócono domyślne ustawienia ARiMR — zapisz, aby utrwalić je w bazie");
   }
 
   // --- Client Tags Admin Section ---
@@ -442,7 +558,7 @@ export default function AdminUsersPage() {
 
     const { data: permissionsData, error: permissionsError } = await supabase
       .from("user_permissions")
-      .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode");
+      .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode, arimr_calculator");
 
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
@@ -466,6 +582,12 @@ export default function AdminUsersPage() {
         Boolean(permission.custom_mode),
       ])
     );
+    const arimrCalculatorByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.arimr_calculator),
+      ])
+    );
     const ideaSignPrepareByUserId = new Map(
       (permissionsData || []).map((permission) => [
         permission.user_id,
@@ -487,6 +609,7 @@ export default function AdminUsersPage() {
         ideasign_prepare_access: ideaSignPrepareByUserId.get(profile.id) || false,
         ideasign_send_access: ideaSignSendByUserId.get(profile.id) || false,
         custom_mode_access: customModeByUserId.get(profile.id) || false,
+        arimr_calculator_access: arimrCalculatorByUserId.get(profile.id) || false,
       })) as Profile[]
     );
     setLoading(false);
@@ -504,6 +627,7 @@ export default function AdminUsersPage() {
       ideasign_prepare_access: ideaSignPrepareAccess,
       ideasign_send_access: ideaSignSendAccess,
       custom_mode_access: customModeAccess,
+      arimr_calculator_access: arimrCalculatorAccess,
       ...profileValues
     } = values;
     const payload: Partial<Profile> = profileValues;
@@ -545,7 +669,8 @@ export default function AdminUsersPage() {
       smsAccess !== undefined ||
       ideaSignPrepareAccess !== undefined ||
       ideaSignSendAccess !== undefined ||
-      customModeAccess !== undefined
+      customModeAccess !== undefined ||
+      arimrCalculatorAccess !== undefined
     ) {
       const {
         data: { user },
@@ -572,6 +697,10 @@ export default function AdminUsersPage() {
               ideaSignSendAccess ?? currentProfile?.ideasign_send_access ?? false,
             custom_mode:
               customModeAccess ?? currentProfile?.custom_mode_access ?? false,
+            arimr_calculator:
+              arimrCalculatorAccess ??
+              currentProfile?.arimr_calculator_access ??
+              false,
             updated_by: user.id,
             updated_at: new Date().toISOString(),
           },
@@ -1143,6 +1272,16 @@ export default function AdminUsersPage() {
       changeLines.push(
         `Uprawnienie Custom Mode: ${profile.custom_mode_access ? "Tak" : "Nie"} → ${
           changes.custom_mode_access ? "Tak" : "Nie"
+        }`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "arimr_calculator_access") &&
+      changes.arimr_calculator_access !== profile.arimr_calculator_access
+    ) {
+      changeLines.push(
+        `Dostęp do ARiMR: ${profile.arimr_calculator_access ? "Tak" : "Nie"} → ${
+          changes.arimr_calculator_access ? "Tak" : "Nie"
         }`
       );
     }
@@ -1831,13 +1970,51 @@ export default function AdminUsersPage() {
             {activeSection === "sms" && <SmsTemplatesAdmin />}
 
             {activeSection === "pricing" && (
-              <AdminPanel
-                adminStatus={adminStatus}
-                pricingOverrides={pricingOverrides}
-                updatePricingValue={updatePricingValue}
-                savePricingSettings={savePricingSettings}
-                resetPricingOverrides={resetPricingOverrides}
-              />
+              <div className="space-y-5">
+                <nav
+                  aria-label="Wybór panelu kalkulatora"
+                  className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:w-fit"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalculatorAdminMode("standard");
+                      setAdminStatus("");
+                    }}
+                    className={`flex-1 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${calculatorAdminMode === "standard" ? "bg-slate-950 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}
+                  >
+                    Kalkulator ofertowy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCalculatorAdminMode("arimr2026");
+                      setAdminStatus("");
+                    }}
+                    className={`flex-1 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${calculatorAdminMode === "arimr2026" ? "bg-emerald-600 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}
+                  >
+                    ARiMR 2026
+                  </button>
+                </nav>
+
+                {calculatorAdminMode === "standard" ? (
+                  <AdminPanel
+                    adminStatus={adminStatus}
+                    pricingOverrides={pricingOverrides}
+                    updatePricingValue={updatePricingValue}
+                    savePricingSettings={savePricingSettings}
+                    resetPricingOverrides={resetPricingOverrides}
+                  />
+                ) : (
+                  <Arimr2026AdminPanel
+                    settings={arimr2026Settings}
+                    status={adminStatus}
+                    onChange={updateArimr2026Setting}
+                    onSave={saveArimr2026Settings}
+                    onReset={resetArimr2026Settings}
+                  />
+                )}
+              </div>
             )}
 
             {activeSection === "grant" && <GrantAdminPanel />}
@@ -1987,6 +2164,7 @@ export default function AdminUsersPage() {
                     <th className="px-4 py-3 text-center">IdeaSign: wyślij</th>
                     <th className="px-4 py-3 text-center">SMS</th>
                     <th className="px-4 py-3 text-center">Custom Mode</th>
+                    <th className="px-4 py-3 text-center">Kalkulator ARiMR</th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -2101,6 +2279,30 @@ export default function AdminUsersPage() {
                             {(
                               editedProfile.realization_access ??
                               profile.realization_access
+                            )
+                              ? "Tak"
+                              : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-[#102a43]">
+                            <input
+                              type="checkbox"
+                              checked={
+                                editedProfile.arimr_calculator_access ??
+                                profile.arimr_calculator_access
+                              }
+                              onChange={(event) => {
+                                updateEditedProfile(profile.id, {
+                                  arimr_calculator_access: event.target.checked,
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 accent-[#102a43]"
+                            />
+                            {(
+                              editedProfile.arimr_calculator_access ??
+                              profile.arimr_calculator_access
                             )
                               ? "Tak"
                               : "Nie"}

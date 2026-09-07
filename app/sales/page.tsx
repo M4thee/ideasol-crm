@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import {
+  getCalculatorProgram,
+  type CalculatorProgram,
+} from "@/lib/calculator/arimr2026Sales";
 
 type Sale = {
   id: string;
@@ -13,6 +17,9 @@ type Sale = {
   contract_value: number | null;
   status: string;
   created_at: string;
+  offer_snapshot?: Record<string, unknown> | null;
+  offer_data?: Record<string, unknown> | null;
+  customer_data?: Record<string, unknown> | null;
 };
 
 type Client = {
@@ -54,6 +61,7 @@ type OfferPickerItem = {
   final_gross: number | null;
   created_at: string;
   created_by?: string | null;
+  offer_data?: Record<string, unknown> | null;
 };
 
 function isHiddenAssignmentUser(profile: {
@@ -126,6 +134,7 @@ export default function SalesPage() {
   const [salesOwners, setSalesOwners] = useState<SalesOwner[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [isSellerFilterOpen, setIsSellerFilterOpen] = useState(false);
+  const [salesProgramFilter, setSalesProgramFilter] = useState<"all" | CalculatorProgram>("all");
 
   const [isOfferPickerOpen, setIsOfferPickerOpen] = useState(false);
   const [offersLoading, setOffersLoading] = useState(false);
@@ -283,7 +292,7 @@ export default function SalesPage() {
 
     let query = supabase
       .from("sales")
-      .select("id, public_id, client_id, seller_id, sale_date, contract_value, status, created_at")
+      .select("id, public_id, client_id, seller_id, sale_date, contract_value, status, created_at, offer_snapshot, offer_data, customer_data")
       .order("created_at", { ascending: false });
 
     if (selectedSellerIds.length > 0) {
@@ -383,7 +392,7 @@ export default function SalesPage() {
     let offersQuery = supabase
       .from("client_offers")
       .select(
-        "id, offer_public_id, client_name, client_email, final_gross, created_at, created_by"
+        "id, offer_public_id, client_name, client_email, final_gross, created_at, created_by, offer_data"
       )
       .order("created_at", { ascending: false })
       .limit(100);
@@ -468,6 +477,14 @@ export default function SalesPage() {
     });
   }, [offers, offerSearch]);
 
+  const visibleProgramSales = useMemo(
+    () =>
+      salesProgramFilter === "all"
+        ? sales
+        : sales.filter((sale) => getCalculatorProgram(sale) === salesProgramFilter),
+    [sales, salesProgramFilter]
+  );
+
   return (
     <main className="text-slate-900 dark:text-slate-100">
       <div className="space-y-6">
@@ -492,7 +509,7 @@ export default function SalesPage() {
             <p className="text-sm text-slate-500 dark:text-slate-400">
               {currentUserRole === "seller" ? "Moje sprzedaże" : "Liczba sprzedaży"}
             </p>
-            <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">{sales.length}</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">{visibleProgramSales.length}</p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
@@ -500,7 +517,7 @@ export default function SalesPage() {
               {currentUserRole === "seller" ? "Moje zakończone" : "Zakończone"}
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">
-              {sales.filter((sale) => sale.status.startsWith("Zakończony")).length}
+              {visibleProgramSales.filter((sale) => sale.status.startsWith("Zakończony")).length}
             </p>
           </div>
 
@@ -509,7 +526,7 @@ export default function SalesPage() {
               {currentUserRole === "seller" ? "Wartość moich umów" : "Wartość umów"}
             </p>
             <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-slate-100 sm:text-3xl">
-              {sales
+              {visibleProgramSales
                 .filter((sale) => sale.status !== "Anulowana")
                 .reduce((sum, sale) => sum + (sale.contract_value || 0), 0)
                 .toLocaleString("pl-PL")} zł
@@ -527,6 +544,19 @@ export default function SalesPage() {
             </div>
 
             <div className="flex w-full flex-col gap-3 sm:flex-row lg:ml-auto lg:w-auto">
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                <span className="sr-only">Program sprzedaży</span>
+                <select
+                  value={salesProgramFilter}
+                  onChange={(event) => setSalesProgramFilter(event.target.value as "all" | CalculatorProgram)}
+                  className="bg-transparent text-sm font-semibold text-slate-700 outline-none dark:text-slate-200"
+                >
+                  <option value="all">Wszystkie programy</option>
+                  <option value="standard">Sprzedaż standardowa</option>
+                  <option value="arimr2026">ARiMR 2026</option>
+                </select>
+              </label>
+
               <div className="relative w-full sm:w-auto">
                 <button
                   type="button"
@@ -603,7 +633,7 @@ export default function SalesPage() {
 
           {loading ? (
             <div className="p-4 text-slate-500 dark:text-slate-400 sm:p-6">Ładowanie sprzedaży...</div>
-          ) : sales.length === 0 ? (
+          ) : visibleProgramSales.length === 0 ? (
             <div className="space-y-4 p-4 text-slate-500 dark:text-slate-400 sm:p-6">
               <p>
                 Brak sprzedaży. Sprzedaże są teraz tworzone wyłącznie na podstawie istniejących ofert.
@@ -625,6 +655,7 @@ export default function SalesPage() {
                 <thead className="border-b border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                   <tr>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">SaleID</th>
+                    <th className="text-left px-4 py-3 sm:px-6 font-semibold">Program</th>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">Data sprzedaży</th>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">Klient</th>
                     <th className="text-left px-4 py-3 sm:px-6 font-semibold">Sprzedawca</th>
@@ -635,10 +666,11 @@ export default function SalesPage() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {sales.map((sale) => {
+                  {visibleProgramSales.map((sale) => {
                     const visibleSaleId = sale.public_id
                       ? `SID${String(sale.public_id).padStart(6, "0")}`
                       : `SID-${sale.id.slice(0, 8).toUpperCase()}`;
+                    const saleProgram = getCalculatorProgram(sale);
                     const clientName =
                       sale.client?.full_name ||
                       sale.client?.company_name ||
@@ -648,6 +680,18 @@ export default function SalesPage() {
                       <tr key={sale.id} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/70">
                         <td className="px-4 py-4 sm:px-6 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                           {visibleSaleId}
+                        </td>
+
+                        <td className="px-4 py-4 sm:px-6 whitespace-nowrap">
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
+                              saleProgram === "arimr2026"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                                : "border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                            }`}
+                          >
+                            {saleProgram === "arimr2026" ? "ARiMR 2026" : "Standardowa"}
+                          </span>
                         </td>
 
                         <td className="px-4 py-4 sm:px-6 text-slate-700 dark:text-slate-300 whitespace-nowrap">
@@ -768,6 +812,15 @@ export default function SalesPage() {
                         <p className="mt-1 text-lg font-bold text-slate-900">
                           {offer.offer_public_id || "—"}
                         </p>
+                        <span
+                          className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                            getCalculatorProgram(offer) === "arimr2026"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {getCalculatorProgram(offer) === "arimr2026" ? "ARiMR 2026" : "Standardowa"}
+                        </span>
                       </div>
 
                       <div className="flex-1">

@@ -23,6 +23,7 @@ import {
   getExplicitStorageVoltageType,
   rankInvertersForStorage,
 } from "@/lib/calculator/equipmentCompatibility";
+import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
 
 function isOfferFormOnline() {
   if (typeof navigator === "undefined") return true;
@@ -148,6 +149,9 @@ function writeCachedOfferFormClients(clients: CrmClientOption[]) {
 
 
 type OfferFormProps = {
+  calculatorProgram?: "standard" | "arimr2026";
+  canManageProgramSettings?: boolean;
+  onOpenProgramSettings?: () => void;
   offerType: string;
   setOfferType: (value: string) => void;
   panelModel: string;
@@ -216,6 +220,9 @@ type OfferFormProps = {
 };
 
 export default function OfferForm({
+  calculatorProgram = "standard",
+  canManageProgramSettings = false,
+  onOpenProgramSettings,
   offerType,
   setOfferType,
   panelModel,
@@ -282,6 +289,7 @@ export default function OfferForm({
   customPaymentTotalGross,
   hasStaleResult = false,
 }: OfferFormProps) {
+  const isArimr2026 = calculatorProgram === "arimr2026";
   const [clientSearch, setClientSearch] = useState("");
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [existingPvAnswer, setExistingPvAnswer] = useState<"yes" | "no" | "">("");
@@ -778,7 +786,9 @@ export default function OfferForm({
       id: "settlement" as const,
       number: "04",
       label: "Rozliczenie",
-      description: `VAT ${vatRate}% · ${billingSystem === "net_billing" ? "Net Billing" : "Net Metering"}`,
+      description: isArimr2026
+        ? `VAT ${vatRate}% · ARiMR 2026`
+        : `VAT ${vatRate}% · ${billingSystem === "net_billing" ? "Net Billing" : "Net Metering"}`,
     },
   ];
   const workspaceSteps = customProductMode
@@ -830,6 +840,14 @@ export default function OfferForm({
   }
 
   function goToNextWorkspaceSection() {
+    if (
+      activeWorkspaceStep === "client" &&
+      !customProductMode &&
+      existingPvAnswer === ""
+    ) {
+      return;
+    }
+
     if (activeWorkspaceStep === "equipment" && nextEquipmentEditor) {
       setActiveEquipmentEditor(nextEquipmentEditor.id);
       return;
@@ -847,7 +865,7 @@ export default function OfferForm({
 
   return (
     <section className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-xl shadow-slate-200/60 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30">
-      <div className="relative flex items-center justify-between gap-4 bg-slate-950 px-5 py-4 text-white dark:bg-black">
+      <div className={`relative flex items-center justify-between gap-4 px-5 py-4 text-white ${isArimr2026 ? "bg-[#102a43] dark:bg-[#081a2c]" : "bg-slate-950 dark:bg-black"}`}>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-400">IdeaSol Configurator</p>
           <h2 className="mt-1 text-xl font-black tracking-tight">
@@ -855,16 +873,23 @@ export default function OfferForm({
           </h2>
         </div>
 
-        {!customProductMode ? <button
+        {!customProductMode && (!isArimr2026 || canManageProgramSettings) ? <button
           type="button"
-          onClick={() => setShowSettings((current) => !current)}
+          onClick={() => {
+            if (isArimr2026) {
+              onOpenProgramSettings?.();
+              return;
+            }
+
+            setShowSettings((current) => !current);
+          }}
           className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/10 text-lg transition hover:bg-white/20"
           aria-label="Ustawienia kalkulatora"
         >
           ⚙
         </button> : null}
 
-        {showSettings && !customProductMode && (
+        {showSettings && !customProductMode && !isArimr2026 && (
           <div className="absolute right-4 top-[calc(100%+0.75rem)] z-40 w-[calc(100%-2rem)] rounded-2xl border border-blue-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-950/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:w-72">
             <label className="block">
               <span className="text-sm text-slate-700 dark:text-slate-200">
@@ -910,7 +935,9 @@ export default function OfferForm({
                   type="button"
                   onClick={() => setActiveWorkspaceStep(step.id)}
                   className={`group rounded-2xl p-3 text-left transition ${isActive
-                    ? "bg-slate-950 text-white shadow-lg shadow-slate-300 dark:bg-white dark:text-slate-950 dark:shadow-none"
+                    ? isArimr2026
+                      ? "bg-[#102a43] text-white shadow-lg shadow-blue-200 dark:bg-[#081a2c] dark:shadow-none"
+                      : "bg-slate-950 text-white shadow-lg shadow-slate-300 dark:bg-white dark:text-slate-950 dark:shadow-none"
                     : "text-slate-600 hover:bg-white hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-white"
                     }`}
                 >
@@ -1078,7 +1105,9 @@ export default function OfferForm({
               Stan obecny: czy klient posiada fotowoltaikę?
             </div>
             <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              To pole wpływa na warunek dotacji PME: pojemność magazynu musi wynosić minimum dwukrotność łącznej mocy PV klienta.
+              {isArimr2026
+                ? "Informacja pozostaje na ofercie. Dotację ARiMR liczymy dla nowej instalacji PV i nowego magazynu."
+                : "To pole wpływa na warunek dotacji PME: pojemność magazynu musi wynosić minimum dwukrotność łącznej mocy PV klienta."}
             </p>
           </div>
 
@@ -1092,7 +1121,9 @@ export default function OfferForm({
                 setEmailStatus("");
               }}
               className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "yes"
-                  ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                  ? isArimr2026
+                    ? "border-[#102a43] bg-[#102a43] text-white dark:border-[#345779] dark:bg-[#081a2c]"
+                    : "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                 }`}
             >
@@ -1109,7 +1140,9 @@ export default function OfferForm({
                 setEmailStatus("");
               }}
               className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${existingPvAnswer === "no"
-                  ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                  ? isArimr2026
+                    ? "border-[#102a43] bg-[#102a43] text-white dark:border-[#345779] dark:bg-[#081a2c]"
+                    : "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                 }`}
             >
@@ -1396,7 +1429,9 @@ export default function OfferForm({
                               setResult(null);
                             }}
                             className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${storageVoltageFilter === option.value
-                                ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                                ? isArimr2026
+                                  ? "border-[#102a43] bg-[#102a43] text-white dark:border-[#345779] dark:bg-[#081a2c]"
+                                  : "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950"
                                 : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                               }`}
                           >
@@ -1624,22 +1659,34 @@ export default function OfferForm({
                 const selectedService = selectedAdditionalServices.find(
                   (item) => item.id === service.id
                 );
+                const isUnavailableInArimr =
+                  isArimr2026 && isPmeApplicationServiceName(service.name);
 
                 return (
                   <div
                     key={service.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+                    className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950 ${isUnavailableInArimr ? "bg-slate-100 opacity-55 grayscale dark:bg-slate-900" : ""}`}
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="flex cursor-pointer items-start gap-3">
+                      <label className={`flex items-start gap-3 ${isUnavailableInArimr ? "cursor-not-allowed" : "cursor-pointer"}`}>
                         <input
                           type="checkbox"
                           checked={Boolean(selectedService)}
-                          onChange={() => toggleAdditionalService(service)}
+                          disabled={isUnavailableInArimr}
+                          onChange={() => {
+                            if (!isUnavailableInArimr) toggleAdditionalService(service);
+                          }}
                           className="mt-1 h-5 w-5"
                         />
                         <div>
-                          <div className="font-semibold text-slate-900 dark:text-slate-100">{service.name}</div>
+                          <div className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-100">
+                            <span>{service.name}</span>
+                            {isUnavailableInArimr ? (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                Niedostępne w ARiMR
+                              </span>
+                            ) : null}
+                          </div>
                           <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                             {Number(service.price_net || 0).toLocaleString("pl-PL", {
                               minimumFractionDigits: 2,
@@ -1650,7 +1697,7 @@ export default function OfferForm({
                         </div>
                       </label>
 
-                      {selectedService && service.allows_quantity && (
+                      {selectedService && service.allows_quantity && !isUnavailableInArimr && (
                         <label className="block sm:w-32">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                             Ilość {service.unit_label?.trim() || "szt."}
@@ -1684,7 +1731,7 @@ export default function OfferForm({
       {(customProductMode || hasPvSelected || hasStorageSelected) && (
         <div className={`mb-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 ${activeWorkspaceStep === "settlement" ? "" : "hidden"}`}>
           <div className="space-y-4">
-            {!customProductMode ? <div>
+            {!customProductMode && !isArimr2026 ? <div>
               <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">System rozliczeń</span>
               <div className="grid grid-cols-2 gap-2">
                 {[
@@ -1733,7 +1780,7 @@ export default function OfferForm({
               </label>
             ) : null}
 
-            {!customProductMode ? <div>
+            {!customProductMode && !isArimr2026 ? <div>
               <span className="mb-2 block text-xs font-semibold text-slate-500 dark:text-slate-400">Program PME</span>
               {hasStorageSelected ? (
                 <label className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-4 py-3 ${includeSubsidy ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"}`}>
@@ -1761,8 +1808,20 @@ export default function OfferForm({
             {activeWorkspaceStep !== "settlement" ? (
               <button
                 type="button"
+                disabled={
+                  activeWorkspaceStep === "client" &&
+                  !customProductMode &&
+                  existingPvAnswer === ""
+                }
                 onClick={goToNextWorkspaceSection}
-                className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:shadow-none dark:hover:bg-slate-200"
+                title={
+                  activeWorkspaceStep === "client" &&
+                  !customProductMode &&
+                  existingPvAnswer === ""
+                    ? "Najpierw odpowiedz, czy klient posiada fotowoltaikę."
+                    : undefined
+                }
+                className={`rounded-xl px-5 py-3 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:shadow-none dark:disabled:bg-slate-800 dark:disabled:text-slate-500 ${isArimr2026 ? "bg-[#102a43] shadow-blue-200 hover:bg-[#173b5e] disabled:hover:bg-slate-200 dark:bg-[#081a2c] dark:hover:bg-[#102a43] dark:disabled:hover:bg-slate-800" : "bg-slate-950 shadow-slate-200 hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"}`}
               >
                 Dalej: {nextSectionLabel} →
               </button>
@@ -1771,6 +1830,7 @@ export default function OfferForm({
                 onClick={calculate}
                 disabled={
                   !canConfigureOffer ||
+                  (isArimr2026 && (!hasPvSelected || !hasStorageSelected)) ||
                   (customProductMode
                     ? !hasValidCustomOfferItems
                     : !hasPvSelected && !hasStorageSelected)
@@ -1785,6 +1845,8 @@ export default function OfferForm({
                         ? "Przelicz ofertę"
                         : "Oblicz ofertę"
                       : "Uzupełnij pozycję"
+                    : isArimr2026 && (!hasPvSelected || !hasStorageSelected)
+                    ? "Wybierz PV i ME"
                     : hasPvSelected || hasStorageSelected
                     ? hasStaleResult
                       ? "Przelicz ofertę"

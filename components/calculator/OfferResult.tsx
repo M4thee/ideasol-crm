@@ -6,10 +6,16 @@ import Link from "next/link";
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 import type { CustomPaymentSchedule } from "@/lib/customPaymentSchedule";
 import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
+import type { Arimr2026CalculationResult } from "@/lib/calculator/arimr2026";
 
 type Result = {
+  calculatorProgram?: "standard" | "arimr2026";
+  arimr2026?: Arimr2026CalculationResult;
   pvPowerKw: number;
   inverter: string;
+  inverterSizingPvPowerKw?: number;
+  selectedInverterMaxPvKw?: number;
+  inverterPowerRequiresReview?: boolean;
   energyStorage: string;
   storage?: string;
   storageVoltageType?: "low_voltage" | "high_voltage";
@@ -66,6 +72,9 @@ type Result = {
   additionalServicesNet?: number;
   vatRate: number;
   companyMargin: number;
+  arimrInternalCostsNet?: number;
+  arimrCompanyProfitNet?: number;
+  arimrWarrantyFundNet?: number;
   operatorPercent?: number;
   sellerCommissionNet?: number;
   sellerWarrantyFeeNet?: number;
@@ -177,6 +186,7 @@ type OfferResultProps = {
   compact?: boolean;
   wide?: boolean;
   hideSubsidy?: boolean;
+  hideTechnicalDetails?: boolean;
   equipmentQuickEdit?: EquipmentQuickEdit;
 };
 
@@ -255,6 +265,149 @@ function PencilIcon() {
   );
 }
 
+function ArimrSellerPlanDetails({
+  result,
+  compact = false,
+}: {
+  result?: Arimr2026CalculationResult;
+  compact?: boolean;
+}) {
+  if (!result) return null;
+
+  const planContributionKw = Number(result.sellerPlanContributionKw ?? 0);
+  const programPlanKw = Number(
+    result.sellerProgramPlanKw ?? result.sellerMonthlyPlanKw ?? 0
+  );
+  const offerPlanSharePercent =
+    Number(result.sellerPlanSharePercent ?? result.sellerPlanCompletionPercent ?? 0);
+  const sellerBaseCompensationNet = Number(result.sellerBaseCompensationNet ?? 0);
+
+  const rows = [
+    ["Wkład tej oferty do planu", `${planContributionKw.toLocaleString("pl-PL")} kW`],
+    ["Plan na cały program", `${programPlanKw.toLocaleString("pl-PL")} kW`],
+    ["Udział tej oferty w planie", `${offerPlanSharePercent.toLocaleString("pl-PL", { maximumFractionDigits: 1 })}%`],
+    ["Prowizja bazowa przy 100% planu", `${sellerBaseCompensationNet.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`],
+    ["Rozliczenie końcowe", "Raport ARiMR 2026"],
+    ["Narzut handlowca", "0 zł"],
+  ];
+
+  return (
+    <div className={`${compact ? "mt-2 border-t border-slate-200 pt-2 dark:border-slate-700" : "rounded-2xl border border-violet-200 bg-violet-50 p-4 dark:border-violet-900 dark:bg-violet-950/25"} space-y-1.5`}>
+      {!compact ? <p className="mb-2 text-xs font-black uppercase tracking-[0.14em] text-violet-600 dark:text-violet-300">Rozliczenie planu handlowca</p> : null}
+      {rows.map(([label, value]) => (
+        <div key={label} className={`flex justify-between gap-3 ${compact ? "text-[10px]" : "text-sm"}`}>
+          <span>{label}</span>
+          <span className="shrink-0 font-bold">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ArimrFinancialDetails({
+  result,
+  compact = false,
+}: {
+  result: Result;
+  compact?: boolean;
+}) {
+  if (result.calculatorProgram !== "arimr2026") return null;
+
+  const formatMoney = (value: number) =>
+    `${value.toLocaleString("pl-PL", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} zł`;
+  const companyProfit = result.arimrCompanyProfitNet || 0;
+  const warrantyFund = result.arimrWarrantyFundNet || 0;
+  const ownerProfit = (companyProfit - warrantyFund) / 3;
+
+  return (
+    <div className={`${compact ? "space-y-1.5" : "rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/25"}`}>
+      <div className={`flex justify-between gap-3 ${compact ? "text-[10px]" : "text-sm"}`}>
+        <span>Suma kosztów wewnętrznych</span>
+        <span className="shrink-0 font-bold">{formatMoney(result.arimrInternalCostsNet || 0)}</span>
+      </div>
+      <div className={`flex justify-between gap-3 font-bold ${compact ? "text-[10px]" : "text-sm"}`}>
+        <span>Zysk firmy</span>
+        <span className="shrink-0">{formatMoney(companyProfit)}</span>
+      </div>
+      <div className={`flex justify-between gap-3 ${compact ? "text-[10px]" : "text-sm"}`}>
+        <span>W tym fundusz gwarancyjny</span>
+        <span className="shrink-0 font-bold">{formatMoney(warrantyFund)}</span>
+      </div>
+      <div className={`flex justify-between gap-3 font-bold ${compact ? "text-[10px]" : "text-sm"}`}>
+        <span>Zysk per wspólnik</span>
+        <span className="shrink-0">{formatMoney(ownerProfit)}</span>
+      </div>
+    </div>
+  );
+}
+
+export function OfferTechnicalDetails({
+  result,
+  canSeeTechnicalView,
+  compact = false,
+}: {
+  result: Result;
+  canSeeTechnicalView: boolean;
+  compact?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!canSeeTechnicalView) return null;
+
+  return (
+    <div className={compact ? "mt-3 border-t border-slate-200 pt-3 dark:border-slate-700" : "mt-6 border-t border-slate-200 pt-4 dark:border-slate-700"}>
+      <button
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        className={compact
+          ? "flex w-full items-center justify-between text-left text-xs font-bold text-slate-500"
+          : "flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"}
+      >
+        <span className={compact ? undefined : "font-medium text-slate-500 dark:text-slate-300"}>
+          {compact ? "Dane techniczne" : "Zaawansowane dane finansowe"}
+        </span>
+        <span className={compact ? undefined : "text-slate-400 dark:text-slate-500"}>
+          {expanded ? "Zwiń" : "Rozwiń"}
+        </span>
+      </button>
+
+      {expanded ? (
+        <div className={compact ? "mt-3 space-y-1.5 text-[10px] text-slate-500" : "mt-4 space-y-3"}>
+          {result.calculatorProgram === "arimr2026" ? (
+            <ArimrFinancialDetails result={result} compact={compact} />
+          ) : (
+            <div className={compact
+              ? "flex justify-between gap-3 font-bold"
+              : "mb-4 flex justify-between text-sm font-semibold text-slate-600 dark:text-slate-300"}
+            >
+              <span>{compact ? "Marża firmy" : "Realna marża firmy"}</span>
+              <span>{Number(result.companyMargin || 0).toLocaleString("pl-PL")} zł</span>
+            </div>
+          )}
+
+          <div className={compact ? "space-y-1.5" : "space-y-2"}>
+            {(Array.isArray(result.breakdown) ? result.breakdown : []).map((item) => (
+              <div
+                key={item.label}
+                className={compact
+                  ? "flex justify-between gap-3"
+                  : "flex items-start justify-between gap-3 text-sm text-slate-700 dark:text-slate-300"}
+              >
+                <span className={compact ? undefined : "min-w-0 break-words"}>{item.label}</span>
+                <span className="shrink-0">{Number(item.value || 0).toLocaleString("pl-PL")} zł</span>
+              </div>
+            ))}
+          </div>
+          <ArimrSellerPlanDetails result={result.arimr2026} compact={compact} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function OfferResult({
   result,
   panelCount,
@@ -292,9 +445,9 @@ export default function OfferResult({
   compact = false,
   wide = false,
   hideSubsidy = false,
+  hideTechnicalDetails = false,
   equipmentQuickEdit,
 }: OfferResultProps) {
-  const [showMarginSummary, setShowMarginSummary] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
 
@@ -331,7 +484,6 @@ export default function OfferResult({
     }
   }, [selectedClientId, selectedCrmClientEmail, clientEmail, setClientEmail]);
 
-  const canSeeMarginSummary = canSeeTechnicalView;
 
   const normalizedClientSearchQuery = clientSearchQuery.trim().toLowerCase();
 
@@ -386,8 +538,13 @@ export default function OfferResult({
     return item?.value || 0;
   }
 
-  const storageNetFromBreakdown = findBreakdownValue(["magazyn", "storage"]);
-  const inverterNetFromBreakdown = findBreakdownValue(["falownik", "inverter"]);
+  const isArimr2026 = result.calculatorProgram === "arimr2026" && Boolean(result.arimr2026);
+  const storageNetFromBreakdown = isArimr2026
+    ? Number(result.arimr2026?.storageSalePriceNet || 0)
+    : findBreakdownValue(["magazyn", "storage"]);
+  const inverterNetFromBreakdown = isArimr2026
+    ? 0
+    : findBreakdownValue(["falownik", "inverter"]);
   const emsNetFromBreakdown = findBreakdownValue(["ems"]);
   const backupNetFromBreakdown = findBreakdownValue(["backup", "zasilania awaryjnego"]);
   const hasBackupForPdf = backupNetFromBreakdown > 0;
@@ -404,7 +561,9 @@ export default function OfferResult({
   );
 
   const pvNetForPdf = Math.max(
-    hasSubsidyOptimization
+    isArimr2026
+      ? Number(result.arimr2026?.pvSalePriceNet || 0)
+      : hasSubsidyOptimization
       ? result.subsidyAllocation?.pvNet || 0
       : result.finalNet -
           storageNetFromBreakdown -
@@ -415,7 +574,9 @@ export default function OfferResult({
   );
 
   const storageNetForPdf = Math.max(
-    hasSubsidyOptimization
+    isArimr2026
+      ? Number(result.arimr2026?.storageSalePriceNet || 0)
+      : hasSubsidyOptimization
       ? result.subsidyAllocation?.storageNet || storageNetFromBreakdown
       : storageNetFromBreakdown,
     0
@@ -497,8 +658,10 @@ export default function OfferResult({
       backupNet: backupNetFromBreakdown,
       backupGross: backupGrossFromBreakdown,
       additionalServices,
-      subsidyTotal: result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0,
+      subsidyTotal: result.arimr2026?.grantAfterLimit ?? (result.subsidyAllocation?.enabled ? result.subsidyAllocation.total || 0 : 0),
       subsidyAllocation: result.subsidyAllocation?.enabled ? result.subsidyAllocation : undefined,
+      calculatorProgram: result.calculatorProgram,
+      arimr2026: result.arimr2026,
       finalNet: result.finalNet,
       finalGross: result.finalGross,
       vatRate: result.vatRate,
@@ -593,9 +756,11 @@ export default function OfferResult({
           confirm: "Tak, wyślij jawnie",
         };
 
-  const compactSubsidyTotal = result.subsidyAllocation?.enabled
-    ? Number(result.subsidyAllocation.total || 0)
-    : 0;
+  const compactSubsidyTotal = result.arimr2026?.grantAfterLimit ?? (
+    result.subsidyAllocation?.enabled
+      ? Number(result.subsidyAllocation.total || 0)
+      : 0
+  );
 
   function renderQuickEditor(target: "panel" | "storage" | "inverter") {
     const editor = equipmentQuickEdit?.[target];
@@ -711,6 +876,11 @@ export default function OfferResult({
                 <div className={`${wide ? "p-4" : "p-3"} rounded-xl border border-amber-100 bg-amber-50/65 dark:border-amber-900/40 dark:bg-amber-950/20`}>
                   <div className="flex flex-wrap items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><p className={`${wide ? "text-base" : "text-xs"} font-bold text-slate-900 dark:text-white`}>Falownik</p>{renderEditButton("inverter", "falownik")}{renderCatalogCardButton("inverter", "falownika")}</div>
                   <p className={`${wide ? "mt-1.5 text-sm leading-5" : "mt-1 text-[10px] leading-4"} break-words text-slate-500`}>{result.inverter}</p>
+                  {result.inverterPowerRequiresReview ? (
+                    <p className={`${wide ? "mt-2 text-xs leading-5" : "mt-1 text-[9px] leading-4"} rounded-lg border border-amber-300 bg-amber-100/70 px-2 py-1.5 font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100`}>
+                      Największy zgodny napięciowo model w katalogu obsługuje do {Number(result.selectedInverterMaxPvKw || 0).toLocaleString("pl-PL")} kWp przy wymaganych {Number(result.inverterSizingPvPowerKw || 0).toLocaleString("pl-PL")} kWp. Dobór mocy lub układ równoległy wymaga potwierdzenia technicznego.
+                    </p>
+                  ) : null}
                   {renderQuickEditor("inverter")}
                 </div>
               )}
@@ -765,12 +935,13 @@ export default function OfferResult({
             <div className="rounded-xl bg-slate-100 px-3 py-2 text-[10px] leading-4 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{copied ? "Skopiowano treść oferty. " : ""}{pdfStatus || saveOfferStatus || emailStatus}</div>
           )}
 
-          {canSeeMarginSummary && (
-            <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
-              <button type="button" onClick={() => setShowMarginSummary((current) => !current)} className="flex w-full items-center justify-between text-left text-xs font-bold text-slate-500"><span>Dane techniczne</span><span>{showMarginSummary ? "Zwiń" : "Rozwiń"}</span></button>
-              {showMarginSummary && <div className="mt-3 space-y-1.5 text-[10px] text-slate-500"><div className="flex justify-between gap-3 font-bold"><span>Marża firmy</span><span>{result.companyMargin.toLocaleString("pl-PL")} zł</span></div>{result.breakdown.map((item) => <div key={item.label} className="flex justify-between gap-3"><span>{item.label}</span><span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span></div>)}</div>}
-            </div>
-          )}
+          {!hideTechnicalDetails ? (
+            <OfferTechnicalDetails
+              result={result}
+              canSeeTechnicalView={canSeeTechnicalView}
+              compact
+            />
+          ) : null}
         </div>
       ) : (
         <>
@@ -1175,47 +1346,12 @@ export default function OfferResult({
           />
         )}
 
-        {canSeeMarginSummary && (
-          <div className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-700">
-            <button
-              type="button"
-              onClick={() => setShowMarginSummary((current) => !current)}
-              className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
-            >
-              <>
-                <span className="font-medium text-slate-500 dark:text-slate-300">
-                  Zaawansowane dane finansowe
-                </span>
-                <span className="text-slate-400 dark:text-slate-500">
-                  {showMarginSummary ? "Zwiń" : "Rozwiń"}
-                </span>
-              </>
-            </button>
-
-            {showMarginSummary && (
-              <div className="mt-4 space-y-3">
-                <div className="mb-4 flex justify-between text-sm font-semibold text-slate-600 dark:text-slate-300">
-                  <span>Realna marża firmy</span>
-                  <span>{result.companyMargin.toLocaleString("pl-PL")} zł</span>
-                </div>
-
-                <div className="space-y-2">
-                  {(Array.isArray(result?.breakdown)
-                    ? result.breakdown
-                    : []).map((item) => (
-                    <div
-                      key={item.label}
-                      className="flex items-start justify-between gap-3 text-sm text-slate-700 dark:text-slate-300"
-                    >
-                      <span className="min-w-0 break-words">{item.label}</span>
-                      <span className="shrink-0">{item.value.toLocaleString("pl-PL")} zł</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {!hideTechnicalDetails ? (
+          <OfferTechnicalDetails
+            result={result}
+            canSeeTechnicalView={canSeeTechnicalView}
+          />
+        ) : null}
       </div>
 
         </>

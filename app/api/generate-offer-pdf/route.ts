@@ -14,6 +14,13 @@ import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
 export const runtime = "nodejs";
 
 type OfferPdfData = {
+  calculatorProgram?: "standard" | "arimr2026";
+  arimr2026?: {
+    pvGrant?: number;
+    storageGrant?: number;
+    grantAfterLimit?: number;
+    customerPaymentGross?: number;
+  };
   clientName?: string;
   offerType?: string;
   customOfferTitle?: string;
@@ -892,8 +899,17 @@ async function createOfferPdf(data: OfferPdfData) {
     y -= paymentCardHeight + 12;
   }
 
-  const subsidyTotal = data.subsidyAllocation?.enabled ? getSubsidyTotal(data) : 0;
-  const storageSubsidy = Number(data.subsidyAllocation?.storageSubsidy || 0);
+  const isArimr2026 = data.calculatorProgram === "arimr2026";
+  const subsidyTotal = isArimr2026
+    ? Number(data.arimr2026?.grantAfterLimit || data.subsidyTotal || 0)
+    : data.subsidyAllocation?.enabled
+      ? getSubsidyTotal(data)
+      : 0;
+  const storageSubsidy = Number(
+    isArimr2026
+      ? data.arimr2026?.storageGrant || 0
+      : data.subsidyAllocation?.storageSubsidy || 0
+  );
   const euBonus = Number(
     data.subsidyAllocation?.euBonus ?? data.subsidyAllocation?.emsBonus ?? 0
   );
@@ -923,7 +939,9 @@ async function createOfferPdf(data: OfferPdfData) {
     );
 
     page.drawText(
-      `Dotacja ME: ${formatMoney(storageSubsidy)}${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)}` : ""}`,
+      isArimr2026
+        ? `Dotacja PV: ${formatMoney(data.arimr2026?.pvGrant || 0)} · Dotacja ME: ${formatMoney(storageSubsidy)}`
+        : `Dotacja ME: ${formatMoney(storageSubsidy)}${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)}` : ""}`,
       {
         x: marginX + 20,
         y: y - 37,
@@ -935,7 +953,9 @@ async function createOfferPdf(data: OfferPdfData) {
 
     drawWrappedText(
       page,
-      "Powyższa cena nie uwzględnia dotacji rządowej w Programie Priorytetowym Przydomowe Magazyny Energii, która wypłacana jest przez Narodowy Fundusz Ochrony Środowiska i Gospodarki Wodnej na rachunek bankowy beneficjenta na podstawie złożonego wniosku o dofinansowanie, na podstawie faktur i protokołów potwierdzających montaż urządzeń dofinansowywanych przez program. IdeaSol składa wnioski o dofinansowanie w imieniu swoich klientów, jeżeli tak zostanie ustalone podczas zawierania umowy sprzedaży i montażu instalacji fotowoltaicznej i/lub magazynu energii. Szacowana kwota dotacji została wyliczona na podstawie oficjalnych informacji zawartych na stronie internetowej Programu Priorytetowego Przydomowe Magazyny Energii część II. IdeaSol nie odpowiada za decyzje instytucji prowadzących nabór co do ich terminu, wcześniejszego zakończenia lub zmian w regulaminie PP Przydomowe Magazyny, a takze za decyzje co do przyznania dofinansowania.",
+      isArimr2026
+        ? `Szacowany wkład własny klienta brutto: ${formatMoney(data.arimr2026?.customerPaymentGross || 0)}. Kalkulator stosuje stawki jednostkowe ARiMR oraz limit obszaru B. Wynik wymaga potwierdzenia z finalnym regulaminem naboru 2026.`
+        : "Powyższa cena nie uwzględnia dotacji rządowej w Programie Priorytetowym Przydomowe Magazyny Energii, która wypłacana jest przez Narodowy Fundusz Ochrony Środowiska i Gospodarki Wodnej na rachunek bankowy beneficjenta na podstawie złożonego wniosku o dofinansowanie, na podstawie faktur i protokołów potwierdzających montaż urządzeń dofinansowywanych przez program. IdeaSol składa wnioski o dofinansowanie w imieniu swoich klientów, jeżeli tak zostanie ustalone podczas zawierania umowy sprzedaży i montażu instalacji fotowoltaicznej i/lub magazynu energii. Szacowana kwota dotacji została wyliczona na podstawie oficjalnych informacji zawartych na stronie internetowej Programu Priorytetowego Przydomowe Magazyny Energii część II. IdeaSol nie odpowiada za decyzje instytucji prowadzących nabór co do ich terminu, wcześniejszego zakończenia lub zmian w regulaminie PP Przydomowe Magazyny, a takze za decyzje co do przyznania dofinansowania.",
       {
         x: marginX + 20,
         y: y - 51,
@@ -956,6 +976,8 @@ async function createOfferPdf(data: OfferPdfData) {
     page,
     data.offerType === "custom"
       ? "Oferta ma charakter informacyjny. Zakres, dostępność oraz warunki realizacji wymagają potwierdzenia przed zawarciem umowy."
+      : isArimr2026
+      ? "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Dotacja została oszacowana według stawek jednostkowych ARiMR 2026 i wymaga potwierdzenia z finalnym regulaminem naboru."
       : data.subsidyAllocation?.enabled
       ? "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu i zostały zoptymalizowane pod jak najkorzystniejszą dla klienta wysokość dotacji z programu PME."
       : "Oferta ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Powyższe ceny obowiązują przy zakupie całego oferowanego pakietu.",
@@ -1013,6 +1035,8 @@ export async function POST(request: Request) {
       emsNet: body.emsNet,
       emsGross: body.emsGross,
       additionalServices: body.additionalServices,
+      calculatorProgram: body.calculatorProgram,
+      arimr2026: body.arimr2026,
       subsidyTotal: body.subsidyTotal,
       subsidyAllocation: body.subsidyAllocation,
       finalNet: body.finalNet,

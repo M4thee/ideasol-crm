@@ -2,14 +2,18 @@
 
 import { supabase } from "@/lib/supabase";
 import { useEffect, useRef, useState } from "react";
-import OfferResult, { type OfferEmailOptions } from "@/components/calculator/OfferResult";
+import OfferResult, {
+  OfferTechnicalDetails,
+  type OfferEmailOptions,
+} from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
+import Arimr2026GrantSummary from "@/components/calculator/Arimr2026GrantSummary";
 import CreditCalculator from "@/components/calculator/CreditCalculator";
 import ResultOverviewBar from "@/components/calculator/ResultOverviewBar";
 import ResultPanelFocusToggle from "@/components/calculator/ResultPanelFocusToggle";
 import SubsidyOptimizer from "@/components/SubsidyOptimizer";
 import { generateOfferPdfBase64 } from "@/lib/generateOfferPdfAttachment";
-import { recordCrmAuditEvent } from "@/lib/crmAudit";
+import { createCrmAuditId, recordCrmAuditEvent } from "@/lib/crmAudit";
 import { normalizeInstallationCount } from "@/lib/installationCount";
 import {
   CUSTOM_PANEL_CODE,
@@ -41,12 +45,24 @@ import {
   getExplicitStorageVoltageType,
   rankInvertersForStorage,
 } from "@/lib/calculator/equipmentCompatibility";
+import {
+  calculateArimr2026,
+  DEFAULT_ARIMR_2026_SETTINGS,
+  type Arimr2026CalculationResult,
+  type Arimr2026MountingLocation,
+  type Arimr2026Settings,
+} from "@/lib/calculator/arimr2026";
+import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
 
 
 type Result = {
+  calculatorProgram?: "standard" | "arimr2026";
+  arimr2026?: Arimr2026CalculationResult;
   pvPowerKw: number;
   inverter: string;
   inverterSizingPvPowerKw?: number;
+  selectedInverterMaxPvKw?: number;
+  inverterPowerRequiresReview?: boolean;
   inverterBatteryVoltageType?: "low_voltage" | "high_voltage" | null;
   inverterBatteryVoltageLabel?: string;
   energyStorage: string;
@@ -134,10 +150,15 @@ type Result = {
 
   basePriceNet: number;
   sellerMarkupNet: number;
+  sellerCommissionNet?: number;
+  operatorPercent?: number;
   finalNet: number;
   finalGross: number;
   vatRate: number;
   companyMargin: number;
+  arimrInternalCostsNet?: number;
+  arimrCompanyProfitNet?: number;
+  arimrWarrantyFundNet?: number;
   breakdown: {
     label: string;
     value: number;
@@ -223,6 +244,7 @@ type UserProfile = {
   role: "admin" | "owner" | "seller" | "cc" | null;
   is_active?: boolean | null;
   custom_mode_access?: boolean;
+  arimr_calculator_access?: boolean;
 };
 
 type CrmClientOption = {
@@ -250,6 +272,7 @@ const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
 const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v2";
 const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
+const ARIMR_2026_SETTINGS_CACHE_KEY = "ideasol:calculator:arimr2026:settings:v3";
 
 
 type CachedCrmClientsPayload = {
@@ -492,7 +515,72 @@ function writeCachedPricingOverrides(pricing: typeof DEFAULT_PRICING_OVERRIDES) 
     console.warn("Nie udało się zapisać cache ustawień cen kalkulatora", error);
   }
 }
+
+function readCachedArimr2026Settings() {
+  if (typeof window === "undefined") {
+    return null as Arimr2026Settings | null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ARIMR_2026_SETTINGS_CACHE_KEY);
+
+    if (!rawValue) return null;
+
+    return {
+      ...DEFAULT_ARIMR_2026_SETTINGS,
+      ...(JSON.parse(rawValue) as Partial<Arimr2026Settings>),
+    };
+  } catch (error) {
+    console.warn("Nie udało się odczytać cache ustawień ARiMR 2026", error);
+    return null;
+  }
+}
+
+function writeCachedArimr2026Settings(settings: Arimr2026Settings) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      ARIMR_2026_SETTINGS_CACHE_KEY,
+      JSON.stringify(settings)
+    );
+  } catch (error) {
+    console.warn("Nie udało się zapisać cache ustawień ARiMR 2026", error);
+  }
+}
+
+function getArimrMountingLocation(roofType: string): Arimr2026MountingLocation {
+  if (roofType === "papa") return "flat_roof";
+  if (roofType === "dachowka") return "pitched_tile";
+  if (roofType === "grunt") return "ground";
+  return "pitched_sheet";
+}
+
+function getArimrMountingCost(
+  mountingLocation: Arimr2026MountingLocation,
+  pvPowerKwp: number,
+  settings: Arimr2026Settings
+) {
+  const rateNetPerKwp =
+    mountingLocation === "flat_roof"
+      ? settings.flatRoofCostNetPerKwp
+      : mountingLocation === "pitched_tile"
+        ? settings.pitchedTileCostNetPerKwp
+        : mountingLocation === "ground"
+          ? settings.groundCostNetPerKwp
+          : settings.pitchedSheetCostNetPerKwp;
+
+  return pvPowerKwp * rateNetPerKwp;
+}
+
+function getArimrSubsidyTotal(result: Result) {
+  return result.arimr2026?.grantAfterLimit ?? result.subsidyAllocation?.total ?? 0;
+}
+
 export default function Home() {
+  const [calculatorMode, setCalculatorMode] = useState<"standard" | "arimr2026">(
+    "standard"
+  );
   const [clientIdFromUrl, setClientIdFromUrl] = useState("");
   const [isOffline, setIsOffline] = useState(false);
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
@@ -554,6 +642,9 @@ export default function Home() {
   const [emailStatus, setEmailStatus] = useState("");
   const [catalogError, setCatalogError] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
+  const [arimr2026Settings, setArimr2026Settings] = useState(
+    DEFAULT_ARIMR_2026_SETTINGS
+  );
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
   const calculationAuditIdRef = useRef<string | null>(null);
 
@@ -566,6 +657,7 @@ export default function Home() {
   const canSeeTechnicalView = currentUserRole === "admin" || currentUserRole === "owner";
   const canSeePricingPanel = currentUserRole.includes("admin");
   const customModeAvailable = userProfile?.custom_mode_access === true;
+  const arimrCalculatorAvailable = userProfile?.arimr_calculator_access === true;
   const customModeActive = customMode && customModeAvailable;
 
   useEffect(() => {
@@ -842,14 +934,16 @@ export default function Home() {
       }
 
       if (data) {
-        const { data: customModePermission } = await supabase
+        const { data: calculatorPermissions } = await supabase
           .from("user_permissions")
-          .select("custom_mode")
+          .select("custom_mode, arimr_calculator")
           .eq("user_id", user.id)
           .maybeSingle();
         const profile = {
           ...data,
-          custom_mode_access: customModePermission?.custom_mode === true,
+          custom_mode_access: calculatorPermissions?.custom_mode === true,
+          arimr_calculator_access:
+            calculatorPermissions?.arimr_calculator === true,
         } as UserProfile;
         setUserProfile(profile);
 
@@ -869,6 +963,7 @@ export default function Home() {
 
     async function loadPricingSettings() {
       const cachedPricing = readCachedPricingOverrides();
+      const cachedArimrSettings = readCachedArimr2026Settings();
 
       if (cachedPricing) {
         setPricingOverrides({
@@ -883,6 +978,10 @@ export default function Home() {
             ...cachedPricing.placeholders,
           },
         });
+      }
+
+      if (cachedArimrSettings) {
+        setArimr2026Settings(cachedArimrSettings);
       }
 
       if (!isCalculatorOnline()) {
@@ -944,6 +1043,43 @@ export default function Home() {
 
         writeCachedPricingOverrides(nextPricing);
         return nextPricing;
+      });
+
+      setArimr2026Settings((current) => {
+        const nextSettings: Arimr2026Settings = {
+          pvReferenceRateNetPerKwp: Number(data.arimr_pv_reference_rate_net_per_kwp ?? current.pvReferenceRateNetPerKwp),
+          storageReferenceRateNetPerKwh: Number(data.arimr_storage_reference_rate_net_per_kwh ?? current.storageReferenceRateNetPerKwh),
+          supportPercent: Number(data.arimr_support_percent ?? current.supportPercent),
+          areaBGrantLimit: Number(data.arimr_area_b_grant_limit ?? current.areaBGrantLimit),
+          minimumStorageKwhPerPvKwp: Number(data.arimr_min_storage_kwh_per_pv_kwp ?? current.minimumStorageKwhPerPvKwp),
+          defaultVatRate: Number(data.arimr_default_vat_rate ?? current.defaultVatRate),
+          pvSaleRateNetPerKwp: Number(data.arimr_default_pv_sale_rate_net_per_kwp ?? data.arimr_sale_pv_flat_roof_net_per_kwp ?? current.pvSaleRateNetPerKwp),
+          storageSaleRateNetPerKwh: Number(data.arimr_default_storage_sale_rate_net_per_kwh ?? current.storageSaleRateNetPerKwh),
+          sellerMonthlyPlanKw: Number(data.arimr_seller_monthly_plan_kw ?? current.sellerMonthlyPlanKw),
+          sellerPvPlanKwPerKwp: Number(data.arimr_seller_pv_plan_kw_per_kwp ?? current.sellerPvPlanKwPerKwp),
+          sellerStoragePlanKwPerUnit: Number(data.arimr_seller_storage_plan_kw_per_unit ?? current.sellerStoragePlanKwPerUnit),
+          sellerPvCompensationNetPerKwp: Number(data.arimr_seller_pv_compensation_net_per_kwp ?? current.sellerPvCompensationNetPerKwp),
+          sellerStorageCompensationNetPerKwh: Number(data.arimr_seller_storage_compensation_net_per_kwh ?? current.sellerStorageCompensationNetPerKwh),
+          sellerMaxMultiplierPercent: Number(data.arimr_seller_max_multiplier_percent ?? current.sellerMaxMultiplierPercent),
+          pvInstallationCostNetPerKwp: Number(data.arimr_cost_pv_installation_net_per_kwp ?? current.pvInstallationCostNetPerKwp),
+          storageInstallationCostNet: Number(data.arimr_cost_storage_installation_net ?? current.storageInstallationCostNet),
+          flatRoofCostNetPerKwp: Number(data.arimr_cost_flat_roof_net ?? current.flatRoofCostNetPerKwp),
+          pitchedSheetCostNetPerKwp: Number(data.arimr_cost_pitched_sheet_net ?? current.pitchedSheetCostNetPerKwp) === 1500
+            ? DEFAULT_ARIMR_2026_SETTINGS.pitchedSheetCostNetPerKwp
+            : Number(data.arimr_cost_pitched_sheet_net ?? current.pitchedSheetCostNetPerKwp),
+          pitchedTileCostNetPerKwp: Number(data.arimr_cost_pitched_tile_net ?? current.pitchedTileCostNetPerKwp),
+          groundCostNetPerKwp: Number(data.arimr_cost_ground_net ?? current.groundCostNetPerKwp),
+          protectionsCostNet: Number(data.arimr_cost_protections_net ?? current.protectionsCostNet),
+          wiringCostNet: Number(data.arimr_cost_wiring_net ?? current.wiringCostNet),
+          transportElectronicsCostNet: Number(data.arimr_cost_transport_electronics_net ?? current.transportElectronicsCostNet),
+          transportPanelsCostNet: Number(data.arimr_cost_transport_panels_net ?? current.transportPanelsCostNet),
+          documentationCostNet: Number(data.arimr_cost_documentation_net ?? current.documentationCostNet),
+          marketingCostNet: Number(data.arimr_cost_marketing_net ?? current.marketingCostNet),
+          warrantyFundPercent: Number(data.arimr_cost_warranty_fund_percent ?? current.warrantyFundPercent),
+        };
+
+        writeCachedArimr2026Settings(nextSettings);
+        return nextSettings;
       });
     }
 
@@ -1333,9 +1469,17 @@ export default function Home() {
   }
 
   function buildCalculationPayload() {
+    const isArimr2026 = calculatorMode === "arimr2026";
+    const allowedAdditionalServices = isArimr2026
+      ? selectedAdditionalServices.filter(
+          (service) => !isPmeApplicationServiceName(service.name)
+        )
+      : selectedAdditionalServices;
+
     return {
-      customMode: customModeActive,
-      customProductMode,
+      calculatorProgram: calculatorMode,
+      customMode: isArimr2026 ? false : customModeActive,
+      customProductMode: isArimr2026 ? false : customProductMode,
       customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
       customOfferItems: customProductMode ? customOfferItems : null,
       customPaymentTerms: customProductMode ? customPaymentTerms.trim() : null,
@@ -1345,7 +1489,7 @@ export default function Home() {
       panelCount,
       roofType,
       storage,
-      includeSubsidy,
+      includeSubsidy: isArimr2026 ? false : includeSubsidy,
       isUpsell,
       existingPvPowerKw: isUpsell
         ? Number(String(existingPvPowerKw).replace(",", ".")) || 0
@@ -1353,11 +1497,11 @@ export default function Home() {
       billingSystem,
       selectedInverterName,
       clientHasOwnHybridInverter,
-      sellerMarkup,
+      sellerMarkup: isArimr2026 ? 0 : sellerMarkup,
       vatRate,
       pricingOverrides,
-      additionalServices: selectedAdditionalServices,
-      additional_services: selectedAdditionalServices,
+      additionalServices: allowedAdditionalServices,
+      additional_services: allowedAdditionalServices,
       advisor: {
         id: userProfile?.id || null,
         name: advisorName,
@@ -1476,10 +1620,115 @@ export default function Home() {
         data = await res.json();
       }
 
+      if (calculatorMode === "arimr2026") {
+        if (offerType !== "pv_storage") {
+          throw new Error("W programie ARiMR 2026 wybierz instalację PV i magazyn energii.");
+        }
+
+        const mountingLocation = getArimrMountingLocation(roofType);
+        const selectedPanel = panels.find((panel) => panel.code === panelModel);
+        const selectedStorage = storages.find((item) => item.code === storage);
+        const selectedInverter = clientHasOwnHybridInverter
+          ? null
+          : inverters.find(
+              (inverter) =>
+                inverter.name === selectedInverterName ||
+                inverter.name === data.inverter ||
+                inverter.display_name === data.inverter
+            );
+        const allowedAdditionalServices = (data.additionalServices || []).filter(
+          (service) => !isPmeApplicationServiceName(service.name)
+        );
+        const additionalServicesNet = allowedAdditionalServices.reduce(
+          (sum, service) => sum + Number(service.totalNet || 0),
+          0
+        );
+        const arimrResult = calculateArimr2026(
+          {
+            pvPowerKwp: data.pvPowerKw,
+            storageCapacityKwh:
+              Number(data.storageCapacityKwh) || Number(selectedStorage?.capacity_kwh) || 0,
+            mountingLocation,
+            additionalServicesNet,
+            vatRate,
+          },
+          arimr2026Settings
+        );
+        const warrantyFundNet =
+          arimrResult.salePriceNet * (arimr2026Settings.warrantyFundPercent / 100);
+        const technicalBreakdown = [
+          {
+            label: `Panele (${panelCount} szt.)`,
+            value: panelCount * Number(selectedPanel?.price_net || 0),
+          },
+          { label: "Falownik", value: Number(selectedInverter?.price_net || 0) },
+          {
+            label: "Montaż PV",
+            value:
+              data.pvPowerKw *
+              arimr2026Settings.pvInstallationCostNetPerKwp,
+          },
+          { label: "Magazyn energii", value: Number(selectedStorage?.price_net || 0) },
+          {
+            label: "Montaż ME",
+            value: arimr2026Settings.storageInstallationCostNet,
+          },
+          {
+            label: "Konstrukcja / dach / grunt",
+            value: getArimrMountingCost(
+              mountingLocation,
+              data.pvPowerKw,
+              arimr2026Settings
+            ),
+          },
+          { label: "Zabezpieczenia", value: arimr2026Settings.protectionsCostNet },
+          { label: "Okablowanie", value: arimr2026Settings.wiringCostNet },
+          {
+            label: "Transport",
+            value:
+              arimr2026Settings.transportElectronicsCostNet +
+              arimr2026Settings.transportPanelsCostNet,
+          },
+          { label: "Dokumentacja", value: arimr2026Settings.documentationCostNet },
+          {
+            label: "Wynagrodzenie handlowca ARiMR",
+            value: arimrResult.sellerCompensationNet,
+          },
+        ].map((item) => ({ ...item, value: Math.round(item.value * 100) / 100 }));
+        const internalCostTotal = technicalBreakdown.reduce(
+          (sum, item) => sum + item.value,
+          0
+        );
+        const companyProfitNet =
+          Math.round((arimrResult.salePriceNet - internalCostTotal) * 100) / 100;
+
+        data = {
+          ...data,
+          calculatorProgram: "arimr2026",
+          arimr2026: arimrResult,
+          includeSubsidy: false,
+          subsidyAllocation: undefined,
+          subsidyProgramCap: arimr2026Settings.areaBGrantLimit,
+          basePriceNet: arimrResult.salePriceNet,
+          sellerMarkupNet: 0,
+          sellerCommissionNet: arimrResult.sellerCompensationNet,
+          finalNet: arimrResult.salePriceNet,
+          finalGross: arimrResult.salePriceGross,
+          vatRate: arimrResult.vatRate,
+          companyMargin: companyProfitNet,
+          arimrInternalCostsNet: Math.round(internalCostTotal * 100) / 100,
+          arimrCompanyProfitNet: companyProfitNet,
+          arimrWarrantyFundNet: Math.round(warrantyFundNet * 100) / 100,
+          breakdown: technicalBreakdown,
+          additionalServices: allowedAdditionalServices,
+          additionalServicesNet,
+        };
+      }
+
       setResult(data);
       setResultIsDirty(false);
       setResultPanelTab("summary");
-      const calculationId = crypto.randomUUID();
+      const calculationId = createCrmAuditId();
       calculationAuditIdRef.current = calculationId;
       void recordCrmAuditEvent({
         eventType: "calculation_completed",
@@ -1517,18 +1766,19 @@ export default function Home() {
   }
 
   function resetForm() {
+    const isArimr2026 = calculatorMode === "arimr2026";
     setCustomMode(false);
     setCustomProductMode(false);
     setCustomOfferTitle(DEFAULT_CUSTOM_OFFER_TITLE);
     setCustomOfferItems([createCustomOfferItem()]);
     setCustomPaymentTerms("");
     setCustomEquipment(createDefaultCustomEquipment());
-    setOfferType("none");
+    setOfferType(isArimr2026 ? "pv_storage" : "none");
     setPanelModel(panels[0]?.code || "");
     setPanelCount(16);
     setManualPowerKw("");
     setRoofType("blacha");
-    setStorage("none");
+    setStorage(isArimr2026 ? storages[0]?.code || "none" : "none");
     setClientHasOwnHybridInverter(false);
     setIncludeSubsidy(false);
     setIsUpsell(false);
@@ -1540,14 +1790,16 @@ export default function Home() {
     setCustomPaymentSchedule(createEmptyCustomPaymentSchedule());
     const defaultMargin = userProfile?.default_seller_markup;
 
-    if (defaultMargin !== null && defaultMargin !== undefined) {
+    if (isArimr2026) {
+      setSellerMarkup(0);
+    } else if (defaultMargin !== null && defaultMargin !== undefined) {
       const parsedDefaultMargin = Number(defaultMargin);
 
       if (Number.isFinite(parsedDefaultMargin)) {
         setSellerMarkup(parsedDefaultMargin);
       }
     }
-    setVatRate(8);
+    setVatRate(isArimr2026 ? arimr2026Settings.defaultVatRate : 8);
     setResult(null);
     setIsResultFocusMode(false);
     setResultIsDirty(false);
@@ -1639,15 +1891,15 @@ export default function Home() {
       vat_rate: result.vatRate,
       seller_margin: result.sellerMarkupNet,
       company_margin: result.companyMargin,
-      subsidy_allocation_enabled: result.subsidyAllocation?.enabled ?? false,
-      subsidy_billing_system: result.subsidyAllocation?.billingSystem ?? result.billingSystem ?? null,
-      subsidy_pv_net: result.subsidyAllocation?.pvNet ?? null,
-      subsidy_storage_net: result.subsidyAllocation?.storageNet ?? null,
+      subsidy_allocation_enabled: result.calculatorProgram === "arimr2026" || (result.subsidyAllocation?.enabled ?? false),
+      subsidy_billing_system: result.calculatorProgram === "arimr2026" ? null : result.subsidyAllocation?.billingSystem ?? result.billingSystem ?? null,
+      subsidy_pv_net: result.arimr2026?.pvGrant ?? result.subsidyAllocation?.pvNet ?? null,
+      subsidy_storage_net: result.arimr2026?.storageGrant ?? result.subsidyAllocation?.storageNet ?? null,
       subsidy_ems_net: result.subsidyAllocation?.emsNet ?? null,
-      subsidy_storage_subsidy: result.subsidyAllocation?.storageSubsidy ?? null,
+      subsidy_storage_subsidy: result.arimr2026?.storageGrant ?? result.subsidyAllocation?.storageSubsidy ?? null,
       subsidy_ems_bonus: 0,
       subsidy_eu_bonus: result.subsidyAllocation?.euBonus ?? null,
-      subsidy_total: result.subsidyAllocation?.total ?? null,
+      subsidy_total: getArimrSubsidyTotal(result) || null,
       pv_power_kw: result.pvPowerKw,
       panel_model: panelModelForSave,
       panel_count: customProductMode ? 0 : panelCount,
@@ -1656,6 +1908,7 @@ export default function Home() {
       energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
       offer_data: {
+        calculatorProgram: result.calculatorProgram || "standard",
         installationCount,
         identicalSetCount: installationCount,
         pdfQuantity: installationCount,
@@ -1671,6 +1924,7 @@ export default function Home() {
         additionalServices: selectedAdditionalServices,
         additional_services: selectedAdditionalServices,
         form: {
+          calculatorProgram: result.calculatorProgram || "standard",
           installationCount,
           identicalSetCount: installationCount,
           customMode: customModeActive,
@@ -1804,6 +2058,9 @@ const hasInverter = result.inverter && result.inverter !== "Brak";
       ? `- ${getInverterLabel(result.inverter)}: ${result.inverter}\n`
       : "";
     const storageLine = hasStorage ? `- magazyn energii: ${storageDisplayName}\n` : "";
+    const arimrSettlement = result.arimr2026
+      ? `\nDotacja ARiMR 2026: ${result.arimr2026.grantAfterLimit.toLocaleString("pl-PL")} zł\nWkład własny klienta brutto: ${result.arimr2026.customerPaymentGross.toLocaleString("pl-PL")} zł\n`
+      : "";
 
     return `Dzień dobry,
 
@@ -1816,6 +2073,7 @@ ${pvLine}${inverterLine}${storageLine}- montaż instalacji
 
 Cena netto: ${result.finalNet.toLocaleString("pl-PL")} zł
 Cena brutto ${result.vatRate}%: ${result.finalGross.toLocaleString("pl-PL")} zł
+${arimrSettlement}
 
 Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
 
@@ -2032,7 +2290,9 @@ IdeaSol`;
           customPaymentTerms: result.customPaymentTerms || "",
           customOfferTitle: result.customOfferTitle || DEFAULT_CUSTOM_OFFER_TITLE,
           subsidyAllocation: result.subsidyAllocation || null,
-          subsidyTotal: result.subsidyAllocation?.total || 0,
+          subsidyTotal: getArimrSubsidyTotal(result),
+          calculatorProgram: result.calculatorProgram,
+          arimr2026: result.arimr2026 || null,
           includeCatalogCards: catalogCardsForEmail.length > 0,
           catalogCards: catalogCardsForEmail,
           sellerNote: emailOptions?.sellerNote || "",
@@ -2199,16 +2459,16 @@ IdeaSol`;
           vat_rate: queuedResult.vatRate,
           seller_margin: queuedResult.sellerMarkupNet,
           company_margin: queuedResult.companyMargin,
-          subsidy_allocation_enabled: queuedResult.subsidyAllocation?.enabled ?? false,
+          subsidy_allocation_enabled: queuedResult.calculatorProgram === "arimr2026" || (queuedResult.subsidyAllocation?.enabled ?? false),
           subsidy_billing_system:
-            queuedResult.subsidyAllocation?.billingSystem ?? queuedResult.billingSystem ?? null,
-          subsidy_pv_net: queuedResult.subsidyAllocation?.pvNet ?? null,
-          subsidy_storage_net: queuedResult.subsidyAllocation?.storageNet ?? null,
+            queuedResult.calculatorProgram === "arimr2026" ? null : queuedResult.subsidyAllocation?.billingSystem ?? queuedResult.billingSystem ?? null,
+          subsidy_pv_net: queuedResult.arimr2026?.pvGrant ?? queuedResult.subsidyAllocation?.pvNet ?? null,
+          subsidy_storage_net: queuedResult.arimr2026?.storageGrant ?? queuedResult.subsidyAllocation?.storageNet ?? null,
           subsidy_ems_net: queuedResult.subsidyAllocation?.emsNet ?? null,
-          subsidy_storage_subsidy: queuedResult.subsidyAllocation?.storageSubsidy ?? null,
+          subsidy_storage_subsidy: queuedResult.arimr2026?.storageGrant ?? queuedResult.subsidyAllocation?.storageSubsidy ?? null,
           subsidy_ems_bonus: 0,
           subsidy_eu_bonus: queuedResult.subsidyAllocation?.euBonus ?? null,
-          subsidy_total: queuedResult.subsidyAllocation?.total ?? null,
+          subsidy_total: getArimrSubsidyTotal(queuedResult) || null,
           pv_power_kw: queuedResult.pvPowerKw,
           panel_model: snapshot.panelModel || null,
           panel_count: Number(snapshot.panelCount || 0),
@@ -2217,6 +2477,7 @@ IdeaSol`;
           energy_storage: getResultStorageDisplayName(queuedResult),
           roof_type: snapshot.roofType || null,
           offer_data: {
+            calculatorProgram: queuedResult.calculatorProgram || "standard",
             installationCount: installationCountSnapshot,
             identicalSetCount: installationCountSnapshot,
             pdfQuantity: installationCountSnapshot,
@@ -2232,6 +2493,7 @@ IdeaSol`;
             additionalServices: selectedAdditionalServicesSnapshot,
             additional_services: selectedAdditionalServicesSnapshot,
             form: {
+              calculatorProgram: queuedResult.calculatorProgram || "standard",
               installationCount: installationCountSnapshot,
               identicalSetCount: installationCountSnapshot,
               customMode: Boolean(snapshot.customMode),
@@ -2321,7 +2583,9 @@ IdeaSol`;
             finalGross: queuedResult.finalGross,
             vatRate: queuedResult.vatRate,
             subsidyAllocation: queuedResult.subsidyAllocation || null,
-            subsidyTotal: queuedResult.subsidyAllocation?.total || 0,
+            subsidyTotal: getArimrSubsidyTotal(queuedResult),
+            calculatorProgram: queuedResult.calculatorProgram,
+            arimr2026: queuedResult.arimr2026 || null,
             includeCatalogCards: Boolean(snapshot.includeCatalogCards) && catalogCardsSnapshot.length > 0,
             catalogCards: Boolean(snapshot.includeCatalogCards) ? catalogCardsSnapshot : [],
             sellerNote: String(snapshot.sellerNote || ""),
@@ -2410,6 +2674,72 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1600px] space-y-6">
 
+        <nav
+          aria-label="Wybór kalkulatora"
+          className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setCalculatorMode("standard");
+              setShowAdminPanel(false);
+              setShowSettings(false);
+              setIncludeSubsidy(false);
+              setResult(null);
+              setResultIsDirty(false);
+              setResultPanelTab("summary");
+              const defaultMarkup = Number(userProfile?.default_seller_markup);
+              setSellerMarkup(Number.isFinite(defaultMarkup) ? defaultMarkup : 3000);
+            }}
+            className={`flex-1 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${calculatorMode === "standard" ? "bg-slate-950 text-white shadow-sm dark:bg-black" : "text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"}`}
+          >
+            Kalkulator ofertowy
+          </button>
+          <button
+            type="button"
+            disabled={!arimrCalculatorAvailable}
+            aria-disabled={!arimrCalculatorAvailable}
+            title={
+              arimrCalculatorAvailable
+                ? "Otwórz kalkulator ARiMR 2026"
+                : "Brak dostępu. Uprawnienie nadaje administrator w zakładce Użytkownicy."
+            }
+            onClick={() => {
+              if (!arimrCalculatorAvailable) return;
+              setCalculatorMode("arimr2026");
+              setShowAdminPanel(false);
+              setShowSettings(false);
+              setSellerMarkup(0);
+              setIncludeSubsidy(false);
+              setIsUpsell(false);
+              setCustomMode(false);
+              setCustomProductMode(false);
+              setOfferType("pv_storage");
+              setStorage((current) =>
+                current !== "none" ? current : storages[0]?.code || "none"
+              );
+              setSelectedAdditionalServices((current) =>
+                current.filter(
+                  (service) => !isPmeApplicationServiceName(service.name)
+                )
+              );
+              setVatRate(arimr2026Settings.defaultVatRate);
+              setResult(null);
+              setResultIsDirty(false);
+              setResultPanelTab("summary");
+            }}
+            className={`flex-1 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${
+              !arimrCalculatorAvailable
+                ? "cursor-not-allowed bg-slate-100 text-slate-400 ring-1 ring-inset ring-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:ring-slate-700"
+                : calculatorMode === "arimr2026"
+                  ? "bg-[#102a43] text-white shadow-sm dark:bg-[#081a2c]"
+                  : "text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+          >
+            ARiMR 2026{!arimrCalculatorAvailable ? " · zablokowany" : ""}
+          </button>
+        </nav>
+
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
             <p className="font-semibold">
@@ -2434,7 +2764,7 @@ IdeaSol`;
           </div>
         )}
 
-        {canSeePricingPanel && showAdminPanel && (
+        {canSeePricingPanel && showAdminPanel && calculatorMode === "standard" && (
           <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-6">
             <AdminPanel
               adminStatus={adminStatus}
@@ -2452,6 +2782,11 @@ IdeaSol`;
           >
             <div className={`${isResultFocusMode ? "pointer-events-none max-h-0 opacity-0" : "max-h-[4000px] opacity-100"} min-w-0 overflow-hidden transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none`}>
               <OfferForm
+              calculatorProgram={calculatorMode}
+              canManageProgramSettings={canSeePricingPanel && calculatorMode === "standard"}
+              onOpenProgramSettings={() =>
+                setShowAdminPanel((current) => !current)
+              }
               offerType={offerType}
               setOfferType={setOfferType}
               panelModel={panelModel}
@@ -2474,7 +2809,7 @@ IdeaSol`;
               setStorage={setStorage}
               billingSystem={billingSystem}
               setBillingSystem={setBillingSystem}
-              includeSubsidy={includeSubsidy}
+              includeSubsidy={calculatorMode === "standard" ? includeSubsidy : false}
               setIncludeSubsidy={setIncludeSubsidy}
               isUpsell={isUpsell}
               setIsUpsell={setIsUpsell}
@@ -2500,11 +2835,11 @@ IdeaSol`;
               setEmailStatus={setEmailStatus}
               showSettings={showSettings}
               setShowSettings={setShowSettings}
-              sellerMarkup={sellerMarkup}
+              sellerMarkup={calculatorMode === "arimr2026" ? 0 : sellerMarkup}
               setSellerMarkup={setSellerMarkup}
               selectedAdditionalServices={selectedAdditionalServices}
               setSelectedAdditionalServices={setSelectedAdditionalServices}
-              customModeAvailable={customModeAvailable}
+              customModeAvailable={calculatorMode === "standard" && customModeAvailable}
               customMode={customModeActive}
               setCustomMode={setCustomMode}
               customProductMode={customProductMode}
@@ -2541,7 +2876,7 @@ IdeaSol`;
                 />
               )}
               <div className={`${isResultFocusMode ? "p-3" : "p-2"} overflow-hidden rounded-[26px] border border-slate-200 bg-slate-100/70 shadow-xl shadow-slate-200/50 dark:border-slate-700 dark:bg-slate-950 dark:shadow-black/20`}>
-                <div className={`${isResultFocusMode ? "p-6" : "p-4"} rounded-[20px] bg-slate-950 text-white dark:border dark:border-slate-700 dark:bg-black`}>
+                <div className={`${isResultFocusMode ? "p-6" : "p-4"} rounded-[20px] text-white dark:border ${calculatorMode === "arimr2026" ? "border-[#345779] bg-[#102a43] dark:border-[#345779] dark:bg-[#081a2c]" : "border-transparent bg-slate-950 dark:border-slate-700 dark:bg-black"}`}>
                   <div className={`${isResultFocusMode ? "mb-5" : "mb-3"} flex items-center justify-between gap-3`}>
                     <div>
                       <p className={`${isResultFocusMode ? "text-xs" : "text-[10px]"} font-black uppercase tracking-[0.18em] text-emerald-400`}>Pulpit oferty</p>
@@ -2636,6 +2971,7 @@ IdeaSol`;
                   compact
                   wide={isResultFocusMode}
                   hideSubsidy
+                  hideTechnicalDetails
                   equipmentQuickEdit={customModeActive || customProductMode ? undefined : {
                     panel: result.offerType === "storage" ? undefined : {
                       value: panelModel,
@@ -2681,7 +3017,9 @@ IdeaSol`;
                 />
                     )}
                     {resultPanelTab === "subsidy" && (
-                      result.energyStorage !== "Brak" && (result.includeSubsidy || result.subsidyAllocation?.requested) ? (
+                      result.calculatorProgram === "arimr2026" && result.arimr2026 ? (
+                        <Arimr2026GrantSummary result={result.arimr2026} />
+                      ) : result.energyStorage !== "Brak" && (result.includeSubsidy || result.subsidyAllocation?.requested) ? (
                         <SubsidyOptimizer
                           totalOfferNetPrice={result.finalNet}
                           totalOfferGrossPrice={result.finalGross * normalizeInstallationCount(identicalSetCount)}
@@ -2696,6 +3034,11 @@ IdeaSol`;
                     {resultPanelTab === "credit" && (
                       <CreditCalculator installationPrice={result.finalGross * normalizeInstallationCount(identicalSetCount)} compact expanded={isResultFocusMode} />
                     )}
+                    <OfferTechnicalDetails
+                      result={result}
+                      canSeeTechnicalView={canSeeTechnicalView}
+                      compact
+                    />
                   </div>
                 )}
               </div>

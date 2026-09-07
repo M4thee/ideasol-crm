@@ -1883,6 +1883,11 @@ export default function OfferDetailsPage() {
       Number(offer.pv_power_kw || 0) > 0
     );
     const saleResult = (saleOfferSnapshot.offer_data?.result || {}) as Record<string, any>;
+    const calculatorProgram =
+      saleResult.calculatorProgram === "arimr2026" ||
+      saleOfferSnapshot.offer_data?.calculatorProgram === "arimr2026"
+        ? "arimr2026"
+        : "standard";
 
     // --- Contract number generation ---
     const userNumberRaw = effectiveSeller?.user_number || "00";
@@ -1967,6 +1972,7 @@ export default function OfferDetailsPage() {
       status: "Oczekuje na sprawdzenie dokumentów",
       customer_type: saleForm.customerType,
       customer_data: {
+        calculator_program: calculatorProgram,
         installation_count: installationCount,
         customer_type: saleForm.customerType,
         full_name: saleForm.fullName,
@@ -2024,6 +2030,7 @@ export default function OfferDetailsPage() {
         client2_marketing_phone: saleForm.client2MarketingPhone,
         client2_photo_consent: saleForm.client2PhotoConsent,
         subsidy_allocation: saleResult.subsidyAllocation || null,
+        arimr2026: calculatorProgram === "arimr2026" ? saleResult.arimr2026 || null : null,
         subsidy_total: Number(
           saleResult.subsidyAllocation?.total || 0
         ),

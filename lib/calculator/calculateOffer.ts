@@ -792,8 +792,22 @@ export function calculateOffer(input: CalculateOfferInput) {
         )
         .sort((first, second) => first.maxPvKw - second.maxPvKw);
 
-  const automaticallySelectedInverter = compatibleAutomaticInverters.find(
+  const exactlySizedAutomaticInverter = compatibleAutomaticInverters.find(
     (item) => inverterSizingPvPowerKw <= item.maxPvKw
+  );
+  const arimrVoltageCompatibleFallback =
+    body.calculatorProgram === "arimr2026" && selectedInverterName === "auto"
+      ? compatibleAutomaticInverters.reduce<InverterItem | undefined>(
+          (largest, item) =>
+            !largest || item.maxPvKw > largest.maxPvKw ? item : largest,
+          undefined
+        )
+      : undefined;
+  const automaticallySelectedInverter =
+    exactlySizedAutomaticInverter || arimrVoltageCompatibleFallback;
+  const inverterPowerRequiresReview = Boolean(
+    automaticallySelectedInverter &&
+      inverterSizingPvPowerKw > automaticallySelectedInverter.maxPvKw
   );
 
   const inverter =
@@ -1049,6 +1063,9 @@ export function calculateOffer(input: CalculateOfferInput) {
     customEquipment: normalizedCustomEquipment,
     pvPowerKw,
     inverterSizingPvPowerKw,
+    selectedInverterMaxPvKw:
+      "maxPvKw" in inverter ? Number(inverter.maxPvKw || 0) : 0,
+    inverterPowerRequiresReview,
     inverter: "displayName" in inverter ? inverter.displayName : inverter.name,
     inverterBatteryVoltageType:
       "type" in inverter && inverter.type === "hybrid"
