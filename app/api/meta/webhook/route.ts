@@ -9,7 +9,9 @@ import {
   buildTeamsLeadAssignmentMessage,
   sendTeamsBoardMetaLeadNotification,
   sendTeamsDirectMetaLeadNotification,
+  sendTeamsGeneralMetaLeadNotification,
 } from "@/lib/microsoftTeams";
+import { buildTeamsGeneralMetaLeadMessage } from "@/lib/metaLeadGeneralNotification";
 import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -18,6 +20,16 @@ export const runtime = "nodejs";
 type MetaLeadField = {
   name?: string;
   values?: string[];
+};
+
+type MetaLeadResponse = {
+  id?: string;
+  form_id?: string | number;
+  ad_id?: string | number;
+  ad_name?: string;
+  campaign_id?: string | number;
+  campaign_name?: string;
+  field_data?: MetaLeadField[];
 };
 
 type NormalizedMetaLead = {
@@ -128,8 +140,17 @@ async function fetchMetaLead(leadgenId: string) {
   if (!accessToken) throw new Error("Brakuje META_PAGE_ACCESS_TOKEN.");
 
   const apiVersion = process.env.META_GRAPH_API_VERSION || "v20.0";
+  const fields = [
+    "id",
+    "form_id",
+    "ad_id",
+    "ad_name",
+    "campaign_id",
+    "campaign_name",
+    "field_data",
+  ].join(",");
   const response = await fetch(
-    `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(accessToken)}`,
+    `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(leadgenId)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
     { cache: "no-store" }
   );
 
@@ -137,7 +158,7 @@ async function fetchMetaLead(leadgenId: string) {
     throw new Error(`Meta Graph API zwróciło ${response.status}: ${await response.text()}`);
   }
 
-  return response.json();
+  return (await response.json()) as MetaLeadResponse;
 }
 
 async function saveMetaLead(
@@ -164,6 +185,21 @@ async function findExistingClientId(leadgenId: string) {
 
   if (error) throw error;
   return data?.client_id ? String(data.client_id) : null;
+}
+
+async function countIntegrationLeads(integrationId: string) {
+  const { count, error } = await supabaseAdmin
+    .from("meta_leads")
+    .select("meta_lead_id", { count: "exact", head: true })
+    .eq("integration_id", integrationId)
+    .not("client_id", "is", null);
+
+  if (error) {
+    console.error("[META WEBHOOK] campaign lead count", error);
+    return null;
+  }
+
+  return count ?? 0;
 }
 
 async function createClient(
@@ -210,44 +246,74 @@ async function sendNotifications(params: {
   clientId: string;
   clientName: string;
   assignedUser: { id: string; email: string | null; display_name: string | null } | null;
+  metaCampaignName: string;
+  metaAdName: string;
+  campaignLeadCount: number | null;
 }) {
-  const { integration, clientId, clientName, assignedUser } = params;
-  if (!assignedUser) return;
+  const {
+    integration,
+    clientId,
+    clientName,
+    assignedUser,
+    metaCampaignName,
+    metaAdName,
+    campaignLeadCount,
+  } = params;
 
   const crmUrl = `${process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl"}/clients/${encodeURIComponent(clientId)}`;
-  const deliveries: Array<Promise<unknown>> = [];
-
-  if (integration.notify_assigned_user && assignedUser.email) {
-    deliveries.push(
-      sendTeamsDirectMetaLeadNotification({
-        userEmail: assignedUser.email,
-        message: buildTeamsLeadAssignmentMessage({
-          campaignName: integration.campaign_name,
-          clientName,
-          crmUrl,
+  const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [
+    {
+      target: "general-chat",
+      promise: sendTeamsGeneralMetaLeadNotification({
+        message: buildTeamsGeneralMetaLeadMessage({
+          campaignName: metaCampaignName,
+          adName: metaAdName,
+          campaignLeadCount,
         }),
-      })
+      }),
+    },
+  ];
+
+  if (integration.notify_assigned_user && assignedUser?.email) {
+    deliveries.push(
+      {
+        target: "assigned-user",
+        promise: sendTeamsDirectMetaLeadNotification({
+          userEmail: assignedUser.email,
+          message: buildTeamsLeadAssignmentMessage({
+            campaignName: integration.campaign_name,
+            clientName,
+            crmUrl,
+          }),
+        }),
+      }
     );
   }
 
-  if (integration.notify_owners) {
+  if (integration.notify_owners && assignedUser) {
     deliveries.push(
-      sendTeamsBoardMetaLeadNotification({
-        message: buildTeamsLeadAssignmentMessage({
-          campaignName: integration.campaign_name,
-          clientName,
-          crmUrl,
-          assignedUserName: assignedUser.display_name || assignedUser.email,
-          recipientIsOwner: true,
+      {
+        target: "board-chat",
+        promise: sendTeamsBoardMetaLeadNotification({
+          message: buildTeamsLeadAssignmentMessage({
+            campaignName: integration.campaign_name,
+            clientName,
+            crmUrl,
+            assignedUserName: assignedUser.display_name || assignedUser.email,
+            recipientIsOwner: true,
+          }),
         }),
-      })
+      }
     );
   }
 
-  const results = await Promise.allSettled(deliveries);
-  for (const result of results) {
+  const results = await Promise.allSettled(deliveries.map((delivery) => delivery.promise));
+  for (const [index, result] of results.entries()) {
     if (result.status === "rejected") {
-      console.error("[META WEBHOOK] Teams notification", result.reason);
+      console.error(
+        `[META WEBHOOK] Teams notification ${deliveries[index]?.target || "unknown"}`,
+        result.reason
+      );
     }
   }
 }
@@ -295,11 +361,16 @@ async function processLeadEvent(
       : "unassigned_no_participants",
   });
 
+  const campaignLeadCount = await countIntegrationLeads(integration.id);
+
   await sendNotifications({
     integration,
     clientId,
     clientName: lead.fullName || "Lead Meta Ads",
     assignedUser: assignment.user,
+    metaCampaignName: metaLead.campaign_name?.trim() || integration.campaign_name,
+    metaAdName: metaLead.ad_name?.trim() || "brak danych",
+    campaignLeadCount,
   });
 
   return {
