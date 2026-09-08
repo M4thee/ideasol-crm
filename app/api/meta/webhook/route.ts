@@ -10,6 +10,7 @@ import {
   sendTeamsBoardMetaLeadNotification,
   sendTeamsDirectMetaLeadNotification,
 } from "@/lib/microsoftTeams";
+import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -170,11 +171,10 @@ async function createClient(
   integration: LeadIntegration,
   assignedUserId: string | null
 ) {
-  const notes = [
-    `Lead z ${integration.name}.`,
-    `Kampania: ${integration.campaign_name}`,
-    ...lead.extraAnswers.map((answer) => `${answer.label}: ${answer.value}`),
-  ].join("\n");
+  const notes = buildMetaLeadNote({
+    campaignName: integration.campaign_name,
+    answers: lead.extraAnswers,
+  });
 
   const { data, error } = await supabaseAdmin
     .from("clients")
