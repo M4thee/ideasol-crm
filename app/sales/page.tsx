@@ -18,7 +18,6 @@ type Sale = {
   status: string;
   created_at: string;
   offer_snapshot?: Record<string, unknown> | null;
-  offer_data?: Record<string, unknown> | null;
   customer_data?: Record<string, unknown> | null;
 };
 
@@ -292,7 +291,7 @@ export default function SalesPage() {
 
     let query = supabase
       .from("sales")
-      .select("id, public_id, client_id, seller_id, sale_date, contract_value, status, created_at, offer_snapshot, offer_data, customer_data")
+      .select("id, public_id, client_id, seller_id, sale_date, contract_value, status, created_at, offer_snapshot, customer_data")
       .order("created_at", { ascending: false });
 
     if (selectedSellerIds.length > 0) {

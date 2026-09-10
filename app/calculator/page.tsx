@@ -52,6 +52,10 @@ import {
   type Arimr2026MountingLocation,
   type Arimr2026Settings,
 } from "@/lib/calculator/arimr2026";
+import {
+  createEmptyArimrPvSizingFormState,
+  type ArimrPvSizingFormState,
+} from "@/lib/calculator/pvDemandSizing";
 import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
 
 
@@ -644,6 +648,9 @@ export default function Home() {
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
   const [arimr2026Settings, setArimr2026Settings] = useState(
     DEFAULT_ARIMR_2026_SETTINGS
+  );
+  const [arimrPvSizing, setArimrPvSizing] = useState<ArimrPvSizingFormState>(
+    createEmptyArimrPvSizingFormState
   );
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
   const calculationAuditIdRef = useRef<string | null>(null);
@@ -1783,6 +1790,7 @@ export default function Home() {
     setIncludeSubsidy(false);
     setIsUpsell(false);
     setExistingPvPowerKw("0");
+    setArimrPvSizing(createEmptyArimrPvSizingFormState());
     setBillingSystem("net_billing");
     setSelectedInverterName("auto");
     setSelectedAdditionalServices([]);
@@ -2815,6 +2823,8 @@ IdeaSol`;
               setIsUpsell={setIsUpsell}
               existingPvPowerKw={existingPvPowerKw}
               setExistingPvPowerKw={setExistingPvPowerKw}
+              arimrPvSizing={arimrPvSizing}
+              setArimrPvSizing={setArimrPvSizing}
               storages={storages}
               panels={panels}
               inverters={inverters}
