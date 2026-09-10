@@ -13,11 +13,13 @@ type ActivityRow = {
   id: string;
   client_id: string | null;
   created_at: string;
+  activity_type: string | null;
 };
 
 type CalendarRow = {
   id: string;
   client_id: string | null;
+  created_at: string;
   event_at: string;
   event_type: string | null;
   status: string | null;
@@ -113,12 +115,14 @@ function getRanges(now: Date, timezone: string) {
     timezone
   );
   const monthStart = zonedDateToUtc({ year: current.year, month: current.month, day: 1 }, timezone);
+  const quarterStartMonth = Math.floor((current.month - 1) / 3) * 3 + 1;
+  const quarterStart = zonedDateToUtc({ year: current.year, month: quarterStartMonth, day: 1 }, timezone);
   const nextDay = new Date(Date.UTC(current.year, current.month - 1, current.day + 1));
   const dayEnd = zonedDateToUtc(
     { year: nextDay.getUTCFullYear(), month: nextDay.getUTCMonth() + 1, day: nextDay.getUTCDate() },
     timezone
   );
-  return { dayStart, dayEnd, weekStart, monthStart, queryStart: new Date(Math.min(weekStart.getTime(), monthStart.getTime())) };
+  return { dayStart, dayEnd, weekStart, monthStart, quarterStart, queryStart: quarterStart };
 }
 
 function inRange(value: string | null | undefined, start: Date, end: Date) {
@@ -156,10 +160,11 @@ export async function loadCommandCenterMetrics(
   const queryStartIso = ranges.queryStart.toISOString();
   const dayEndIso = ranges.dayEnd.toISOString();
 
-  const [clients, activities, calendar, offers, unfilteredSales, profiles] = await Promise.all([
+  const [clients, activities, calendarByEventDate, calendarCreated, offers, unfilteredSales, profiles] = await Promise.all([
     fetchAllRows<ClientRow>((from, to) => supabase.from("clients").select("id, created_at, status, lead_source, assigned_user_id").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_at, activity_type").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", ranges.monthStart.toISOString()).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id").gte("created_at", ranges.monthStart.toISOString()).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ProfileRow>((from, to) => supabase.from("profiles").select("id, display_name, role").order("id", { ascending: true }).range(from, to)),
@@ -184,7 +189,7 @@ export async function loadCommandCenterMetrics(
   });
 
   const meetingClientIds = new Set(
-    calendar
+    calendarByEventDate
       .filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row) && row.client_id && monthClientIds.has(row.client_id))
       .map((row) => row.client_id as string)
   );
@@ -241,7 +246,11 @@ export async function loadCommandCenterMetrics(
   const weekSales = salesIn(ranges.weekStart);
   const monthSales = salesIn(ranges.monthStart);
   const sumSales = (rows: SaleRow[]) => rows.reduce((sum, row) => sum + numberValue(row.contract_value), 0);
-  const meetingsToday = calendar.filter((row) => normalize(row.event_type) === "meeting" && inRange(row.event_at, ranges.dayStart, ranges.dayEnd));
+  const meetingsToday = calendarByEventDate.filter((row) => normalize(row.event_type) === "meeting" && inRange(row.event_at, ranges.dayStart, ranges.dayEnd));
+  const bookedMeetings = calendarCreated.filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row));
+  const phoneActivities = activities.filter((row) => normalize(row.activity_type) === "phone");
+  const countIn = <Row extends { created_at: string }>(rows: Row[], start: Date) =>
+    rows.filter((row) => inRange(row.created_at, start, ranges.dayEnd)).length;
 
   return {
     generatedAt: now.toISOString(),
@@ -249,6 +258,7 @@ export async function loadCommandCenterMetrics(
       today: clients.filter((row) => inRange(row.created_at, ranges.dayStart, ranges.dayEnd)).length,
       week: clients.filter((row) => inRange(row.created_at, ranges.weekStart, ranges.dayEnd)).length,
       month: monthClients.length,
+      quarter: clients.filter((row) => inRange(row.created_at, ranges.quarterStart, ranges.dayEnd)).length,
       contactedMonth: contactedClientIds.size,
       contactRateMonth: monthClients.length ? Math.round((contactedClientIds.size / monthClients.length) * 100) : 0,
       averageFirstActivityMinutes: firstActivityMinutes.length
@@ -261,9 +271,11 @@ export async function loadCommandCenterMetrics(
       today: todaySales.length,
       week: weekSales.length,
       month: monthSales.length,
+      quarter: salesIn(ranges.quarterStart).length,
       valueToday: sumSales(todaySales),
       valueWeek: sumSales(weekSales),
       valueMonth: sumSales(monthSales),
+      valueQuarter: sumSales(salesIn(ranges.quarterStart)),
     },
     funnel: {
       leads: monthClients.length,
@@ -273,15 +285,26 @@ export async function loadCommandCenterMetrics(
       sales: saleClientIds.size,
     },
     meetings: {
-      today: meetingsToday.filter((row) => !isCancelledMeeting(row)).length,
+      today: countIn(bookedMeetings, ranges.dayStart),
+      week: countIn(bookedMeetings, ranges.weekStart),
+      month: countIn(bookedMeetings, ranges.monthStart),
+      quarter: countIn(bookedMeetings, ranges.quarterStart),
+      scheduledToday: meetingsToday.filter((row) => !isCancelledMeeting(row)).length,
       upcomingToday: meetingsToday.filter((row) => !isCancelledMeeting(row) && new Date(row.event_at) >= now).length,
+    },
+    calls: {
+      today: countIn(phoneActivities, ranges.dayStart),
+      week: countIn(phoneActivities, ranges.weekStart),
+      month: countIn(phoneActivities, ranges.monthStart),
+      quarter: countIn(phoneActivities, ranges.quarterStart),
     },
     ranking,
     reliability: [
       "Leady są liczone z rekordów clients według created_at.",
       "Podjęty lead oznacza co najmniej jedną zarejestrowaną aktywność w CRM.",
       "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; wartość pochodzi z sales.contract_value.",
-      "Command Center nie wylicza liczby ani czasu połączeń telefonicznych.",
+      "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
+      "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
     ],
   };
 }

@@ -10,11 +10,13 @@ export type CommandCenterWidgetKind =
   | "lead-sources"
   | "lead-statuses"
   | "advisor-ranking"
+  | "meetings-kpi"
   | "meetings-today"
+  | "calls-kpi"
   | "monthly-target"
   | "status-ticker";
 
-export type CommandCenterPeriod = "today" | "week" | "month";
+export type CommandCenterPeriod = "today" | "week" | "month" | "quarter";
 
 export type CommandCenterWidget = {
   id: string;
@@ -103,6 +105,7 @@ export type CommandCenterMetrics = {
     today: number;
     week: number;
     month: number;
+    quarter: number;
     contactedMonth: number;
     contactRateMonth: number;
     averageFirstActivityMinutes: number | null;
@@ -113,9 +116,11 @@ export type CommandCenterMetrics = {
     today: number;
     week: number;
     month: number;
+    quarter: number;
     valueToday: number;
     valueWeek: number;
     valueMonth: number;
+    valueQuarter: number;
   };
   funnel: {
     leads: number;
@@ -126,7 +131,17 @@ export type CommandCenterMetrics = {
   };
   meetings: {
     today: number;
+    week: number;
+    month: number;
+    quarter: number;
+    scheduledToday: number;
     upcomingToday: number;
+  };
+  calls: {
+    today: number;
+    week: number;
+    month: number;
+    quarter: number;
   };
   ranking: CommandCenterRankingRow[];
   reliability: string[];
