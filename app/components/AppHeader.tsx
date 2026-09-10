@@ -1471,6 +1471,13 @@ const canManageUsers = profile?.role === "admin";
                       >
                         Panel administratora
                       </Link>
+                      <Link
+                        href="/command-center/admin"
+                        className="block px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+                        onClick={() => setProfileMenuOpen(false)}
+                      >
+                        Command Center
+                      </Link>
                     </>
                   )}
 
@@ -1750,6 +1757,13 @@ const canManageUsers = profile?.role === "admin";
                   className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
                 >
                   Panel administratora
+                </Link>
+                <Link
+                  href="/command-center/admin"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                >
+                  Command Center
                 </Link>
               </>
             )}
