@@ -602,6 +602,15 @@ export async function sendTeamsBoardMetaLeadNotification(
   };
 }
 
+export async function sendTeamsGeneralMetaLeadNotification(
+  payload: TeamsChannelNotificationPayload
+) {
+  return sendTeamsStickyChatNotification(
+    requireEnv("MICROSOFT_TEAMS_GENERAL_CHAT_ID"),
+    payload.message
+  );
+}
+
 export async function sendTeamsDirectEnergyStorageLeadNotification(payload: TeamsCalendarNotificationPayload) {
   const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
 
