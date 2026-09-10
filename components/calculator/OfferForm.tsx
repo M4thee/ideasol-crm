@@ -24,6 +24,19 @@ import {
   rankInvertersForStorage,
 } from "@/lib/calculator/equipmentCompatibility";
 import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
+import {
+  ARIMR_PV_DIRECTIONS,
+  ARIMR_PV_MOUNTINGS,
+  ARIMR_PV_SIZING_ASSUMPTIONS,
+  calculateArimrPvDemandSizing,
+  createEmptyArimrPvSizingFormState,
+  type ArimrPvDirection,
+  type ArimrPvMounting,
+  type ArimrPvSizingFormState,
+} from "@/lib/calculator/pvDemandSizing";
+
+const EMPTY_ARIMR_PV_SIZING = createEmptyArimrPvSizingFormState();
+const noopSetArimrPvSizing: Dispatch<SetStateAction<ArimrPvSizingFormState>> = () => { };
 
 function isOfferFormOnline() {
   if (typeof navigator === "undefined") return true;
@@ -184,6 +197,8 @@ type OfferFormProps = {
   setIsUpsell: (value: boolean) => void;
   existingPvPowerKw: string;
   setExistingPvPowerKw: (value: string) => void;
+  arimrPvSizing?: ArimrPvSizingFormState;
+  setArimrPvSizing?: Dispatch<SetStateAction<ArimrPvSizingFormState>>;
   storages: CatalogStorage[];
   panels: CatalogPanel[];
   inverters: CatalogInverter[];
@@ -255,6 +270,8 @@ export default function OfferForm({
   setIsUpsell,
   existingPvPowerKw,
   setExistingPvPowerKw,
+  arimrPvSizing = EMPTY_ARIMR_PV_SIZING,
+  setArimrPvSizing = noopSetArimrPvSizing,
   storages,
   panels,
   inverters,
@@ -587,6 +604,36 @@ export default function OfferForm({
   const panelsToShow = panels;
   const hasPvSelected = offerType === "pv" || offerType === "pv_storage";
   const hasStorageSelected = offerType === "storage" || offerType === "pv_storage";
+  const sizingPanel = useMemo(
+    () => panelsToShow.find((panel) => panel.code === panelModel) || panelsToShow[0] || null,
+    [panelModel, panelsToShow]
+  );
+  const arimrSizingResult = useMemo(() => {
+    if (!isArimr2026) return null;
+
+    const annualConsumptionKwh = Number(
+      arimrPvSizing.annualConsumptionKwh.replace(/\s/g, "")
+    );
+    const existingPvPowerKwp = existingPvAnswer === "yes"
+      ? Number(String(existingPvPowerKw || "0").replace(",", ".")) || 0
+      : 0;
+
+    return calculateArimrPvDemandSizing({
+      annualConsumptionKwh,
+      directions: arimrPvSizing.directions,
+      mountings: arimrPvSizing.mountings,
+      panelPowerWp: Number(sizingPanel?.power_wp || 0),
+      existingPvPowerKwp,
+    });
+  }, [
+    arimrPvSizing.annualConsumptionKwh,
+    arimrPvSizing.directions,
+    arimrPvSizing.mountings,
+    existingPvAnswer,
+    existingPvPowerKw,
+    isArimr2026,
+    sizingPanel?.power_wp,
+  ]);
 
   const storagesToShow = useMemo(() => {
     return storages.filter(
@@ -755,6 +802,41 @@ export default function OfferForm({
     }
   }
 
+  function toggleArimrSizingDirection(direction: ArimrPvDirection) {
+    setArimrPvSizing((current) => ({
+      ...current,
+      directions: current.directions.includes(direction)
+        ? current.directions.filter((item) => item !== direction)
+        : [...current.directions, direction],
+    }));
+    invalidateCalculation();
+  }
+
+  function toggleArimrSizingMounting(mounting: ArimrPvMounting) {
+    setArimrPvSizing((current) => ({
+      ...current,
+      mountings: current.mountings.includes(mounting)
+        ? current.mountings.filter((item) => item !== mounting)
+        : [...current.mountings, mounting],
+    }));
+    invalidateCalculation();
+  }
+
+  function applyArimrSizingRecommendation() {
+    if (!arimrSizingResult || arimrSizingResult.recommendedPanelCount <= 0 || !sizingPanel) {
+      return;
+    }
+
+    updateOfferModules(true, true);
+    setPanelModel(sizingPanel.code);
+    setPanelCount(arimrSizingResult.recommendedPanelCount);
+    setManualPowerKw(String(arimrSizingResult.recommendedPowerKwp).replace(".", ","));
+    setRoofType(arimrSizingResult.selectedMounting.roofType);
+    setSelectedInverterName("auto");
+    setActiveEquipmentEditor("pv");
+    invalidateCalculation();
+  }
+
   const standardWorkspaceSteps = [
     {
       id: "client" as const,
@@ -839,6 +921,21 @@ export default function OfferForm({
     setActiveWorkspaceStep(workspaceSteps[Math.max(0, activeWorkspaceStepIndex - 1)].id);
   }
 
+  function openWorkspaceSection(
+    nextStep: "client" | "equipment" | "extras" | "settlement"
+  ) {
+    if (
+      activeWorkspaceStep === "client" &&
+      nextStep !== "client" &&
+      isArimr2026 &&
+      arimrSizingResult
+    ) {
+      applyArimrSizingRecommendation();
+    }
+
+    setActiveWorkspaceStep(nextStep);
+  }
+
   function goToNextWorkspaceSection() {
     if (
       activeWorkspaceStep === "client" &&
@@ -846,6 +943,10 @@ export default function OfferForm({
       existingPvAnswer === ""
     ) {
       return;
+    }
+
+    if (activeWorkspaceStep === "client" && isArimr2026 && arimrSizingResult) {
+      applyArimrSizingRecommendation();
     }
 
     if (activeWorkspaceStep === "equipment" && nextEquipmentEditor) {
@@ -933,7 +1034,7 @@ export default function OfferForm({
                 <button
                   key={step.id}
                   type="button"
-                  onClick={() => setActiveWorkspaceStep(step.id)}
+                  onClick={() => openWorkspaceSection(step.id)}
                   className={`group rounded-2xl p-3 text-left transition ${isActive
                     ? isArimr2026
                       ? "bg-[#102a43] text-white shadow-lg shadow-blue-200 dark:bg-[#081a2c] dark:shadow-none"
@@ -1174,6 +1275,194 @@ export default function OfferForm({
         )}
 
       </div> : null}
+
+      {isArimr2026 && activeWorkspaceStep === "client" ? (
+        <div className="mb-4 rounded-2xl border border-[#cbd9e6] bg-[#f5f9fd] p-4 dark:border-[#345779] dark:bg-[#0b2238] sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="font-black text-[#102a43] dark:text-white">
+                  Dobór mocy PV do zużycia
+                </h4>
+                <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-[#345779] ring-1 ring-[#cbd9e6] dark:bg-[#102a43] dark:text-slate-200 dark:ring-[#345779]">
+                  opcjonalnie
+                </span>
+              </div>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500 dark:text-slate-300">
+                Podaj energię, którą ma pokryć nowa instalacja. Jeśli klient ma już PV, wpisz pozostałe zapotrzebowanie.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-slate-400 dark:text-slate-400">
+              Szacunek ofertowy
+            </span>
+          </div>
+
+          <label className="mt-5 block max-w-md">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Roczne zużycie energii
+            </span>
+            <div className="relative mt-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="np. 20 000"
+                value={arimrPvSizing.annualConsumptionKwh}
+                onChange={(event) => {
+                  const value = event.target.value.replace(/[^0-9\s]/g, "");
+                  setArimrPvSizing((current) => ({
+                    ...current,
+                    annualConsumptionKwh: value,
+                  }));
+                  invalidateCalculation();
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-16 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 dark:border-[#345779] dark:bg-[#081a2c] dark:text-white dark:shadow-none dark:focus:border-blue-500 dark:focus:ring-blue-500/20"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs font-bold text-slate-400">
+                kWh/rok
+              </span>
+            </div>
+          </label>
+
+          <fieldset className="mt-5">
+            <legend className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Dostępne kierunki montażu
+            </legend>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {ARIMR_PV_DIRECTIONS.map((direction) => {
+                const checked = arimrPvSizing.directions.includes(direction.value);
+
+                return (
+                  <label
+                    key={direction.value}
+                    className={`cursor-pointer rounded-xl border px-3 py-2.5 transition ${checked
+                      ? "border-[#102a43] bg-[#102a43] text-white dark:border-blue-300 dark:bg-[#173b5e]"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-[#345779] dark:border-[#345779] dark:bg-[#081a2c] dark:text-slate-200"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleArimrSizingDirection(direction.value)}
+                        className="h-4 w-4 accent-blue-600"
+                      />
+                      <span className="min-w-7 text-xs font-black">{direction.shortLabel}</span>
+                      <span className="text-xs font-semibold">{direction.label}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="mt-5">
+            <legend className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Dostępne miejsce posadowienia PV
+            </legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {ARIMR_PV_MOUNTINGS.map((mounting) => {
+                const checked = arimrPvSizing.mountings.includes(mounting.value);
+
+                return (
+                  <label
+                    key={mounting.value}
+                    className={`cursor-pointer rounded-xl border px-3 py-3 transition ${checked
+                      ? "border-[#102a43] bg-[#102a43] text-white dark:border-blue-300 dark:bg-[#173b5e]"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-[#345779] dark:border-[#345779] dark:bg-[#081a2c] dark:text-slate-200"
+                    }`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleArimrSizingMounting(mounting.value)}
+                        className="h-4 w-4 accent-blue-600"
+                      />
+                      <span className="text-sm font-semibold">{mounting.label}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          {arimrSizingResult ? (
+            <div className="mt-5 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm dark:border-[#345779] dark:bg-[#081a2c]">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-700 dark:text-blue-300">
+                    Rekomendacja
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-300">
+                    Najkorzystniejszy zaznaczony wariant: {arimrSizingResult.selectedDirection.label.toLowerCase()} · {arimrSizingResult.selectedMounting.shortLabel.toLowerCase()}
+                  </p>
+                </div>
+                <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 dark:bg-blue-950/50 dark:text-blue-200">
+                  {arimrSizingResult.annualYieldKwhPerKwp.toLocaleString("pl-PL")} kWh z 1 kWp/rok
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-[#102a43] p-4 text-white">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-blue-200">Nowa instalacja</p>
+                  <p className="mt-2 text-2xl font-black">
+                    {arimrSizingResult.recommendedPowerKwp.toLocaleString("pl-PL")} kWp
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    {arimrSizingResult.recommendedPanelCount} × {Number(sizingPanel?.power_wp || 0).toLocaleString("pl-PL")} Wp
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-4 dark:bg-[#102a43]">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-blue-200">Produkcja / pokrycie</p>
+                  <p className="mt-2 text-xl font-black text-[#102a43] dark:text-white">
+                    {arimrSizingResult.estimatedAnnualProductionKwh.toLocaleString("pl-PL")} kWh
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">
+                    około {arimrSizingResult.coveragePercent.toLocaleString("pl-PL")}% zapotrzebowania
+                  </p>
+                </div>
+                <div className="rounded-xl bg-amber-50 p-4 dark:bg-amber-950/30">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-amber-700 dark:text-amber-300">Na potrzeby domu łącznie</p>
+                  <p className="mt-2 text-xl font-black text-[#102a43] dark:text-white">
+                    maks. {arimrSizingResult.residentialPowerLimitKwp.toLocaleString("pl-PL")} kWp
+                  </p>
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                    do {arimrSizingResult.residentialPanelCount} paneli · 10 kWp i 20% OZE w gospodarstwie
+                  </p>
+                </div>
+              </div>
+
+              {arimrSizingResult.isProgramLimitBinding ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                  Pełne pokrycie wymaga około <strong>{arimrSizingResult.fullCoveragePowerKwp.toLocaleString("pl-PL")} kWp</strong>, ale w tym PPE pozostaje maksymalnie <strong>{arimrSizingResult.availableNewPvLimitKwp.toLocaleString("pl-PL")} kWp</strong> nowej PV. Do kroku 2 trafi wariant mieszczący się w limicie programu.
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 dark:border-[#345779] sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-300">
+                  Przy przejściu dalej moc, liczba paneli i rekomendowane posadowienie zostaną ustawione automatycznie.
+                </p>
+                <button
+                  type="button"
+                  disabled={arimrSizingResult.recommendedPanelCount <= 0}
+                  onClick={applyArimrSizingRecommendation}
+                  className="shrink-0 rounded-xl bg-[#102a43] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#173b5e] disabled:cursor-not-allowed disabled:bg-slate-300 dark:bg-blue-700 dark:hover:bg-blue-600"
+                >
+                  Ustaw w instalacji
+                </button>
+              </div>
+            </div>
+          ) : arimrPvSizing.annualConsumptionKwh || arimrPvSizing.directions.length > 0 || arimrPvSizing.mountings.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-[#9fb6ca] bg-white/70 px-4 py-3 text-xs text-slate-600 dark:border-[#345779] dark:bg-[#081a2c]/70 dark:text-slate-300">
+              Uzupełnij roczne zużycie oraz zaznacz co najmniej jeden kierunek i jedno miejsce montażu. Dobór pojawi się automatycznie.
+            </div>
+          ) : null}
+
+          <p className="mt-3 text-[11px] leading-relaxed text-slate-400 dark:text-slate-400">
+            Uproszczony dobór zakłada bazową produkcję {ARIMR_PV_SIZING_ASSUMPTIONS.baseAnnualYieldKwhPerKwp.toLocaleString("pl-PL")} kWh/kWp/rok i współczynniki zależne od kierunku oraz posadowienia. Limit domu jest liczony z mocy OZE wpisanej w tym kalkulatorze; przy innych źródłach lub PPE trzeba je doliczyć. Ostateczną moc potwierdzamy po analizie profilu zużycia, zacienienia i dostępnej powierzchni.
+          </p>
+        </div>
+      ) : null}
 
       {customModeAvailable ? (
         <div className={`mb-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-950 sm:grid-cols-2 ${activeWorkspaceStep === "equipment" ? "" : "hidden"}`}>
