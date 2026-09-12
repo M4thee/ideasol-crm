@@ -47,6 +47,7 @@ export const COMMAND_CENTER_WIDGETS: CommandCenterWidgetDefinition[] = [
   { id: "lead-funnel", kind: "lead-funnel", name: "Lejek leadów", description: "Kohorta leadów miesiąca: aktywność, spotkanie, oferta, sprzedaż.", defaultSize: { w: 5, h: 5 } },
   { id: "lead-sources", kind: "lead-sources", name: "Źródła leadów", description: "Rozkład pola lead_source dla nowych leadów.", defaultSize: { w: 4, h: 4 } },
   { id: "lead-statuses", kind: "lead-statuses", name: "Statusy leadów", description: "Rozkład bieżącego statusu klientów-leadów.", defaultSize: { w: 4, h: 4 } },
+  { id: "lead-map", kind: "lead-map", name: "Mapa leadów — Polska", description: "Punkty leadów według kodów pocztowych i lokalnego katalogu współrzędnych.", defaultSize: { w: 6, h: 5 }, defaultPeriod: "month" },
   { id: "advisor-ranking", kind: "advisor-ranking", name: "Ranking doradców", description: "Informacyjne zestawienie sprzedaży, konwersji i podejmowalności.", defaultSize: { w: 7, h: 5 } },
   { id: "monthly-target", kind: "monthly-target", name: "Cel miesięczny", description: "Realizacja celu ustawionego w konfiguracji widżetu.", defaultSize: { w: 4, h: 3 } },
   { id: "status-ticker", kind: "status-ticker", name: "Pasek informacyjny", description: "Subtelne podsumowanie zagregowanych danych.", defaultSize: { w: 12, h: 1 } },

@@ -1,8 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 import { createDefaultCommandCenterSnapshot } from "@/lib/command-center/widget-registry";
+import { digestCommandCenterSecret } from "@/lib/command-center/device-server";
 import { validateCommandCenterSnapshot } from "@/lib/command-center/validation";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -25,6 +26,39 @@ function slugify(value: string) {
 
 const DEVICE_PLATFORMS = new Set(["browser", "android_tv", "google_tv", "apple_tv", "fire_tv", "other"]);
 const DEVICE_THEMES = new Set(["light", "dark", "auto"]);
+const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+const PAIRING_CODE_LENGTH = 8;
+const PAIRING_CODE_ATTEMPTS = 12;
+
+function createPairingCode() {
+  return Array.from(
+    { length: PAIRING_CODE_LENGTH },
+    () => PAIRING_CODE_ALPHABET[randomInt(PAIRING_CODE_ALPHABET.length)]
+  ).join("");
+}
+
+function formatPairingCode(code: string) {
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+async function issuePairingCode(deviceId: string, profileId: string) {
+  for (let attempt = 0; attempt < PAIRING_CODE_ATTEMPTS; attempt += 1) {
+    const rawCode = createPairingCode();
+    const { data, error } = await supabaseAdmin.rpc("cc_issue_device_pairing_code", {
+      p_device_id: deviceId,
+      p_code_digest: digestCommandCenterSecret(rawCode),
+      p_created_by: profileId,
+    });
+    if (!error && data) {
+      return {
+        activationCode: formatPairingCode(rawCode),
+        activationExpiresAt: data.expires_at as string,
+      };
+    }
+    if (error?.code !== "23505") throw new Error(error?.message || "Nie udało się wygenerować kodu aktywacyjnego.");
+  }
+  throw new Error("Nie udało się wylosować wolnego kodu aktywacyjnego. Spróbuj ponownie.");
+}
 
 function isValidTimezone(value: string) {
   try {
@@ -206,8 +240,7 @@ export async function POST(request: Request) {
     const platform = String(body.platform || "browser");
     if (name.length < 2) return errorResponse("Podaj nazwę urządzenia.");
     if (!DEVICE_PLATFORMS.has(platform)) return errorResponse("Nieobsługiwana platforma urządzenia.");
-    const rawToken = randomBytes(24).toString("base64url");
-    const digest = createHash("sha256").update(rawToken).digest("hex");
+    const digest = digestCommandCenterSecret(randomBytes(32).toString("base64url"));
     const { data, error } = await supabaseAdmin.from("cc_devices").insert({
       name,
       platform,
@@ -217,7 +250,29 @@ export async function POST(request: Request) {
       updated_by: profile.id,
     }).select("id,name").single();
     if (error) return errorResponse(error.message, 500);
-    return NextResponse.json({ device: data, token: rawToken });
+    try {
+      const activation = await issuePairingCode(data.id, profile.id);
+      return NextResponse.json({ device: data, ...activation });
+    } catch (activationError) {
+      await supabaseAdmin.from("cc_devices").delete().eq("id", data.id);
+      return errorResponse(activationError instanceof Error ? activationError.message : "Nie udało się wygenerować kodu aktywacyjnego.", 500);
+    }
+  }
+
+  if (action === "create-device-activation-code") {
+    const deviceId = String(body.deviceId || "");
+    const { data: device, error: deviceError } = await supabaseAdmin
+      .from("cc_devices")
+      .select("id,name")
+      .eq("id", deviceId)
+      .maybeSingle();
+    if (deviceError || !device) return errorResponse("Nie znaleziono urządzenia.", 404);
+    try {
+      const activation = await issuePairingCode(device.id, profile.id);
+      return NextResponse.json({ device, ...activation });
+    } catch (activationError) {
+      return errorResponse(activationError instanceof Error ? activationError.message : "Nie udało się wygenerować kodu aktywacyjnego.", 500);
+    }
   }
 
   if (action === "update-device") {
@@ -252,7 +307,7 @@ export async function POST(request: Request) {
 
   if (action === "rotate-device-token") {
     const rawToken = randomBytes(24).toString("base64url");
-    const digest = createHash("sha256").update(rawToken).digest("hex");
+    const digest = digestCommandCenterSecret(rawToken);
     const { data, error } = await supabaseAdmin.from("cc_devices").update({
       access_token_digest: digest,
       updated_by: profile.id,

@@ -3,7 +3,7 @@ plugins {
 }
 
 val commandCenterUrl = providers.gradleProperty("COMMAND_CENTER_URL")
-    .orElse("https://crm.ideasol.pl/command-center/tv/not-configured")
+    .orElse("https://crm.ideasol.pl/command-center/tv")
 
 android {
     namespace = "pl.ideasol.commandcenter.tv"
@@ -13,8 +13,8 @@ android {
         applicationId = "pl.ideasol.commandcenter.tv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
 
         buildConfigField("String", "COMMAND_CENTER_URL", "\"${commandCenterUrl.get()}\"")
     }

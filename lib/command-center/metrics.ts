@@ -7,6 +7,13 @@ type ClientRow = {
   status: string | null;
   lead_source: string | null;
   assigned_user_id: string | null;
+  postal_code: string | null;
+};
+
+type PostalCodeLocationRow = {
+  postal_code: string;
+  latitude: number | string;
+  longitude: number | string;
 };
 
 type ActivityRow = {
@@ -58,6 +65,11 @@ async function fetchAllRows<Row>(
 
 function normalize(value: unknown) {
   return String(value || "").trim().toLocaleLowerCase("pl-PL");
+}
+
+function normalizePostalCode(value: unknown) {
+  const match = String(value || "").trim().match(/^(\d{2})[-\s]?(\d{3})$/);
+  return match ? `${match[1]}-${match[2]}` : null;
 }
 
 function numberValue(value: unknown) {
@@ -161,7 +173,7 @@ export async function loadCommandCenterMetrics(
   const dayEndIso = ranges.dayEnd.toISOString();
 
   const [clients, activities, calendarByEventDate, calendarCreated, offers, unfilteredSales, profiles] = await Promise.all([
-    fetchAllRows<ClientRow>((from, to) => supabase.from("clients").select("id, created_at, status, lead_source, assigned_user_id").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<ClientRow>((from, to) => supabase.from("clients").select("id, created_at, status, lead_source, assigned_user_id, postal_code").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_at, activity_type").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", ranges.monthStart.toISOString()).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
@@ -169,6 +181,55 @@ export async function loadCommandCenterMetrics(
     fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ProfileRow>((from, to) => supabase.from("profiles").select("id, display_name, role").order("id", { ascending: true }).range(from, to)),
   ]);
+  const postalCodes = Array.from(new Set(clients.map((row) => normalizePostalCode(row.postal_code)).filter((code): code is string => Boolean(code))));
+  const postalCodeChunks = Array.from({ length: Math.ceil(postalCodes.length / 150) }, (_, index) => postalCodes.slice(index * 150, (index + 1) * 150));
+  const postalCodeLocations = (await Promise.all(postalCodeChunks.map((chunk) =>
+    fetchAllRows<PostalCodeLocationRow>((from, to) => supabase
+      .from("postal_code_locations")
+      .select("postal_code, latitude, longitude")
+      .in("postal_code", chunk)
+      .order("postal_code", { ascending: true })
+      .range(from, to))
+  ))).flat();
+
+  const locationSums = new Map<string, { latitude: number; longitude: number; count: number }>();
+  postalCodeLocations.forEach((location) => {
+    const postalCode = normalizePostalCode(location.postal_code);
+    const latitude = numberValue(location.latitude);
+    const longitude = numberValue(location.longitude);
+    if (!postalCode || !latitude || !longitude) return;
+    const current = locationSums.get(postalCode) || { latitude: 0, longitude: 0, count: 0 };
+    current.latitude += latitude;
+    current.longitude += longitude;
+    current.count += 1;
+    locationSums.set(postalCode, current);
+  });
+  const locationMap = new Map(Array.from(locationSums, ([postalCode, location]) => [postalCode, {
+    latitude: location.latitude / location.count,
+    longitude: location.longitude / location.count,
+  }]));
+  const leadMapCounts = new Map<string, { today: number; week: number; month: number; quarter: number }>();
+  let validPostalCodes = 0;
+  let locatedLeads = 0;
+  clients.forEach((client) => {
+    const postalCode = normalizePostalCode(client.postal_code);
+    if (!postalCode) return;
+    validPostalCodes += 1;
+    if (!locationMap.has(postalCode)) return;
+    locatedLeads += 1;
+    const counts = leadMapCounts.get(postalCode) || { today: 0, week: 0, month: 0, quarter: 0 };
+    counts.quarter += 1;
+    if (inRange(client.created_at, ranges.monthStart, ranges.dayEnd)) counts.month += 1;
+    if (inRange(client.created_at, ranges.weekStart, ranges.dayEnd)) counts.week += 1;
+    if (inRange(client.created_at, ranges.dayStart, ranges.dayEnd)) counts.today += 1;
+    leadMapCounts.set(postalCode, counts);
+  });
+  const leadMapPoints = Array.from(leadMapCounts, ([postalCode, counts]) => ({
+    postalCode,
+    latitude: locationMap.get(postalCode)!.latitude,
+    longitude: locationMap.get(postalCode)!.longitude,
+    ...counts,
+  })).sort((a, b) => a.postalCode.localeCompare(b.postalCode, "pl"));
   const sales = unfilteredSales.filter(isCountedSale);
   const monthClients = clients.filter((row) => inRange(row.created_at, ranges.monthStart, ranges.dayEnd));
   const monthClientIds = new Set(monthClients.map((row) => row.id));
@@ -298,6 +359,11 @@ export async function loadCommandCenterMetrics(
       month: countIn(phoneActivities, ranges.monthStart),
       quarter: countIn(phoneActivities, ranges.quarterStart),
     },
+    leadMap: {
+      points: leadMapPoints,
+      validPostalCodes,
+      locatedLeads,
+    },
     ranking,
     reliability: [
       "Leady są liczone z rekordów clients według created_at.",
@@ -305,6 +371,7 @@ export async function loadCommandCenterMetrics(
       "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; wartość pochodzi z sales.contract_value.",
       "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
       "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
+      "Mapa leadów grupuje rekordy clients po kodzie pocztowym i korzysta z lokalnego katalogu postal_code_locations; nie przekazuje adresów do zewnętrznej mapy.",
     ],
   };
 }

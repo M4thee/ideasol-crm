@@ -9,6 +9,7 @@ export type CommandCenterWidgetKind =
   | "lead-funnel"
   | "lead-sources"
   | "lead-statuses"
+  | "lead-map"
   | "advisor-ranking"
   | "meetings-kpi"
   | "meetings-today"
@@ -99,6 +100,16 @@ export type CommandCenterRankingRow = {
   conversion: number;
 };
 
+export type CommandCenterLeadMapPoint = {
+  postalCode: string;
+  latitude: number;
+  longitude: number;
+  today: number;
+  week: number;
+  month: number;
+  quarter: number;
+};
+
 export type CommandCenterMetrics = {
   generatedAt: string;
   leads: {
@@ -142,6 +153,11 @@ export type CommandCenterMetrics = {
     week: number;
     month: number;
     quarter: number;
+  };
+  leadMap: {
+    points: CommandCenterLeadMapPoint[];
+    validPostalCodes: number;
+    locatedLeads: number;
   };
   ranking: CommandCenterRankingRow[];
   reliability: string[];

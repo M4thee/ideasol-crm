@@ -64,6 +64,15 @@
 .cc-kpi-currency span { max-width: none; }
 .cc-empty { align-items: center; color: var(--cc-muted); display: flex; font-size: 19px; height: calc(100% - 30px); justify-content: center; text-align: center; }
 
+.cc-lead-map { display: grid; grid-template-columns: minmax(0, 1fr) 190px; height: calc(100% - 34px); min-height: 0; }
+.cc-lead-map svg { height: 100%; min-height: 0; overflow: visible; width: 100%; }
+.cc-lead-map-outline { fill: color-mix(in srgb, var(--cc-blue) 8%, var(--cc-panel-strong)); stroke: color-mix(in srgb, var(--cc-blue) 58%, var(--cc-line)); stroke-linejoin: round; stroke-width: 3; }
+.cc-lead-map-dot { fill: var(--cc-orange); opacity: 0.78; stroke: color-mix(in srgb, var(--cc-orange) 55%, white); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.cc-lead-map-summary { align-self: center; display: flex; flex-direction: column; gap: 6px; padding-left: 18px; }
+.cc-lead-map-summary strong { color: var(--cc-text); font-size: 54px; letter-spacing: -0.05em; line-height: 0.9; }
+.cc-lead-map-summary span { color: var(--cc-muted); font-size: 17px; line-height: 1.25; }
+.cc-lead-map-summary small { border-top: 1px solid var(--cc-line); color: var(--cc-muted); font-size: 13px; margin-top: 8px; padding-top: 10px; }
+
 .cc-bars { display: grid; gap: 12px; }
 .cc-bar-label { display: flex; font-size: 16px; justify-content: space-between; }
 .cc-bar-label span { max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

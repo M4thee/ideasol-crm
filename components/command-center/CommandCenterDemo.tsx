@@ -35,6 +35,18 @@ const demoMetrics: CommandCenterMetrics = {
   funnel: { leads: 187, contacted: 142, meetings: 79, offers: 48, sales: 32 },
   meetings: { today: 4, week: 21, month: 79, quarter: 204, scheduledToday: 9, upcomingToday: 5 },
   calls: { today: 47, week: 196, month: 731, quarter: 1_982 },
+  leadMap: {
+    validPostalCodes: 164,
+    locatedLeads: 161,
+    points: [
+      { postalCode: "00-001", latitude: 52.2297, longitude: 21.0122, today: 3, week: 12, month: 31, quarter: 84 },
+      { postalCode: "30-001", latitude: 50.0647, longitude: 19.945, today: 2, week: 8, month: 24, quarter: 61 },
+      { postalCode: "80-001", latitude: 54.352, longitude: 18.6466, today: 1, week: 7, month: 19, quarter: 53 },
+      { postalCode: "50-001", latitude: 51.1079, longitude: 17.0385, today: 2, week: 6, month: 17, quarter: 45 },
+      { postalCode: "60-001", latitude: 52.4064, longitude: 16.9252, today: 1, week: 5, month: 14, quarter: 38 },
+      { postalCode: "20-001", latitude: 51.2465, longitude: 22.5684, today: 0, week: 3, month: 9, quarter: 28 },
+    ],
+  },
   ranking: [
     { advisorId: "demo-a", advisorName: "Doradca A", leads: 38, contactedLeads: 31, contactRate: 82, sales: 9, salesValue: 194_000, conversion: 24 },
     { advisorId: "demo-b", advisorName: "Doradca B", leads: 41, contactedLeads: 33, contactRate: 80, sales: 8, salesValue: 171_000, conversion: 20 },

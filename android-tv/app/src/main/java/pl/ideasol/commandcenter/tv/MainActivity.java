@@ -45,7 +45,7 @@ public final class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " IdeaSolCommandCenterTV/1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " IdeaSolCommandCenterTV/2.0");
 
         CookieManager.getInstance().setAcceptCookie(true);
         webView.setWebViewClient(new WebViewClient());
@@ -91,7 +91,14 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        CookieManager.getInstance().flush();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        CookieManager.getInstance().flush();
         webView.destroy();
         super.onDestroy();
     }
