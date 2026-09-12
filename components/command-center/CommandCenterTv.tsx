@@ -9,7 +9,7 @@ import type {
 } from "@/lib/command-center/types";
 import CommandCenterCanvas from "./CommandCenterCanvas";
 
-const COMMAND_CENTER_ACHIEVEMENT_VIDEO = "/animations/command-center-achievement.webm";
+const COMMAND_CENTER_ACHIEVEMENT_ART = "/animations/command-center-achievement.webp";
 const COMMAND_CENTER_ACHIEVEMENT_AUDIO = "/animations/command-center-achievement.m4a";
 
 function resolveTheme(payload: CommandCenterDevicePayload, date: Date) {
@@ -106,14 +106,13 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
   return (
     <div className="cc-live-event-layer" aria-live="polite" role="status">
       <div className={`cc-live-event-card cc-live-event-${event.kind} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
-        <video
+        {/* Zwykły obraz animowany: Android TV nie może nałożyć na niego natywnego przycisku Play. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          alt=""
           aria-hidden="true"
-          autoPlay
-          className="cc-live-event-video"
-          muted
-          playsInline
-          preload="auto"
-          src={COMMAND_CENTER_ACHIEVEMENT_VIDEO}
+          className="cc-live-event-art"
+          src={COMMAND_CENTER_ACHIEVEMENT_ART}
         />
         <audio
           aria-hidden="true"
@@ -263,18 +262,14 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
   }, [load]);
 
   useEffect(() => {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.preload = "auto";
-    video.src = COMMAND_CENTER_ACHIEVEMENT_VIDEO;
-    video.load();
+    const image = document.createElement("img");
+    image.src = COMMAND_CENTER_ACHIEVEMENT_ART;
     const audio = document.createElement("audio");
     audio.preload = "auto";
     audio.src = COMMAND_CENTER_ACHIEVEMENT_AUDIO;
     audio.load();
     return () => {
-      video.removeAttribute("src");
-      video.load();
+      image.removeAttribute("src");
       audio.removeAttribute("src");
       audio.load();
     };
