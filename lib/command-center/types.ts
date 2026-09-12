@@ -168,6 +168,7 @@ export type CommandCenterLiveEventsPayload = {
 };
 
 export type CommandCenterDevicePayload = {
+  appVersion: string;
   device: CommandCenterDeviceRow;
   dashboard: {
     id: string;

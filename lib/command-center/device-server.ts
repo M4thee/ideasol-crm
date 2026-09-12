@@ -4,6 +4,7 @@ import {
   isCountedCommandCenterSale,
   loadCommandCenterMetrics,
 } from "@/lib/command-center/metrics";
+import { getCommandCenterAppVersion } from "@/lib/command-center/app-version";
 import type {
   CommandCenterDevicePayload,
   CommandCenterLiveEvent,
@@ -155,6 +156,7 @@ export async function loadCommandCenterDevicePayload(rawToken: string): Promise<
     return {
       ok: true,
       payload: {
+        appVersion: getCommandCenterAppVersion(),
         device,
         dashboard: {
           id: dashboard.id,

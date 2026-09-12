@@ -130,7 +130,7 @@ async function playLiveEventSound(kind: CommandCenterLiveEvent["kind"]) {
   }
 }
 
-export default function CommandCenterTv({ token }: { token?: string }) {
+export default function CommandCenterTv({ token, buildVersion }: { token?: string; buildVersion: string }) {
   const [payload, setPayload] = useState<CommandCenterDevicePayload | null>(null);
   const [error, setError] = useState("");
   const [activationRequired, setActivationRequired] = useState(false);
@@ -149,6 +149,7 @@ export default function CommandCenterTv({ token }: { token?: string }) {
   const liveEventActiveRef = useRef(false);
   const liveEventExitTimeoutRef = useRef<number | null>(null);
   const liveEventClearTimeoutRef = useRef<number | null>(null);
+  const reloadRequestedRef = useRef(false);
   const activePages = useMemo(
     () => (payload?.snapshot.pages || []).filter((page) => page.enabled).sort((a, b) => a.order - b.order),
     [payload]
@@ -168,6 +169,17 @@ export default function CommandCenterTv({ token }: { token?: string }) {
         return;
       }
       if (!response.ok) throw new Error(result.error || "Nie udało się pobrać dashboardu.");
+      if (
+        !reloadRequestedRef.current
+        && result.appVersion
+        && result.appVersion !== buildVersion
+      ) {
+        reloadRequestedRef.current = true;
+        const refreshedUrl = new URL(window.location.href);
+        refreshedUrl.searchParams.set("ccv", result.appVersion.slice(0, 12));
+        window.location.replace(refreshedUrl.toString());
+        return;
+      }
       setPayload((current) => {
         if (current && current.dashboard.versionId !== result.dashboard.versionId) setPageIndex(0);
         return result as CommandCenterDevicePayload;
@@ -177,7 +189,7 @@ export default function CommandCenterTv({ token }: { token?: string }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Brak połączenia z Command Center.");
     }
-  }, [token]);
+  }, [buildVersion, token]);
 
   const showNextLiveEvent = useCallback(function showNext() {
     if (liveEventActiveRef.current) return;
