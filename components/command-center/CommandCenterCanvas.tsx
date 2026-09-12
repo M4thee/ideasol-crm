@@ -113,6 +113,7 @@ const POLAND_OUTLINE_POINTS = "579.9,295.4 584.4,305.9 583.5,313.2 609.4,350.8 6
 const POLAND_BOUNDS = { minLongitude: 14.128613, maxLongitude: 24.105762, minLatitude: 49.020752, maxLatitude: 54.838184 };
 const CAMPAIGN_COLORS: Record<CommandCenterLeadMapPoint["campaignKind"], string> = {
   meta: "#1398ef",
+  metaArimr: "#a855f7",
   calculator: "#24d18b",
   advisor: "#94a3b8",
   photo: "#ff991f",

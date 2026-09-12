@@ -66,7 +66,7 @@ const demoMetrics: CommandCenterMetrics = {
     validPostalCodes: 164,
     locatedLeads: 161,
     points: [
-      { campaign: "ARiMR", campaignKind: "meta", postalCode: "00-001", latitude: 52.2297, longitude: 21.0122, yesterday: 2, today: 3, week: 12, month: 31, quarter: 84 },
+      { campaign: "ARiMR", campaignKind: "metaArimr", postalCode: "00-001", latitude: 52.2297, longitude: 21.0122, yesterday: 2, today: 3, week: 12, month: 31, quarter: 84 },
       { campaign: "ME", campaignKind: "meta", postalCode: "30-001", latitude: 50.0647, longitude: 19.945, yesterday: 1, today: 2, week: 8, month: 24, quarter: 61 },
       { campaign: "Kalkulator ME", campaignKind: "calculator", postalCode: "80-001", latitude: 54.352, longitude: 18.6466, yesterday: 1, today: 1, week: 7, month: 19, quarter: 53 },
       { campaign: "Załatwione z roboty", campaignKind: "photo", postalCode: "50-001", latitude: 51.1079, longitude: 17.0385, yesterday: 2, today: 2, week: 6, month: 17, quarter: 45 },

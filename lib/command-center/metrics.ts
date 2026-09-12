@@ -219,7 +219,7 @@ function mapLeadCampaign(
   const integrationId = metaIntegrationByClient.get(client.id);
   const integrationName = integrationId ? integrationNames.get(integrationId)?.trim() : "";
   const normalizedIntegrationName = normalize(integrationName);
-  if (normalizedIntegrationName.includes("arimr")) return { campaign: "ARiMR", campaignKind: "meta" as const };
+  if (normalizedIntegrationName.includes("arimr")) return { campaign: "ARiMR", campaignKind: "metaArimr" as const };
   if (normalizedIntegrationName.includes("magazyn") || normalizedIntegrationName.includes("kwh")) {
     return { campaign: "ME", campaignKind: "meta" as const };
   }
@@ -333,7 +333,7 @@ export async function loadCommandCenterMetrics(
   }]));
   const leadMapCounts = new Map<string, {
     campaign: string;
-    campaignKind: "meta" | "calculator" | "advisor" | "photo";
+    campaignKind: "meta" | "metaArimr" | "calculator" | "advisor" | "photo";
     counts: CommandCenterPeriodValues<number>;
     postalCode: string;
   }>();
