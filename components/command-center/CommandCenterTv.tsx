@@ -9,7 +9,6 @@ import type {
 } from "@/lib/command-center/types";
 import CommandCenterCanvas from "./CommandCenterCanvas";
 
-const COMMAND_CENTER_ACHIEVEMENT_ART = "/animations/command-center-achievement.webp";
 const COMMAND_CENTER_ACHIEVEMENT_AUDIO = "/animations/command-center-achievement.m4a";
 
 function resolveTheme(payload: CommandCenterDevicePayload, date: Date) {
@@ -82,7 +81,15 @@ function DeviceActivation({ onActivated }: { onActivated: () => Promise<void> })
   );
 }
 
-function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exiting: boolean }) {
+function LiveEventAlert({
+  event,
+  exiting,
+  theme,
+}: {
+  event: CommandCenterLiveEvent;
+  exiting: boolean;
+  theme: "light" | "dark";
+}) {
   const notificationAudioRef = useRef<HTMLAudioElement>(null);
   const isSale = event.kind === "sale";
   const value = isSale && event.value
@@ -105,15 +112,13 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
 
   return (
     <div className="cc-live-event-layer" aria-live="polite" role="status">
-      <div className={`cc-live-event-card cc-live-event-${event.kind} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
-        {/* Zwykły obraz animowany: Android TV nie może nałożyć na niego natywnego przycisku Play. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          alt=""
-          aria-hidden="true"
-          className="cc-live-event-art"
-          src={COMMAND_CENTER_ACHIEVEMENT_ART}
-        />
+      <div className={`cc-live-event-card cc-live-event-${event.kind} cc-live-event-theme-${theme} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
+        <div aria-hidden="true" className="cc-live-event-frame">
+          <span className="cc-live-event-accent" />
+          <span className="cc-live-event-sheen" />
+          <span className="cc-live-event-glow cc-live-event-glow-start" />
+          <span className="cc-live-event-glow cc-live-event-glow-end" />
+        </div>
         <audio
           aria-hidden="true"
           preload="auto"
@@ -216,12 +221,12 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     liveEventActiveRef.current = true;
     setActiveLiveEvent(nextEvent);
     setLiveEventExiting(false);
-    liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 5_050);
+    liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 4_200);
     liveEventClearTimeoutRef.current = window.setTimeout(() => {
       setActiveLiveEvent(null);
       liveEventActiveRef.current = false;
       showNext();
-    }, 6_100);
+    }, 4_800);
   }, []);
 
   const loadLiveEvents = useCallback(async () => {
@@ -262,14 +267,11 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
   }, [load]);
 
   useEffect(() => {
-    const image = document.createElement("img");
-    image.src = COMMAND_CENTER_ACHIEVEMENT_ART;
     const audio = document.createElement("audio");
     audio.preload = "auto";
     audio.src = COMMAND_CENTER_ACHIEVEMENT_AUDIO;
     audio.load();
     return () => {
-      image.removeAttribute("src");
       audio.removeAttribute("src");
       audio.load();
     };
@@ -531,7 +533,7 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
             </div>
           }
         />
-        {activeLiveEvent && <LiveEventAlert event={activeLiveEvent} exiting={liveEventExiting} key={activeLiveEvent.id} />}
+        {activeLiveEvent && <LiveEventAlert event={activeLiveEvent} exiting={liveEventExiting} key={activeLiveEvent.id} theme={theme} />}
       </div>
     </main>
   );

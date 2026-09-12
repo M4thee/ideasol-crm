@@ -173,49 +173,93 @@
   display: flex;
   inset: 0;
   justify-content: center;
+  padding-top: 54px;
   pointer-events: none;
   position: absolute;
   z-index: 60;
 }
 
 .cc-live-event-card {
-  height: 653px;
+  height: 210px;
+  isolation: isolate;
   position: relative;
-  width: 1160px;
+  width: 860px;
 }
 
-.cc-live-event-card::before {
-  backdrop-filter: blur(18px) saturate(0.8);
-  background: linear-gradient(135deg, rgba(3, 15, 31, 0.95), rgba(7, 35, 55, 0.92));
-  border: 1px solid rgba(125, 211, 252, 0.22);
-  border-radius: 72px;
-  box-shadow: 0 24px 70px rgba(2, 12, 27, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  content: "";
-  inset: 15% 9% 16%;
+.cc-live-event-entering { animation: cc-live-event-card-in 680ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.cc-live-event-exiting { animation: cc-live-event-card-out 500ms cubic-bezier(0.4, 0, 1, 1) both; }
+
+.cc-live-event-frame {
+  backdrop-filter: blur(24px) saturate(1.16);
+  border: 2px solid rgba(56, 189, 248, 0.46);
+  border-radius: 34px;
+  box-shadow: 0 26px 72px rgba(2, 12, 27, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  inset: 0;
+  overflow: hidden;
   position: absolute;
   z-index: 0;
 }
 
-.cc-live-event-entering::before { animation: cc-live-event-glass-in 520ms 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
-.cc-live-event-exiting::before { animation: cc-live-event-glass-out 420ms ease-in both; }
-
-.cc-live-event-art {
-  clip-path: inset(14% 8% 15% 8% round 76px);
-  height: 100%;
-  inset: 0;
-  object-fit: contain;
-  position: absolute;
-  width: 100%;
-  z-index: 1;
+.cc-live-event-theme-dark .cc-live-event-frame {
+  background: linear-gradient(135deg, rgba(3, 16, 31, 0.97), rgba(8, 38, 57, 0.95));
 }
+
+.cc-live-event-theme-light .cc-live-event-frame {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(226, 243, 250, 0.95));
+  border-color: rgba(14, 165, 233, 0.5);
+  box-shadow: 0 24px 68px rgba(15, 50, 70, 0.24), inset 0 1px 0 #fff;
+}
+
+.cc-live-event-sale .cc-live-event-frame { border-color: rgba(251, 191, 36, 0.58); }
+
+.cc-live-event-accent {
+  background: linear-gradient(90deg, transparent, #38bdf8 16%, #e0f2fe 50%, #38bdf8 84%, transparent);
+  height: 4px;
+  left: 28px;
+  position: absolute;
+  right: 28px;
+  top: 0;
+  transform-origin: center;
+}
+
+.cc-live-event-entering .cc-live-event-accent { animation: cc-live-event-accent-in 780ms 120ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.cc-live-event-sale .cc-live-event-accent { background: linear-gradient(90deg, transparent, #f59e0b 16%, #fef3c7 50%, #f59e0b 84%, transparent); }
+
+.cc-live-event-sheen {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+  bottom: -30%;
+  left: -28%;
+  position: absolute;
+  top: -30%;
+  transform: skewX(-18deg);
+  width: 20%;
+}
+
+.cc-live-event-entering .cc-live-event-sheen { animation: cc-live-event-sheen 850ms 360ms ease-out both; }
+
+.cc-live-event-glow {
+  border-radius: 999px;
+  filter: blur(22px);
+  height: 110px;
+  opacity: 0.28;
+  position: absolute;
+  width: 180px;
+}
+
+.cc-live-event-glow-start { background: #0ea5e9; left: -68px; top: -54px; }
+.cc-live-event-glow-end { background: #38bdf8; bottom: -72px; right: -52px; }
+.cc-live-event-sale .cc-live-event-glow-start,
+.cc-live-event-sale .cc-live-event-glow-end { background: #f59e0b; }
+.cc-live-event-theme-light .cc-live-event-glow { opacity: 0.17; }
+
+.cc-live-event-entering .cc-live-event-glow { animation: cc-live-event-glow-in 900ms 140ms ease-out both; }
 
 .cc-live-event-copy {
   align-items: center;
-  animation: cc-live-event-copy-in 520ms 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  inset: 28% 16% 25%;
+  gap: 6px;
+  inset: 24px 56px;
   justify-content: center;
   min-width: 0;
   position: absolute;
@@ -223,33 +267,52 @@
   z-index: 2;
 }
 
-.cc-live-event-exiting .cc-live-event-copy { animation: cc-live-event-copy-out 400ms ease-in both; }
-.cc-live-event-copy span { color: #4fc4ff; font-size: 17px; font-weight: 850; letter-spacing: 0.2em; text-transform: uppercase; }
-.cc-live-event-sale .cc-live-event-copy span { color: #ffb548; }
-.cc-live-event-copy strong { color: #fff; font-size: 60px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.05; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.7); }
-.cc-live-event-copy small { color: #bfd3df; font-size: 24px; font-weight: 650; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85); }
+.cc-live-event-entering .cc-live-event-copy { animation: cc-live-event-copy-in 480ms 330ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.cc-live-event-copy span { color: #4fc4ff; font-size: 15px; font-weight: 850; letter-spacing: 0.22em; text-transform: uppercase; }
+.cc-live-event-sale .cc-live-event-copy span { color: #fbbf24; }
+.cc-live-event-copy strong { color: #fff; font-size: 52px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.02; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.4); }
+.cc-live-event-copy small { color: #bfd3df; font-size: 20px; font-weight: 650; }
+.cc-live-event-theme-light .cc-live-event-copy strong { color: #0b2238; text-shadow: 0 2px 14px rgba(255, 255, 255, 0.75); }
+.cc-live-event-theme-light .cc-live-event-copy small { color: #38556c; }
+.cc-live-event-theme-light .cc-live-event-copy span { color: #0284c7; }
+.cc-live-event-theme-light.cc-live-event-sale .cc-live-event-copy span { color: #b45309; }
 
 @keyframes cc-live-event-copy-in {
-  from { filter: blur(5px); opacity: 0; transform: translateY(12px) scale(0.97); }
+  from { filter: blur(4px); opacity: 0; transform: translateY(14px) scale(0.97); }
   to { filter: blur(0); opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes cc-live-event-copy-out {
-  from { filter: blur(0); opacity: 1; transform: translateY(0); }
-  to { filter: blur(4px); opacity: 0; transform: translateY(-8px); }
+@keyframes cc-live-event-card-in {
+  0% { opacity: 0; transform: translateY(-54px) scale(0.94); }
+  72% { opacity: 1; transform: translateY(6px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes cc-live-event-glass-in {
-  from { opacity: 0; transform: translateY(-12px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+@keyframes cc-live-event-card-out {
+  from { filter: blur(0); opacity: 1; transform: translateY(0) scale(1); }
+  to { filter: blur(4px); opacity: 0; transform: translateY(-34px) scale(0.97); }
 }
 
-@keyframes cc-live-event-glass-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(-8px) scale(0.98); }
+@keyframes cc-live-event-accent-in {
+  from { opacity: 0; transform: scaleX(0.05); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+@keyframes cc-live-event-sheen {
+  from { opacity: 0; transform: translateX(0) skewX(-18deg); }
+  22% { opacity: 1; }
+  to { opacity: 0; transform: translateX(720px) skewX(-18deg); }
+}
+
+@keyframes cc-live-event-glow-in {
+  from { opacity: 0; transform: scale(0.55); }
+  to { transform: scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cc-live-event-card::before,
+  .cc-live-event-card,
+  .cc-live-event-accent,
+  .cc-live-event-sheen,
+  .cc-live-event-glow,
   .cc-live-event-copy { animation: none !important; }
 }
