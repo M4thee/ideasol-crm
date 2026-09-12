@@ -22,12 +22,7 @@ public final class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         enterImmersiveMode();
         configureWebView();
-
-        if (savedInstanceState == null) {
-            webView.loadUrl(BuildConfig.COMMAND_CENTER_URL);
-        } else {
-            webView.restoreState(savedInstanceState);
-        }
+        webView.loadUrl(BuildConfig.COMMAND_CENTER_URL);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -45,7 +40,7 @@ public final class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " IdeaSolCommandCenterTV/2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " IdeaSolCommandCenterTV/2.0.1");
 
         CookieManager.getInstance().setAcceptCookie(true);
         webView.setWebViewClient(new WebViewClient());
@@ -68,12 +63,6 @@ public final class MainActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) enterImmersiveMode();
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        webView.saveState(outState);
-        super.onSaveInstanceState(outState);
     }
 
     @Override
