@@ -17,7 +17,9 @@ export type CommandCenterWidgetKind =
   | "monthly-target"
   | "status-ticker";
 
-export type CommandCenterPeriod = "today" | "week" | "month" | "quarter";
+export type CommandCenterPeriod = "yesterday" | "today" | "week" | "month" | "quarter";
+
+export type CommandCenterPeriodValues<Value> = Record<CommandCenterPeriod, Value>;
 
 export type CommandCenterWidget = {
   id: string;
@@ -100,67 +102,69 @@ export type CommandCenterRankingRow = {
   conversion: number;
 };
 
-export type CommandCenterLeadMapPoint = {
+export type CommandCenterLeadMapPoint = CommandCenterPeriodValues<number> & {
   postalCode: string;
   latitude: number;
   longitude: number;
-  today: number;
-  week: number;
-  month: number;
-  quarter: number;
+};
+
+export type CommandCenterFunnelMetrics = {
+  leads: number;
+  contacted: number;
+  meetings: number;
+  offers: number;
+  sales: number;
 };
 
 export type CommandCenterMetrics = {
   generatedAt: string;
-  leads: {
-    today: number;
-    week: number;
-    month: number;
-    quarter: number;
+  leads: CommandCenterPeriodValues<number> & {
     contactedMonth: number;
     contactRateMonth: number;
     averageFirstActivityMinutes: number | null;
     sources: Array<{ label: string; value: number }>;
     statuses: Array<{ label: string; value: number }>;
+    contactRateByPeriod: CommandCenterPeriodValues<number>;
+    averageFirstActivityMinutesByPeriod: CommandCenterPeriodValues<number | null>;
+    sourcesByPeriod: CommandCenterPeriodValues<Array<{ label: string; value: number }>>;
+    statusesByPeriod: CommandCenterPeriodValues<Array<{ label: string; value: number }>>;
   };
-  sales: {
-    today: number;
-    week: number;
-    month: number;
-    quarter: number;
+  sales: CommandCenterPeriodValues<number> & {
+    valueYesterday: number;
     valueToday: number;
     valueWeek: number;
     valueMonth: number;
     valueQuarter: number;
+    valueByPeriod: CommandCenterPeriodValues<number>;
   };
-  funnel: {
-    leads: number;
-    contacted: number;
-    meetings: number;
-    offers: number;
-    sales: number;
+  funnel: CommandCenterFunnelMetrics & {
+    byPeriod: CommandCenterPeriodValues<CommandCenterFunnelMetrics>;
   };
-  meetings: {
-    today: number;
-    week: number;
-    month: number;
-    quarter: number;
+  meetings: CommandCenterPeriodValues<number> & {
     scheduledToday: number;
     upcomingToday: number;
   };
-  calls: {
-    today: number;
-    week: number;
-    month: number;
-    quarter: number;
-  };
+  calls: CommandCenterPeriodValues<number>;
   leadMap: {
     points: CommandCenterLeadMapPoint[];
     validPostalCodes: number;
     locatedLeads: number;
   };
   ranking: CommandCenterRankingRow[];
+  rankingByPeriod: CommandCenterPeriodValues<CommandCenterRankingRow[]>;
   reliability: string[];
+};
+
+export type CommandCenterLiveEvent = {
+  id: string;
+  kind: "lead" | "sale";
+  occurredAt: string;
+  value?: number;
+};
+
+export type CommandCenterLiveEventsPayload = {
+  cursor: string;
+  events: CommandCenterLiveEvent[];
 };
 
 export type CommandCenterDevicePayload = {

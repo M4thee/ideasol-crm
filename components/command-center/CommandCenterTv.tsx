@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { CommandCenterDevicePayload } from "@/lib/command-center/types";
+import type {
+  CommandCenterDevicePayload,
+  CommandCenterLiveEvent,
+  CommandCenterLiveEventsPayload,
+} from "@/lib/command-center/types";
 import CommandCenterCanvas from "./CommandCenterCanvas";
 
 function resolveTheme(payload: CommandCenterDevicePayload, date: Date) {
@@ -75,6 +79,57 @@ function DeviceActivation({ onActivated }: { onActivated: () => Promise<void> })
   );
 }
 
+function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exiting: boolean }) {
+  const isSale = event.kind === "sale";
+  const value = isSale && event.value
+    ? new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(event.value)
+    : null;
+  return (
+    <div className="cc-live-event-layer" aria-live="polite" role="status">
+      <div className={`cc-live-event-card cc-live-event-${event.kind} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
+        <div className="cc-live-event-medallion" aria-hidden="true">
+          {isSale ? (
+            <svg viewBox="0 0 64 64"><path d="M18 33 28 43 47 20" /><circle cx="32" cy="32" r="25" /></svg>
+          ) : (
+            <svg viewBox="0 0 64 64"><circle cx="27" cy="24" r="9" /><path d="M11 49c2-10 8-15 16-15s14 5 16 15M48 18v18M39 27h18" /></svg>
+          )}
+        </div>
+        <div className="cc-live-event-copy">
+          <span>IdeaSol Achievement</span>
+          <strong>{isSale ? "Nowa sprzedaż!" : "Nowy lead!"}</strong>
+          <small>{value ? `Wartość sprzedaży: ${value}` : "Nowa szansa trafiła do CRM"}</small>
+        </div>
+        <div className="cc-live-event-orbit" aria-hidden="true"><i /><i /><i /></div>
+      </div>
+    </div>
+  );
+}
+
+async function playLiveEventSound(kind: CommandCenterLiveEvent["kind"]) {
+  try {
+    const context = new AudioContext();
+    await context.resume();
+    const frequencies = kind === "sale" ? [523.25, 783.99, 1046.5] : [440, 659.25, 880];
+    const start = context.currentTime + 0.02;
+    frequencies.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      const noteStart = start + index * 0.09;
+      gain.gain.setValueAtTime(0.0001, noteStart);
+      gain.gain.exponentialRampToValueAtTime(0.055, noteStart + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.42);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(noteStart);
+      oscillator.stop(noteStart + 0.45);
+    });
+    window.setTimeout(() => void context.close(), 900);
+  } catch {
+    // Nie blokujemy powiadomienia wizualnego, jeśli przeglądarka nie pozwoli uruchomić dźwięku.
+  }
+}
+
 export default function CommandCenterTv({ token }: { token?: string }) {
   const [payload, setPayload] = useState<CommandCenterDevicePayload | null>(null);
   const [error, setError] = useState("");
@@ -84,8 +139,16 @@ export default function CommandCenterTv({ token }: { token?: string }) {
   const [now, setNow] = useState(new Date());
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioVolumeOverride, setRadioVolumeOverride] = useState<number | null>(null);
+  const [activeLiveEvent, setActiveLiveEvent] = useState<CommandCenterLiveEvent | null>(null);
+  const [liveEventExiting, setLiveEventExiting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoplayAttemptedStationRef = useRef<string | null>(null);
+  const liveEventCursorRef = useRef<string | null>(null);
+  const seenLiveEventIdsRef = useRef(new Set<string>());
+  const liveEventQueueRef = useRef<CommandCenterLiveEvent[]>([]);
+  const liveEventActiveRef = useRef(false);
+  const liveEventExitTimeoutRef = useRef<number | null>(null);
+  const liveEventClearTimeoutRef = useRef<number | null>(null);
   const activePages = useMemo(
     () => (payload?.snapshot.pages || []).filter((page) => page.enabled).sort((a, b) => a.order - b.order),
     [payload]
@@ -116,6 +179,50 @@ export default function CommandCenterTv({ token }: { token?: string }) {
     }
   }, [token]);
 
+  const showNextLiveEvent = useCallback(function showNext() {
+    if (liveEventActiveRef.current) return;
+    const nextEvent = liveEventQueueRef.current.shift();
+    if (!nextEvent) return;
+    liveEventActiveRef.current = true;
+    setActiveLiveEvent(nextEvent);
+    setLiveEventExiting(false);
+    void playLiveEventSound(nextEvent.kind);
+    liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 3_700);
+    liveEventClearTimeoutRef.current = window.setTimeout(() => {
+      setActiveLiveEvent(null);
+      liveEventActiveRef.current = false;
+      showNext();
+    }, 4_400);
+  }, []);
+
+  const loadLiveEvents = useCallback(async () => {
+    const baseEndpoint = token
+      ? `/api/command-center/device/${encodeURIComponent(token)}/events`
+      : "/api/command-center/device/events";
+    const cursor = liveEventCursorRef.current;
+    const endpoint = cursor ? `${baseEndpoint}?after=${encodeURIComponent(cursor)}` : baseEndpoint;
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json() as CommandCenterLiveEventsPayload;
+      liveEventCursorRef.current = result.cursor;
+      const unseen = result.events.filter((event) => {
+        if (seenLiveEventIdsRef.current.has(event.id)) return false;
+        seenLiveEventIdsRef.current.add(event.id);
+        return true;
+      });
+      if (unseen.length) {
+        liveEventQueueRef.current.push(...unseen);
+        showNextLiveEvent();
+      }
+      if (seenLiveEventIdsRef.current.size > 1000) {
+        seenLiveEventIdsRef.current = new Set(Array.from(seenLiveEventIdsRef.current).slice(-500));
+      }
+    } catch {
+      // Główny dashboard działa dalej także przy chwilowym błędzie kanału powiadomień.
+    }
+  }, [showNextLiveEvent, token]);
+
   useEffect(() => {
     const initialLoadId = window.setTimeout(() => void load(), 0);
     const refreshId = window.setInterval(() => void load(), 15_000);
@@ -124,6 +231,26 @@ export default function CommandCenterTv({ token }: { token?: string }) {
       window.clearInterval(refreshId);
     };
   }, [load]);
+
+  useEffect(() => {
+    if (!payload?.device.id) return;
+    liveEventCursorRef.current = null;
+    seenLiveEventIdsRef.current.clear();
+    liveEventQueueRef.current = [];
+    const initialEventsId = window.setTimeout(() => void loadLiveEvents(), 0);
+    const liveEventsId = window.setInterval(() => void loadLiveEvents(), 4_000);
+    return () => {
+      window.clearTimeout(initialEventsId);
+      window.clearInterval(liveEventsId);
+    };
+  }, [loadLiveEvents, payload?.device.id]);
+
+  useEffect(() => {
+    return () => {
+      if (liveEventExitTimeoutRef.current) window.clearTimeout(liveEventExitTimeoutRef.current);
+      if (liveEventClearTimeoutRef.current) window.clearTimeout(liveEventClearTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     function resize() {
@@ -239,6 +366,7 @@ export default function CommandCenterTv({ token }: { token?: string }) {
             </div>
           }
         />
+        {activeLiveEvent && <LiveEventAlert event={activeLiveEvent} exiting={liveEventExiting} />}
       </div>
     </main>
   );

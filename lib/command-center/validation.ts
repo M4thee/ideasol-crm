@@ -8,7 +8,7 @@ import { COMMAND_CENTER_WIDGETS } from "./widget-registry";
 const widgetKinds = new Set<CommandCenterWidgetKind>(
   COMMAND_CENTER_WIDGETS.map((definition) => definition.kind)
 );
-const periods = new Set(["today", "week", "month", "quarter"]);
+const periods = new Set(["yesterday", "today", "week", "month", "quarter"]);
 const rankingMetrics = new Set(["sales", "salesValue", "contactRate", "conversion"]);
 
 export function validateCommandCenterSnapshot(value: unknown): CommandCenterSnapshot {

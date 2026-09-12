@@ -27,7 +27,7 @@ Istniejący `dashboard_layouts` jest prywatnym układem pulpitu CRM per użytkow
 - Spotkanie: `calendar_events.event_type = 'meeting'`, z wyłączeniem statusów anulowanych.
 - Ranking: leady przypisane przez `assigned_user_id`, sprzedaże przez `seller_id`.
 
-Command Center celowo nie liczy liczby wykonanych połączeń, czasu rozmów, odebranych połączeń ani innych danych call-center.
+Widżet wykonanych telefonów liczy wyłącznie ręcznie zapisane aktywności CRM typu `phone`. Command Center celowo nie przedstawia ich jako danych operatora: nie zna czasu rozmów, połączeń odebranych ani innych metryk call-center.
 
 ## Architektura
 
@@ -52,6 +52,8 @@ Panel administratora ──draft──► cc_dashboards
 
 Logika układu i widżetów pozostaje w aplikacji webowej. Klient TV jest cienki: pobiera snapshot, renderuje planszę 1920×1080, skaluje ją proporcjonalnie oraz rotuje aktywne strony. Co 15 sekund sprawdza wersję i odświeża agregaty. Dzięki temu urządzenie nie otrzymuje publicznego dostępu do tabel konfiguracyjnych ani danych CRM.
 
+Kanał zdarzeń live jest osobnym, lekkim endpointem odpytywanym co 4 sekundy. Zwraca wyłącznie identyfikator zdarzenia, jego typ, czas oraz opcjonalną wartość sprzedaży. Pierwsze wywołanie ustala punkt startowy, więc po uruchomieniu TV nie odtwarza starych komunikatów; po uśpieniu historia jest ograniczona do 10 minut. Zdarzenia są kolejkowane i pokazywane pojedynczo przez 4,4 sekundy z animowanym wejściem, wyjściem i krótkim sygnałem dźwiękowym.
+
 Zapytania agregujące są stronicowane po 1000 rekordów, więc nie zaniżają wyników po przekroczeniu domyślnego limitu Data API. Osobna migracja dodaje indeksy po datach używanych przez pięć źródłowych tabel CRM; nie zmienia rekordów ani logiki zapisu.
 
 ## Schema Command Center
@@ -72,6 +74,7 @@ Strony, widżety i layout są przechowywane w wersjonowanym snapshotcie JSONB (`
 - Panel administratora używa istniejącej weryfikacji tokenu i roli `admin` w `requireAdminRequest`.
 - TV autoryzuje się długim losowym tokenem; baza przechowuje jedynie jego skrót.
 - Odpowiedź urządzenia zawiera tylko agregaty i nazwy pracowników, bez rekordów oraz danych osobowych klientów.
+- Powiadomienia live o nowym leadzie i sprzedaży nie zawierają nazwiska, telefonu, adresu ani innych danych klienta.
 - Klucz `service_role` pozostaje wyłącznie po stronie serwera.
 
 ## Dodane i zmienione pliki

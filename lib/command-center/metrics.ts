@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CommandCenterMetrics, CommandCenterRankingRow } from "./types";
+import type {
+  CommandCenterFunnelMetrics,
+  CommandCenterMetrics,
+  CommandCenterPeriod,
+  CommandCenterPeriodValues,
+  CommandCenterRankingRow,
+} from "./types";
 
 type ClientRow = {
   id: string;
@@ -32,7 +38,7 @@ type CalendarRow = {
   status: string | null;
 };
 
-type OfferRow = { id: string; client_id: string | null };
+type OfferRow = { id: string; client_id: string | null; created_at: string };
 type SaleRow = {
   id: string;
   client_id: string | null;
@@ -48,6 +54,18 @@ type QueryPageResult = {
   data: unknown[] | null;
   error: { message: string } | null;
 };
+
+const COMMAND_CENTER_PERIODS: CommandCenterPeriod[] = ["yesterday", "today", "week", "month", "quarter"];
+
+type CommandCenterDateRange = { start: Date; end: Date };
+
+function mapPeriods<Value>(
+  createValue: (period: CommandCenterPeriod) => Value
+): CommandCenterPeriodValues<Value> {
+  return Object.fromEntries(
+    COMMAND_CENTER_PERIODS.map((period) => [period, createValue(period)])
+  ) as CommandCenterPeriodValues<Value>;
+}
 
 async function fetchAllRows<Row>(
   buildPage: (from: number, to: number) => PromiseLike<QueryPageResult>
@@ -119,6 +137,11 @@ function zonedDateToUtc(
 function getRanges(now: Date, timezone: string) {
   const current = getZonedParts(now, timezone);
   const dayStart = zonedDateToUtc({ year: current.year, month: current.month, day: current.day }, timezone);
+  const previousDay = new Date(Date.UTC(current.year, current.month - 1, current.day - 1));
+  const yesterdayStart = zonedDateToUtc(
+    { year: previousDay.getUTCFullYear(), month: previousDay.getUTCMonth() + 1, day: previousDay.getUTCDate() },
+    timezone
+  );
   const localWeekday = new Date(Date.UTC(current.year, current.month - 1, current.day)).getUTCDay();
   const mondayOffset = localWeekday === 0 ? -6 : 1 - localWeekday;
   const monday = new Date(Date.UTC(current.year, current.month - 1, current.day + mondayOffset));
@@ -134,7 +157,15 @@ function getRanges(now: Date, timezone: string) {
     { year: nextDay.getUTCFullYear(), month: nextDay.getUTCMonth() + 1, day: nextDay.getUTCDate() },
     timezone
   );
-  return { dayStart, dayEnd, weekStart, monthStart, quarterStart, queryStart: quarterStart };
+  const periods: CommandCenterPeriodValues<CommandCenterDateRange> = {
+    yesterday: { start: yesterdayStart, end: dayStart },
+    today: { start: dayStart, end: dayEnd },
+    week: { start: weekStart, end: dayEnd },
+    month: { start: monthStart, end: dayEnd },
+    quarter: { start: quarterStart, end: dayEnd },
+  };
+  const queryStart = new Date(Math.min(yesterdayStart.getTime(), quarterStart.getTime()));
+  return { dayStart, dayEnd, periods, queryStart };
 }
 
 function inRange(value: string | null | undefined, start: Date, end: Date) {
@@ -143,7 +174,7 @@ function inRange(value: string | null | undefined, start: Date, end: Date) {
   return timestamp >= start.getTime() && timestamp < end.getTime();
 }
 
-function isCountedSale(row: SaleRow) {
+export function isCountedCommandCenterSale(row: { status: string | null }) {
   const status = normalize(row.status);
   return !status.includes("anul") && !status.includes("utrac") && !status.includes("rezygn") && !status.includes("nieurat");
 }
@@ -175,12 +206,36 @@ export async function loadCommandCenterMetrics(
   const [clients, activities, calendarByEventDate, calendarCreated, offers, unfilteredSales, profiles] = await Promise.all([
     fetchAllRows<ClientRow>((from, to) => supabase.from("clients").select("id, created_at, status, lead_source, assigned_user_id, postal_code").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_at, activity_type").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", ranges.monthStart.toISOString()).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", queryStartIso).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id").gte("created_at", ranges.monthStart.toISOString()).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ProfileRow>((from, to) => supabase.from("profiles").select("id, display_name, role").order("id", { ascending: true }).range(from, to)),
   ]);
+
+  const rowsInPeriod = <Row,>(
+    rows: Row[],
+    period: CommandCenterPeriod,
+    dateValue: (row: Row) => string | null | undefined
+  ) => {
+    const range = ranges.periods[period];
+    return rows.filter((row) => inRange(dateValue(row), range.start, range.end));
+  };
+  const clientsByPeriod = mapPeriods((period) => rowsInPeriod(clients, period, (row) => row.created_at));
+  const activitiesByPeriod = mapPeriods((period) => rowsInPeriod(activities, period, (row) => row.created_at));
+  const meetingsByCreatedPeriod = mapPeriods((period) => rowsInPeriod(
+    calendarCreated.filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row)),
+    period,
+    (row) => row.created_at
+  ));
+  const callsByPeriod = mapPeriods((period) => rowsInPeriod(
+    activities.filter((row) => normalize(row.activity_type) === "phone"),
+    period,
+    (row) => row.created_at
+  ));
+  const sales = unfilteredSales.filter(isCountedCommandCenterSale);
+  const salesByPeriod = mapPeriods((period) => rowsInPeriod(sales, period, (row) => row.sale_date || row.created_at));
+
   const postalCodes = Array.from(new Set(clients.map((row) => normalizePostalCode(row.postal_code)).filter((code): code is string => Boolean(code))));
   const postalCodeChunks = Array.from({ length: Math.ceil(postalCodes.length / 150) }, (_, index) => postalCodes.slice(index * 150, (index + 1) * 150));
   const postalCodeLocations = (await Promise.all(postalCodeChunks.map((chunk) =>
@@ -208,7 +263,7 @@ export async function loadCommandCenterMetrics(
     latitude: location.latitude / location.count,
     longitude: location.longitude / location.count,
   }]));
-  const leadMapCounts = new Map<string, { today: number; week: number; month: number; quarter: number }>();
+  const leadMapCounts = new Map<string, CommandCenterPeriodValues<number>>();
   let validPostalCodes = 0;
   let locatedLeads = 0;
   clients.forEach((client) => {
@@ -217,11 +272,11 @@ export async function loadCommandCenterMetrics(
     validPostalCodes += 1;
     if (!locationMap.has(postalCode)) return;
     locatedLeads += 1;
-    const counts = leadMapCounts.get(postalCode) || { today: 0, week: 0, month: 0, quarter: 0 };
-    counts.quarter += 1;
-    if (inRange(client.created_at, ranges.monthStart, ranges.dayEnd)) counts.month += 1;
-    if (inRange(client.created_at, ranges.weekStart, ranges.dayEnd)) counts.week += 1;
-    if (inRange(client.created_at, ranges.dayStart, ranges.dayEnd)) counts.today += 1;
+    const counts = leadMapCounts.get(postalCode) || mapPeriods(() => 0);
+    COMMAND_CENTER_PERIODS.forEach((period) => {
+      const range = ranges.periods[period];
+      if (inRange(client.created_at, range.start, range.end)) counts[period] += 1;
+    });
     leadMapCounts.set(postalCode, counts);
   });
   const leadMapPoints = Array.from(leadMapCounts, ([postalCode, counts]) => ({
@@ -230,145 +285,146 @@ export async function loadCommandCenterMetrics(
     longitude: locationMap.get(postalCode)!.longitude,
     ...counts,
   })).sort((a, b) => a.postalCode.localeCompare(b.postalCode, "pl"));
-  const sales = unfilteredSales.filter(isCountedSale);
-  const monthClients = clients.filter((row) => inRange(row.created_at, ranges.monthStart, ranges.dayEnd));
-  const monthClientIds = new Set(monthClients.map((row) => row.id));
-
-  const activitiesByClient = new Map<string, ActivityRow[]>();
-  activities.forEach((activity) => {
-    if (!activity.client_id || !monthClientIds.has(activity.client_id)) return;
-    activitiesByClient.set(activity.client_id, [...(activitiesByClient.get(activity.client_id) || []), activity]);
-  });
-
-  const contactedClientIds = new Set(activitiesByClient.keys());
-  const firstActivityMinutes = monthClients.flatMap((client) => {
-    const firstActivity = (activitiesByClient.get(client.id) || [])
-      .filter((activity) => new Date(activity.created_at).getTime() >= new Date(client.created_at).getTime())
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
-    if (!firstActivity) return [];
-    return [(new Date(firstActivity.created_at).getTime() - new Date(client.created_at).getTime()) / 60000];
-  });
-
-  const meetingClientIds = new Set(
-    calendarByEventDate
-      .filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row) && row.client_id && monthClientIds.has(row.client_id))
-      .map((row) => row.client_id as string)
-  );
-  const offerClientIds = new Set(offers.filter((row) => row.client_id && monthClientIds.has(row.client_id)).map((row) => row.client_id as string));
-  const saleClientIds = new Set(sales.filter((row) => row.client_id && monthClientIds.has(row.client_id)).map((row) => row.client_id as string));
-
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
-  const rankingMap = new Map<string, CommandCenterRankingRow>();
-  profiles
-    .filter((profile) => ["seller", "manager", "owner", "admin"].includes(normalize(profile.role)))
-    .forEach((profile) => rankingMap.set(profile.id, {
-      advisorId: profile.id,
-      advisorName: profile.display_name || "Doradca",
-      leads: 0,
-      contactedLeads: 0,
-      contactRate: 0,
-      sales: 0,
-      salesValue: 0,
-      conversion: 0,
-    }));
-
-  monthClients.forEach((client) => {
-    if (!client.assigned_user_id) return;
-    const row = rankingMap.get(client.assigned_user_id);
-    if (!row) return;
-    row.leads += 1;
-    if (contactedClientIds.has(client.id)) row.contactedLeads += 1;
-  });
-  sales.filter((sale) => inRange(sale.sale_date || sale.created_at, ranges.monthStart, ranges.dayEnd)).forEach((sale) => {
-    if (!sale.seller_id) return;
-    const profile = profileMap.get(sale.seller_id);
-    const row = rankingMap.get(sale.seller_id) || {
-      advisorId: sale.seller_id,
-      advisorName: profile?.display_name || "Doradca",
-      leads: 0,
-      contactedLeads: 0,
-      contactRate: 0,
-      sales: 0,
-      salesValue: 0,
-      conversion: 0,
-    };
-    row.sales += 1;
-    row.salesValue += numberValue(sale.contract_value);
-    rankingMap.set(sale.seller_id, row);
-  });
-  const ranking = Array.from(rankingMap.values()).map((row) => ({
-    ...row,
-    contactRate: row.leads > 0 ? Math.round((row.contactedLeads / row.leads) * 100) : 0,
-    conversion: row.leads > 0 ? Math.round((row.sales / row.leads) * 100) : 0,
-  })).filter((row) => row.leads > 0 || row.sales > 0);
-
-  const salesIn = (start: Date) => sales.filter((row) => inRange(row.sale_date || row.created_at, start, ranges.dayEnd));
-  const todaySales = salesIn(ranges.dayStart);
-  const weekSales = salesIn(ranges.weekStart);
-  const monthSales = salesIn(ranges.monthStart);
   const sumSales = (rows: SaleRow[]) => rows.reduce((sum, row) => sum + numberValue(row.contract_value), 0);
-  const meetingsToday = calendarByEventDate.filter((row) => normalize(row.event_type) === "meeting" && inRange(row.event_at, ranges.dayStart, ranges.dayEnd));
-  const bookedMeetings = calendarCreated.filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row));
-  const phoneActivities = activities.filter((row) => normalize(row.activity_type) === "phone");
-  const countIn = <Row extends { created_at: string }>(rows: Row[], start: Date) =>
-    rows.filter((row) => inRange(row.created_at, start, ranges.dayEnd)).length;
+
+  const leadStats = mapPeriods((period) => {
+    const periodClients = clientsByPeriod[period];
+    const clientMap = new Map(periodClients.map((client) => [client.id, client]));
+    const activitiesByClient = new Map<string, ActivityRow[]>();
+    activitiesByPeriod[period].forEach((activity) => {
+      if (!activity.client_id || !clientMap.has(activity.client_id)) return;
+      const client = clientMap.get(activity.client_id)!;
+      if (new Date(activity.created_at).getTime() < new Date(client.created_at).getTime()) return;
+      activitiesByClient.set(activity.client_id, [...(activitiesByClient.get(activity.client_id) || []), activity]);
+    });
+    const firstActivityMinutes = periodClients.flatMap((client) => {
+      const firstActivity = (activitiesByClient.get(client.id) || [])
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      if (!firstActivity) return [];
+      return [(new Date(firstActivity.created_at).getTime() - new Date(client.created_at).getTime()) / 60000];
+    });
+    return {
+      contactedClientIds: new Set(activitiesByClient.keys()),
+      contactRate: periodClients.length ? Math.round((activitiesByClient.size / periodClients.length) * 100) : 0,
+      averageFirstActivityMinutes: firstActivityMinutes.length
+        ? Math.round(firstActivityMinutes.reduce((sum, value) => sum + value, 0) / firstActivityMinutes.length)
+        : null,
+    };
+  });
+
+  const funnel: CommandCenterPeriodValues<CommandCenterFunnelMetrics> = mapPeriods((period) => {
+    const periodClients = clientsByPeriod[period];
+    const clientIds = new Set(periodClients.map((client) => client.id));
+    const periodMeetings = rowsInPeriod(calendarByEventDate, period, (row) => row.event_at);
+    const periodOffers = rowsInPeriod(offers, period, (row) => row.created_at);
+    return {
+      leads: periodClients.length,
+      contacted: leadStats[period].contactedClientIds.size,
+      meetings: new Set(periodMeetings.filter((row) => normalize(row.event_type) === "meeting" && !isCancelledMeeting(row) && row.client_id && clientIds.has(row.client_id)).map((row) => row.client_id as string)).size,
+      offers: new Set(periodOffers.filter((row) => row.client_id && clientIds.has(row.client_id)).map((row) => row.client_id as string)).size,
+      sales: new Set(salesByPeriod[period].filter((row) => row.client_id && clientIds.has(row.client_id)).map((row) => row.client_id as string)).size,
+    };
+  });
+
+  const ranking = mapPeriods((period) => {
+    const rankingMap = new Map<string, CommandCenterRankingRow>();
+    profiles
+      .filter((profile) => ["seller", "manager", "owner", "admin"].includes(normalize(profile.role)))
+      .forEach((profile) => rankingMap.set(profile.id, {
+        advisorId: profile.id,
+        advisorName: profile.display_name || "Doradca",
+        leads: 0,
+        contactedLeads: 0,
+        contactRate: 0,
+        sales: 0,
+        salesValue: 0,
+        conversion: 0,
+      }));
+    clientsByPeriod[period].forEach((client) => {
+      if (!client.assigned_user_id) return;
+      const row = rankingMap.get(client.assigned_user_id);
+      if (!row) return;
+      row.leads += 1;
+      if (leadStats[period].contactedClientIds.has(client.id)) row.contactedLeads += 1;
+    });
+    salesByPeriod[period].forEach((sale) => {
+      if (!sale.seller_id) return;
+      const profile = profileMap.get(sale.seller_id);
+      const row = rankingMap.get(sale.seller_id) || {
+        advisorId: sale.seller_id,
+        advisorName: profile?.display_name || "Doradca",
+        leads: 0,
+        contactedLeads: 0,
+        contactRate: 0,
+        sales: 0,
+        salesValue: 0,
+        conversion: 0,
+      };
+      row.sales += 1;
+      row.salesValue += numberValue(sale.contract_value);
+      rankingMap.set(sale.seller_id, row);
+    });
+    return Array.from(rankingMap.values()).map((row) => ({
+      ...row,
+      contactRate: row.leads > 0 ? Math.round((row.contactedLeads / row.leads) * 100) : 0,
+      conversion: row.leads > 0 ? Math.round((row.sales / row.leads) * 100) : 0,
+    })).filter((row) => row.leads > 0 || row.sales > 0);
+  });
+
+  const meetingsToday = calendarByEventDate.filter((row) =>
+    normalize(row.event_type) === "meeting" &&
+    inRange(row.event_at, ranges.periods.today.start, ranges.periods.today.end)
+  );
+  const leadCounts = mapPeriods((period) => clientsByPeriod[period].length);
+  const contactRates = mapPeriods((period) => leadStats[period].contactRate);
+  const averageFirstActivityMinutes = mapPeriods((period) => leadStats[period].averageFirstActivityMinutes);
+  const sources = mapPeriods((period) => group(clientsByPeriod[period].map((row) => row.lead_source), "Brak źródła"));
+  const statuses = mapPeriods((period) => group(clientsByPeriod[period].map((row) => row.status), "Brak statusu"));
+  const salesCounts = mapPeriods((period) => salesByPeriod[period].length);
+  const salesValues = mapPeriods((period) => sumSales(salesByPeriod[period]));
 
   return {
     generatedAt: now.toISOString(),
     leads: {
-      today: clients.filter((row) => inRange(row.created_at, ranges.dayStart, ranges.dayEnd)).length,
-      week: clients.filter((row) => inRange(row.created_at, ranges.weekStart, ranges.dayEnd)).length,
-      month: monthClients.length,
-      quarter: clients.filter((row) => inRange(row.created_at, ranges.quarterStart, ranges.dayEnd)).length,
-      contactedMonth: contactedClientIds.size,
-      contactRateMonth: monthClients.length ? Math.round((contactedClientIds.size / monthClients.length) * 100) : 0,
-      averageFirstActivityMinutes: firstActivityMinutes.length
-        ? Math.round(firstActivityMinutes.reduce((sum, value) => sum + value, 0) / firstActivityMinutes.length)
-        : null,
-      sources: group(monthClients.map((row) => row.lead_source), "Brak źródła"),
-      statuses: group(monthClients.map((row) => row.status), "Brak statusu"),
+      ...leadCounts,
+      contactedMonth: leadStats.month.contactedClientIds.size,
+      contactRateMonth: contactRates.month,
+      averageFirstActivityMinutes: averageFirstActivityMinutes.month,
+      sources: sources.month,
+      statuses: statuses.month,
+      contactRateByPeriod: contactRates,
+      averageFirstActivityMinutesByPeriod: averageFirstActivityMinutes,
+      sourcesByPeriod: sources,
+      statusesByPeriod: statuses,
     },
     sales: {
-      today: todaySales.length,
-      week: weekSales.length,
-      month: monthSales.length,
-      quarter: salesIn(ranges.quarterStart).length,
-      valueToday: sumSales(todaySales),
-      valueWeek: sumSales(weekSales),
-      valueMonth: sumSales(monthSales),
-      valueQuarter: sumSales(salesIn(ranges.quarterStart)),
+      ...salesCounts,
+      valueYesterday: salesValues.yesterday,
+      valueToday: salesValues.today,
+      valueWeek: salesValues.week,
+      valueMonth: salesValues.month,
+      valueQuarter: salesValues.quarter,
+      valueByPeriod: salesValues,
     },
-    funnel: {
-      leads: monthClients.length,
-      contacted: contactedClientIds.size,
-      meetings: meetingClientIds.size,
-      offers: offerClientIds.size,
-      sales: saleClientIds.size,
-    },
+    funnel: { ...funnel.month, byPeriod: funnel },
     meetings: {
-      today: countIn(bookedMeetings, ranges.dayStart),
-      week: countIn(bookedMeetings, ranges.weekStart),
-      month: countIn(bookedMeetings, ranges.monthStart),
-      quarter: countIn(bookedMeetings, ranges.quarterStart),
+      ...mapPeriods((period) => meetingsByCreatedPeriod[period].length),
       scheduledToday: meetingsToday.filter((row) => !isCancelledMeeting(row)).length,
       upcomingToday: meetingsToday.filter((row) => !isCancelledMeeting(row) && new Date(row.event_at) >= now).length,
     },
-    calls: {
-      today: countIn(phoneActivities, ranges.dayStart),
-      week: countIn(phoneActivities, ranges.weekStart),
-      month: countIn(phoneActivities, ranges.monthStart),
-      quarter: countIn(phoneActivities, ranges.quarterStart),
-    },
+    calls: mapPeriods((period) => callsByPeriod[period].length),
     leadMap: {
       points: leadMapPoints,
       validPostalCodes,
       locatedLeads,
     },
-    ranking,
+    ranking: ranking.month,
+    rankingByPeriod: ranking,
     reliability: [
-      "Leady są liczone z rekordów clients według created_at.",
-      "Podjęty lead oznacza co najmniej jedną zarejestrowaną aktywność w CRM.",
-      "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; wartość pochodzi z sales.contract_value.",
+      "Wczoraj oznacza poprzedni dzień kalendarzowy; tydzień, miesiąc i kwartał są liczone od początku bieżącego okresu w strefie urządzenia.",
+      "Leady są liczone z rekordów clients według created_at; podjęty lead oznacza co najmniej jedną zarejestrowaną aktywność w tym samym okresie.",
+      "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; liczba i wartość są liczone według sales.sale_date, a wartość pochodzi z sales.contract_value.",
       "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
       "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
       "Mapa leadów grupuje rekordy clients po kodzie pocztowym i korzysta z lokalnego katalogu postal_code_locations; nie przekazuje adresów do zewnętrznej mapy.",

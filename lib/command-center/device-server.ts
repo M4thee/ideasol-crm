@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 
-import { loadCommandCenterMetrics } from "@/lib/command-center/metrics";
-import type { CommandCenterDevicePayload } from "@/lib/command-center/types";
+import {
+  isCountedCommandCenterSale,
+  loadCommandCenterMetrics,
+} from "@/lib/command-center/metrics";
+import type {
+  CommandCenterDevicePayload,
+  CommandCenterLiveEvent,
+  CommandCenterLiveEventsPayload,
+} from "@/lib/command-center/types";
 import { validateCommandCenterSnapshot } from "@/lib/command-center/validation";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -12,8 +19,89 @@ type DevicePayloadResult =
   | { ok: true; payload: CommandCenterDevicePayload }
   | { ok: false; error: string; status: number };
 
+type LiveEventsResult =
+  | { ok: true; payload: CommandCenterLiveEventsPayload }
+  | { ok: false; error: string; status: number };
+
 export function digestCommandCenterSecret(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function numericValue(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value || "0").replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export async function loadCommandCenterLiveEvents(
+  rawToken: string,
+  after?: string | null
+): Promise<LiveEventsResult> {
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from("cc_devices")
+    .select("id")
+    .eq("access_token_digest", digestCommandCenterSecret(rawToken))
+    .maybeSingle();
+  if (deviceError || !device) {
+    return { ok: false, error: "Urządzenie nie jest zarejestrowane.", status: 404 };
+  }
+
+  const cursorDate = new Date();
+  const cursor = cursorDate.toISOString();
+  if (!after) return { ok: true, payload: { cursor, events: [] } };
+
+  const requestedAfter = new Date(after);
+  if (!Number.isFinite(requestedAfter.getTime())) {
+    return { ok: false, error: "Nieprawidłowy znacznik czasu zdarzeń.", status: 400 };
+  }
+
+  // Po dłuższym uśpieniu TV nie odtwarza całej historii powiadomień.
+  const oldestAllowed = new Date(cursorDate.getTime() - 10 * 60 * 1000);
+  const lowerBound = requestedAfter > oldestAllowed ? requestedAfter : oldestAllowed;
+  const lowerBoundIso = lowerBound.toISOString();
+
+  const [{ data: leads, error: leadsError }, { data: sales, error: salesError }] = await Promise.all([
+    supabaseAdmin
+      .from("clients")
+      .select("id,created_at")
+      .gt("created_at", lowerBoundIso)
+      .lte("created_at", cursor)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(25),
+    supabaseAdmin
+      .from("sales")
+      .select("id,created_at,contract_value,status")
+      .gt("created_at", lowerBoundIso)
+      .lte("created_at", cursor)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(25),
+  ]);
+  if (leadsError || salesError) {
+    console.error("Command Center live events error:", leadsError || salesError);
+    return { ok: false, error: "Nie udało się pobrać zdarzeń live.", status: 500 };
+  }
+
+  const events: CommandCenterLiveEvent[] = [
+    ...(leads || []).map((lead) => ({
+      id: `lead:${lead.id}`,
+      kind: "lead" as const,
+      occurredAt: lead.created_at,
+    })),
+    ...(sales || [])
+      .filter(isCountedCommandCenterSale)
+      .map((sale) => ({
+        id: `sale:${sale.id}`,
+        kind: "sale" as const,
+        occurredAt: sale.created_at,
+        value: numericValue(sale.contract_value),
+      })),
+  ]
+    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id))
+    .slice(-25);
+
+  return { ok: true, payload: { cursor, events } };
 }
 
 export async function loadCommandCenterDevicePayload(rawToken: string): Promise<DevicePayloadResult> {

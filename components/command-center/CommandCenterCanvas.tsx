@@ -6,6 +6,8 @@ import type { CSSProperties, DragEvent } from "react";
 import type {
   CommandCenterMetrics,
   CommandCenterPage,
+  CommandCenterPeriod,
+  CommandCenterPeriodValues,
   CommandCenterTheme,
   CommandCenterWidget,
 } from "@/lib/command-center/types";
@@ -27,6 +29,7 @@ type CommandCenterCanvasProps = {
 export const EMPTY_COMMAND_CENTER_METRICS: CommandCenterMetrics = {
   generatedAt: new Date(0).toISOString(),
   leads: {
+    yesterday: 0,
     today: 0,
     week: 0,
     month: 0,
@@ -36,13 +39,31 @@ export const EMPTY_COMMAND_CENTER_METRICS: CommandCenterMetrics = {
     averageFirstActivityMinutes: null,
     sources: [],
     statuses: [],
+    contactRateByPeriod: { yesterday: 0, today: 0, week: 0, month: 0, quarter: 0 },
+    averageFirstActivityMinutesByPeriod: { yesterday: null, today: null, week: null, month: null, quarter: null },
+    sourcesByPeriod: { yesterday: [], today: [], week: [], month: [], quarter: [] },
+    statusesByPeriod: { yesterday: [], today: [], week: [], month: [], quarter: [] },
   },
-  sales: { today: 0, week: 0, month: 0, quarter: 0, valueToday: 0, valueWeek: 0, valueMonth: 0, valueQuarter: 0 },
-  funnel: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
-  meetings: { today: 0, week: 0, month: 0, quarter: 0, scheduledToday: 0, upcomingToday: 0 },
-  calls: { today: 0, week: 0, month: 0, quarter: 0 },
+  sales: {
+    yesterday: 0, today: 0, week: 0, month: 0, quarter: 0,
+    valueYesterday: 0, valueToday: 0, valueWeek: 0, valueMonth: 0, valueQuarter: 0,
+    valueByPeriod: { yesterday: 0, today: 0, week: 0, month: 0, quarter: 0 },
+  },
+  funnel: {
+    leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0,
+    byPeriod: {
+      yesterday: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
+      today: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
+      week: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
+      month: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
+      quarter: { leads: 0, contacted: 0, meetings: 0, offers: 0, sales: 0 },
+    },
+  },
+  meetings: { yesterday: 0, today: 0, week: 0, month: 0, quarter: 0, scheduledToday: 0, upcomingToday: 0 },
+  calls: { yesterday: 0, today: 0, week: 0, month: 0, quarter: 0 },
   leadMap: { points: [], validPostalCodes: 0, locatedLeads: 0 },
   ranking: [],
+  rankingByPeriod: { yesterday: [], today: [], week: [], month: [], quarter: [] },
   reliability: [],
 };
 
@@ -55,6 +76,7 @@ function formatCurrency(value: number) {
 }
 
 function periodLabel(period: CommandCenterWidget["config"]["period"]) {
+  if (period === "yesterday") return "wczoraj";
   if (period === "today") return "dzisiaj";
   if (period === "week") return "w tym tygodniu";
   if (period === "quarter") return "w tym kwartale";
@@ -62,15 +84,15 @@ function periodLabel(period: CommandCenterWidget["config"]["period"]) {
 }
 
 function periodValue(
-  values: { today: number; week: number; month: number; quarter: number },
+  values: CommandCenterPeriodValues<number>,
   period: CommandCenterWidget["config"]["period"]
 ) {
   return values[period || "month"];
 }
 
-function Bars({ rows, total }: { rows: Array<{ label: string; value: number }>; total: number }) {
+function Bars({ rows, total, period }: { rows: Array<{ label: string; value: number }>; total: number; period: CommandCenterPeriod }) {
   const visible = rows.slice(0, 6);
-  if (!visible.length) return <p className="cc-empty">Brak danych w bieżącym miesiącu</p>;
+  if (!visible.length) return <p className="cc-empty">Brak danych {periodLabel(period)}</p>;
   return (
     <div className="cc-bars">
       {visible.map((row, index) => {
@@ -122,24 +144,22 @@ function LeadMap({ widget, metrics }: { widget: CommandCenterWidget; metrics: Co
 }
 
 function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics: CommandCenterMetrics }) {
+  const period = widget.config.period || "month";
   if (widget.kind === "leads-kpi") {
-    const value = periodValue(metrics.leads, widget.config.period);
-    return <div className="cc-kpi"><strong>{value}</strong><span>leadów {periodLabel(widget.config.period)}</span></div>;
+    const value = periodValue(metrics.leads, period);
+    return <div className="cc-kpi"><strong>{value}</strong><span>leadów {periodLabel(period)}</span></div>;
   }
   if (widget.kind === "sales-kpi") {
-    const value = periodValue(metrics.sales, widget.config.period);
-    return <div className="cc-kpi"><strong>{value}</strong><span>sprzedaży {periodLabel(widget.config.period)}</span></div>;
+    const value = periodValue(metrics.sales, period);
+    return <div className="cc-kpi"><strong>{value}</strong><span>sprzedaży {periodLabel(period)}</span></div>;
   }
   if (widget.kind === "sales-value") {
-    const value = periodValue(
-      { today: metrics.sales.valueToday, week: metrics.sales.valueWeek, month: metrics.sales.valueMonth, quarter: metrics.sales.valueQuarter },
-      widget.config.period
-    );
-    return <div className="cc-kpi cc-kpi-currency"><strong>{formatCurrency(value)}</strong><span>{periodLabel(widget.config.period)}</span></div>;
+    const value = periodValue(metrics.sales.valueByPeriod, period);
+    return <div className="cc-kpi cc-kpi-currency"><strong>{formatCurrency(value)}</strong><span>{periodLabel(period)}</span></div>;
   }
   if (widget.kind === "meetings-kpi") {
-    const value = periodValue(metrics.meetings, widget.config.period);
-    return <div className="cc-kpi"><strong>{value}</strong><span>umówionych spotkań {periodLabel(widget.config.period)}</span></div>;
+    const value = periodValue(metrics.meetings, period);
+    return <div className="cc-kpi"><strong>{value}</strong><span>umówionych spotkań {periodLabel(period)}</span></div>;
   }
   if (widget.kind === "meetings-today") {
     return (
@@ -147,24 +167,25 @@ function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics:
     );
   }
   if (widget.kind === "calls-kpi") {
-    const value = periodValue(metrics.calls, widget.config.period);
-    return <div className="cc-kpi"><strong>{value}</strong><span>telefonów {periodLabel(widget.config.period)}</span></div>;
+    const value = periodValue(metrics.calls, period);
+    return <div className="cc-kpi"><strong>{value}</strong><span>telefonów {periodLabel(period)}</span></div>;
   }
   if (widget.kind === "lead-map") return <LeadMap widget={widget} metrics={metrics} />;
-  if (widget.kind === "lead-sources") return <Bars rows={metrics.leads.sources} total={metrics.leads.month} />;
-  if (widget.kind === "lead-statuses") return <Bars rows={metrics.leads.statuses} total={metrics.leads.month} />;
+  if (widget.kind === "lead-sources") return <Bars rows={metrics.leads.sourcesByPeriod[period]} total={periodValue(metrics.leads, period)} period={period} />;
+  if (widget.kind === "lead-statuses") return <Bars rows={metrics.leads.statusesByPeriod[period]} total={periodValue(metrics.leads, period)} period={period} />;
   if (widget.kind === "lead-funnel") {
+    const funnel = metrics.funnel.byPeriod[period];
     const stages = [
-      ["Leady", metrics.funnel.leads],
-      ["Z aktywnością", metrics.funnel.contacted],
-      ["Spotkania", metrics.funnel.meetings],
-      ["Oferty", metrics.funnel.offers],
-      ["Sprzedaże", metrics.funnel.sales],
+      ["Leady", funnel.leads],
+      ["Z aktywnością", funnel.contacted],
+      ["Spotkania", funnel.meetings],
+      ["Oferty", funnel.offers],
+      ["Sprzedaże", funnel.sales],
     ] as const;
     return (
       <div className="cc-funnel">
         {stages.map(([label, value], index) => {
-          const ratio = metrics.funnel.leads ? Math.round((value / metrics.funnel.leads) * 100) : 0;
+          const ratio = funnel.leads ? Math.round((value / funnel.leads) * 100) : 0;
           return (
             <div className="cc-funnel-row" key={label} style={{ width: `${100 - index * 9}%` }}>
               <span>{label}</span><strong>{value}</strong><em>{ratio}%</em>
@@ -176,11 +197,11 @@ function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics:
   }
   if (widget.kind === "advisor-ranking") {
     const metric = widget.config.rankingMetric || "salesValue";
-    const rows = [...metrics.ranking]
+    const rows = [...metrics.rankingByPeriod[period]]
       .sort((a, b) => Number(b[metric]) - Number(a[metric]) || b.salesValue - a.salesValue)
       .slice(0, widget.config.limit || 6);
     const max = Math.max(...rows.map((row) => Number(row[metric])), 1);
-    if (!rows.length) return <p className="cc-empty">Brak aktywności doradców w bieżącym miesiącu</p>;
+    if (!rows.length) return <p className="cc-empty">Brak aktywności doradców {periodLabel(period)}</p>;
     return (
       <div className="cc-ranking">
         {rows.map((row, index) => (
@@ -196,23 +217,26 @@ function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics:
   }
   if (widget.kind === "monthly-target") {
     const target = Number(widget.config.targetAmount || 0);
-    if (!target) return <p className="cc-empty">Ustaw miesięczny cel w konfiguracji widżetu</p>;
-    const ratio = Math.min(100, Math.round((metrics.sales.valueMonth / target) * 100));
+    if (!target) return <p className="cc-empty">Ustaw cel dla wybranego okresu w konfiguracji widżetu</p>;
+    const salesValue = periodValue(metrics.sales.valueByPeriod, period);
+    const ratio = Math.min(100, Math.round((salesValue / target) * 100));
     return (
       <div className="cc-target">
-        <div><strong>{ratio}%</strong><span>{formatCurrency(metrics.sales.valueMonth)} / {formatCurrency(target)}</span></div>
+        <div><strong>{ratio}%</strong><span>{formatCurrency(salesValue)} / {formatCurrency(target)} · {periodLabel(period)}</span></div>
         <div className="cc-target-track"><span style={{ width: `${ratio}%` }} /></div>
       </div>
     );
   }
   return (
     <div className="cc-ticker">
-      <span>Leady: <b>{metrics.leads.month}</b></span>
-      <span>Leady z aktywnością: <b>{metrics.leads.contactRateMonth}%</b></span>
-      <span>Spotkania dziś: <b>{metrics.meetings.scheduledToday}</b></span>
-      <span>Sprzedaż MTD: <b>{formatCurrency(metrics.sales.valueMonth)}</b></span>
-      {metrics.leads.averageFirstActivityMinutes !== null && (
-        <span>Śr. czas do pierwszej aktywności: <b>{metrics.leads.averageFirstActivityMinutes} min</b></span>
+      <span>Okres: <b>{periodLabel(period)}</b></span>
+      <span>Leady: <b>{periodValue(metrics.leads, period)}</b></span>
+      <span>Leady z aktywnością: <b>{metrics.leads.contactRateByPeriod[period]}%</b></span>
+      <span>Spotkania umówione: <b>{periodValue(metrics.meetings, period)}</b></span>
+      <span>Telefony: <b>{periodValue(metrics.calls, period)}</b></span>
+      <span>Sprzedaż: <b>{formatCurrency(periodValue(metrics.sales.valueByPeriod, period))}</b></span>
+      {metrics.leads.averageFirstActivityMinutesByPeriod[period] !== null && (
+        <span>Śr. czas do pierwszej aktywności: <b>{metrics.leads.averageFirstActivityMinutesByPeriod[period]} min</b></span>
       )}
     </div>
   );
