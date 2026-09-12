@@ -25,6 +25,76 @@ type AdminData = {
 };
 type DeviceActivation = { code: string; deviceName: string; expiresAt: string };
 
+function DashboardTitleEditor({ name, onSave }: { name: string; onSave: (name: string) => Promise<boolean> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(name);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    const nextName = value.trim();
+    if (!nextName || nextName === name) {
+      setValue(name);
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    const saved = await onSave(nextName);
+    setSaving(false);
+    if (saved) setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <h2 className="truncate text-lg font-black">{name}</h2>
+        <button
+          type="button"
+          onClick={() => {
+            setValue(name);
+            setEditing(true);
+          }}
+          className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:border-sky-400 hover:text-sky-600 dark:border-slate-600 dark:text-slate-300"
+        >
+          Zmień nazwę
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="flex min-w-0 items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <input
+        aria-label="Nazwa dashboardu"
+        autoFocus
+        maxLength={120}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        className="min-w-48 rounded-lg border border-sky-400 bg-white px-3 py-1.5 text-sm font-bold outline-none ring-2 ring-sky-100 dark:bg-slate-800 dark:ring-sky-950"
+      />
+      <button disabled={saving || !value.trim()} type="submit" className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-black text-white disabled:opacity-50">
+        {saving ? "Zapisuję…" : "Zapisz"}
+      </button>
+      <button
+        disabled={saving}
+        type="button"
+        onClick={() => {
+          setValue(name);
+          setEditing(false);
+        }}
+        className="rounded-lg px-2 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+      >
+        Anuluj
+      </button>
+    </form>
+  );
+}
+
 const tabs: Array<{ id: AdminTab; label: string }> = [
   { id: "dashboards", label: "Dashboardy" },
   { id: "widgets", label: "Widżety" },
@@ -300,7 +370,19 @@ export default function CommandCenterAdmin() {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700">
         <div>
-          <div className="flex items-center gap-3"><h2 className="text-lg font-black">{selectedDashboard.name}</h2><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${selectedDashboard.published_version_id ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{selectedDashboard.published_version_id ? `Opublikowany · ${versions[0]?.version_number || 1}` : "Tylko draft"}</span></div>
+          <div className="flex flex-wrap items-center gap-3">
+            <DashboardTitleEditor
+              name={selectedDashboard.name}
+              onSave={async (name) => Boolean(await perform({
+                action: "update-dashboard",
+                dashboardId: selectedDashboard.id,
+                name,
+                description: selectedDashboard.description,
+                defaultRotationSeconds: selectedDashboard.default_rotation_seconds,
+              }, "Zmienianie nazwy dashboardu…"))}
+            />
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${selectedDashboard.published_version_id ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{selectedDashboard.published_version_id ? `Opublikowany · ${versions[0]?.version_number || 1}` : "Tylko draft"}</span>
+          </div>
           <p className="mt-1 text-xs text-slate-500">Zmiany w builderze nie trafiają na telewizory przed publikacją.</p>
         </div>
         <div className="flex gap-2">
