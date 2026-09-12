@@ -104,6 +104,7 @@ export type CommandCenterRankingRow = {
 
 export type CommandCenterLeadMapPoint = CommandCenterPeriodValues<number> & {
   campaign: string;
+  campaignKind: "meta" | "calculator" | "advisor" | "photo";
   postalCode: string;
   latitude: number;
   longitude: number;

@@ -22,6 +22,17 @@ type PostalCodeLocationRow = {
   longitude: number | string;
 };
 
+type MetaLeadRow = {
+  id: string;
+  client_id: string | null;
+  integration_id: string | null;
+};
+
+type LeadIntegrationRow = {
+  id: string;
+  campaign_name: string;
+};
+
 type ActivityRow = {
   id: string;
   client_id: string | null;
@@ -194,6 +205,33 @@ function group(values: Array<string | null>, fallback: string) {
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "pl"));
 }
 
+function mapLeadCampaign(
+  client: ClientRow,
+  metaIntegrationByClient: Map<string, string | null>,
+  integrationNames: Map<string, string>
+) {
+  const source = normalize(client.lead_source);
+  if (!source) return { campaign: "Lead doradcy", campaignKind: "advisor" as const };
+  if (source === "kalkulatorme") return { campaign: "Kalkulator ME", campaignKind: "calculator" as const };
+  if (source === "import ze zdjęcia") return { campaign: "Załatwione z roboty", campaignKind: "photo" as const };
+  if (source !== "meta ads") return null;
+
+  const integrationId = metaIntegrationByClient.get(client.id);
+  const integrationName = integrationId ? integrationNames.get(integrationId)?.trim() : "";
+  const normalizedIntegrationName = normalize(integrationName);
+  if (normalizedIntegrationName.includes("arimr")) return { campaign: "ARiMR", campaignKind: "meta" as const };
+  if (normalizedIntegrationName.includes("magazyn") || normalizedIntegrationName.includes("kwh")) {
+    return { campaign: "ME", campaignKind: "meta" as const };
+  }
+  const shortenedName = integrationName?.split("|")[0]?.trim() || "Meta Ads";
+  return { campaign: shortenedName, campaignKind: "meta" as const };
+}
+
+function isLeadMapSource(client: ClientRow) {
+  const source = normalize(client.lead_source);
+  return !source || source === "meta ads" || source === "kalkulatorme" || source === "import ze zdjęcia";
+}
+
 export async function loadCommandCenterMetrics(
   supabase: SupabaseClient,
   timezone = "Europe/Warsaw",
@@ -236,16 +274,46 @@ export async function loadCommandCenterMetrics(
   const sales = unfilteredSales.filter(isCountedCommandCenterSale);
   const salesByPeriod = mapPeriods((period) => rowsInPeriod(sales, period, (row) => row.sale_date || row.created_at));
 
-  const postalCodes = Array.from(new Set(clients.map((row) => normalizePostalCode(row.postal_code)).filter((code): code is string => Boolean(code))));
+  const mapEligibleClients = clients.filter(isLeadMapSource);
+  const metaClientIds = mapEligibleClients.filter((client) => normalize(client.lead_source) === "meta ads").map((client) => client.id);
+  const metaClientChunks = Array.from({ length: Math.ceil(metaClientIds.length / 150) }, (_, index) => metaClientIds.slice(index * 150, (index + 1) * 150));
+  const postalCodes = Array.from(new Set(mapEligibleClients.map((client) => normalizePostalCode(client.postal_code)).filter((code): code is string => Boolean(code))));
   const postalCodeChunks = Array.from({ length: Math.ceil(postalCodes.length / 150) }, (_, index) => postalCodes.slice(index * 150, (index + 1) * 150));
-  const postalCodeLocations = (await Promise.all(postalCodeChunks.map((chunk) =>
-    fetchAllRows<PostalCodeLocationRow>((from, to) => supabase
-      .from("postal_code_locations")
-      .select("postal_code, latitude, longitude")
-      .in("postal_code", chunk)
-      .order("postal_code", { ascending: true })
+  const [metaLeadPages, postalCodeLocationPages] = await Promise.all([
+    Promise.all(metaClientChunks.map((chunk) =>
+      fetchAllRows<MetaLeadRow>((from, to) => supabase
+        .from("meta_leads")
+        .select("id, client_id, integration_id")
+        .in("client_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, to))
+    )),
+    Promise.all(postalCodeChunks.map((chunk) =>
+      fetchAllRows<PostalCodeLocationRow>((from, to) => supabase
+        .from("postal_code_locations")
+        .select("postal_code, latitude, longitude")
+        .in("postal_code", chunk)
+        .order("postal_code", { ascending: true })
+        .range(from, to))
+    )),
+  ]);
+  const metaLeads = metaLeadPages.flat();
+  const postalCodeLocations = postalCodeLocationPages.flat();
+  const integrationIds = Array.from(new Set(metaLeads.map((lead) => lead.integration_id).filter((id): id is string => Boolean(id))));
+  const integrationIdChunks = Array.from({ length: Math.ceil(integrationIds.length / 150) }, (_, index) => integrationIds.slice(index * 150, (index + 1) * 150));
+  const leadIntegrations = (await Promise.all(integrationIdChunks.map((chunk) =>
+    fetchAllRows<LeadIntegrationRow>((from, to) => supabase
+      .from("lead_integrations")
+      .select("id, campaign_name")
+      .in("id", chunk)
+      .order("id", { ascending: true })
       .range(from, to))
   ))).flat();
+  const metaIntegrationByClient = new Map(metaLeads.map((lead) => [lead.client_id || "", lead.integration_id]));
+  const integrationNames = new Map(leadIntegrations.map((integration) => [integration.id, integration.campaign_name]));
+
+  const mappedClients = mapEligibleClients.map((client) => ({ client, campaign: mapLeadCampaign(client, metaIntegrationByClient, integrationNames) }))
+    .filter((entry): entry is { client: ClientRow; campaign: NonNullable<ReturnType<typeof mapLeadCampaign>> } => Boolean(entry.campaign));
 
   const locationSums = new Map<string, { latitude: number; longitude: number; count: number }>();
   postalCodeLocations.forEach((location) => {
@@ -265,21 +333,22 @@ export async function loadCommandCenterMetrics(
   }]));
   const leadMapCounts = new Map<string, {
     campaign: string;
+    campaignKind: "meta" | "calculator" | "advisor" | "photo";
     counts: CommandCenterPeriodValues<number>;
     postalCode: string;
   }>();
   let validPostalCodes = 0;
   let locatedLeads = 0;
-  clients.forEach((client) => {
+  mappedClients.forEach(({ client, campaign }) => {
     const postalCode = normalizePostalCode(client.postal_code);
     if (!postalCode) return;
     validPostalCodes += 1;
     if (!locationMap.has(postalCode)) return;
     locatedLeads += 1;
-    const campaign = client.lead_source?.trim() || "Brak kampanii";
-    const mapKey = JSON.stringify([postalCode, campaign]);
+    const mapKey = JSON.stringify([postalCode, campaign.campaign]);
     const entry = leadMapCounts.get(mapKey) || {
-      campaign,
+      campaign: campaign.campaign,
+      campaignKind: campaign.campaignKind,
       counts: mapPeriods(() => 0),
       postalCode,
     };
@@ -289,8 +358,9 @@ export async function loadCommandCenterMetrics(
     });
     leadMapCounts.set(mapKey, entry);
   });
-  const leadMapPoints = Array.from(leadMapCounts.values(), ({ campaign, counts, postalCode }) => ({
+  const leadMapPoints = Array.from(leadMapCounts.values(), ({ campaign, campaignKind, counts, postalCode }) => ({
     campaign,
+    campaignKind,
     postalCode,
     latitude: locationMap.get(postalCode)!.latitude,
     longitude: locationMap.get(postalCode)!.longitude,
@@ -438,7 +508,7 @@ export async function loadCommandCenterMetrics(
       "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; liczba i wartość są liczone według sales.sale_date, a wartość pochodzi z sales.contract_value.",
       "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
       "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
-      "Mapa leadów grupuje rekordy clients po kodzie pocztowym i polu lead_source, a współrzędne pobiera z lokalnego katalogu postal_code_locations; nie przekazuje adresów do zewnętrznej mapy.",
+      "Mapa pokazuje leady Meta Ads według nazwy integratora, Kalkulator ME, Lead doradcy i Załatwione z roboty; grupuje je po kodzie pocztowym i korzysta z lokalnego katalogu postal_code_locations.",
     ],
   };
 }

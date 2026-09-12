@@ -4,6 +4,7 @@ import Image from "next/image";
 import type { CSSProperties, DragEvent } from "react";
 
 import type {
+  CommandCenterLeadMapPoint,
   CommandCenterMetrics,
   CommandCenterPage,
   CommandCenterPeriod,
@@ -110,14 +111,12 @@ function Bars({ rows, total, period }: { rows: Array<{ label: string; value: num
 
 const POLAND_OUTLINE_POINTS = "579.9,295.4 584.4,305.9 583.5,313.2 609.4,350.8 602.3,358.3 609.3,372.8 609.0,380.2 602.0,390.6 586.3,393.4 525.8,459.7 522.4,465.5 527.4,486.4 525.8,497.1 534.3,504.8 532.1,510.0 484.6,493.8 476.8,482.3 461.7,476.4 428.0,475.8 423.3,482.6 415.3,484.7 400.1,478.1 384.9,478.7 372.9,484.6 366.6,496.2 348.5,494.2 349.5,479.8 340.9,476.8 329.5,460.4 318.0,467.8 311.9,477.4 301.0,477.7 299.2,469.0 292.9,467.9 291.3,459.0 278.6,446.7 276.6,436.2 261.2,433.2 244.5,422.8 232.7,427.3 220.4,415.8 218.1,412.3 226.9,406.0 224.9,399.4 207.6,403.9 191.8,393.3 175.5,389.1 182.1,405.5 161.0,417.1 135.2,389.4 147.8,376.5 139.5,369.5 123.0,373.3 106.3,362.3 83.7,356.1 78.0,343.4 62.0,338.7 61.4,349.6 50.9,352.0 63.4,318.2 56.7,300.1 45.8,294.9 45.9,283.0 38.4,268.3 47.5,246.9 43.2,232.5 35.6,223.0 39.5,208.5 10.0,178.5 27.0,150.9 17.8,105.3 37.4,113.0 35.8,97.2 15.1,93.1 14.2,89.0 133.7,57.1 156.2,34.4 175.8,30.8 198.4,19.3 248.0,10.2 262.3,10.0 288.5,23.2 290.9,27.6 269.0,18.0 283.1,45.0 301.5,52.1 327.4,48.9 339.3,42.6 493.5,51.1 537.1,48.5 570.8,69.7 579.5,116.5 596.9,165.6 597.7,193.5 568.2,209.6 554.0,229.3 582.7,250.5 581.1,270.3 576.3,278.8 579.9,295.4";
 const POLAND_BOUNDS = { minLongitude: 14.128613, maxLongitude: 24.105762, minLatitude: 49.020752, maxLatitude: 54.838184 };
-const CAMPAIGN_COLORS = ["#1398ef", "#ff991f", "#a855f7", "#24d18b", "#f43f5e", "#14b8a6", "#eab308", "#6366f1", "#ec4899", "#84cc16"];
-
-function campaignColor(campaign: string) {
-  if (campaign === "Brak kampanii") return "#94a3b8";
-  let hash = 0;
-  for (let index = 0; index < campaign.length; index += 1) hash = ((hash << 5) - hash + campaign.charCodeAt(index)) | 0;
-  return CAMPAIGN_COLORS[Math.abs(hash) % CAMPAIGN_COLORS.length];
-}
+const CAMPAIGN_COLORS: Record<CommandCenterLeadMapPoint["campaignKind"], string> = {
+  meta: "#1398ef",
+  calculator: "#24d18b",
+  advisor: "#94a3b8",
+  photo: "#ff991f",
+};
 
 function LeadMap({ widget, metrics }: { widget: CommandCenterWidget; metrics: CommandCenterMetrics }) {
   const period = widget.config.period || "month";
@@ -127,9 +126,11 @@ function LeadMap({ widget, metrics }: { widget: CommandCenterWidget; metrics: Co
   const total = points.reduce((sum, point) => sum + point.value, 0);
   const max = Math.max(...points.map((point) => point.value), 1);
   const campaignRows = Array.from(points.reduce((rows, point) => {
-    rows.set(point.campaign, (rows.get(point.campaign) || 0) + point.value);
+    const current = rows.get(point.campaign) || { campaign: point.campaign, campaignKind: point.campaignKind, value: 0 };
+    current.value += point.value;
+    rows.set(point.campaign, current);
     return rows;
-  }, new Map<string, number>()), ([campaign, value]) => ({ campaign, value }))
+  }, new Map<string, { campaign: string; campaignKind: CommandCenterLeadMapPoint["campaignKind"]; value: number }>()).values())
     .sort((a, b) => b.value - a.value || a.campaign.localeCompare(b.campaign, "pl"));
   const pointsByPostalCode = points.reduce((rows, point) => {
     rows.set(point.postalCode, [...(rows.get(point.postalCode) || []), point]);
@@ -150,7 +151,7 @@ function LeadMap({ widget, metrics }: { widget: CommandCenterWidget; metrics: Co
           const x = baseX + Math.cos(angle) * offset;
           const y = baseY + Math.sin(angle) * offset;
           const radius = 4 + Math.sqrt(point.value / max) * 11;
-          const color = campaignColor(point.campaign);
+          const color = CAMPAIGN_COLORS[point.campaignKind];
           return (
             <circle className="cc-lead-map-dot" cx={x} cy={y} fill={color} key={`${point.postalCode}:${point.campaign}`} r={radius} stroke={color}>
               <title>{`${point.campaign} · ${point.postalCode}: ${point.value}`}</title>
@@ -166,7 +167,7 @@ function LeadMap({ widget, metrics }: { widget: CommandCenterWidget; metrics: Co
           <div className="cc-lead-map-legend" aria-label="Legenda kampanii">
             {campaignRows.slice(0, 8).map((row) => (
               <div className="cc-lead-map-legend-row" key={row.campaign}>
-                <i aria-hidden="true" style={{ background: campaignColor(row.campaign) }} />
+                <i aria-hidden="true" style={{ background: CAMPAIGN_COLORS[row.campaignKind] }} />
                 <span title={row.campaign}>{row.campaign}</span>
                 <b>{row.value}</b>
               </div>
