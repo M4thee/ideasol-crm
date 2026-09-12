@@ -50,6 +50,68 @@ function placeWidget(page: CommandCenterPage, widget: CommandCenterWidget) {
   return null;
 }
 
+type PreviewCanvasProps = {
+  dashboardName: string;
+  page: CommandCenterPage;
+  selectedWidgetId: string | null;
+  onLibraryDrop: (kind: string) => void;
+  onSelectWidget: (widgetId: string) => void;
+  onWidgetDrop: (sourceWidgetId: string, targetWidgetId: string) => void;
+};
+
+function FittedPreviewCanvas({
+  dashboardName,
+  page,
+  selectedWidgetId,
+  onLibraryDrop,
+  onSelectWidget,
+  onWidgetDrop,
+}: PreviewCanvasProps) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(0);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+
+    const resize = () => {
+      setScale(Math.min(frame.clientWidth / 1920, frame.clientHeight / 1080));
+    };
+    const observer = new ResizeObserver(resize);
+    resize();
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={frameRef} className="relative h-full w-full overflow-hidden bg-black">
+      <div
+        style={{
+          height: 1080,
+          left: "50%",
+          position: "absolute",
+          top: "50%",
+          transform: `translate(-50%, -50%) scale(${scale})`,
+          transformOrigin: "center",
+          width: 1920,
+        }}
+      >
+        <CommandCenterCanvas
+          dashboardName={dashboardName}
+          editing
+          metrics={EMPTY_COMMAND_CENTER_METRICS}
+          onLibraryDrop={onLibraryDrop}
+          onSelectWidget={onSelectWidget}
+          onWidgetDrop={onWidgetDrop}
+          page={page}
+          selectedWidgetId={selectedWidgetId}
+          theme="dark"
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function CommandCenterAdmin() {
   const [tab, setTab] = useState<AdminTab>("dashboards");
   const [data, setData] = useState<AdminData>({ dashboards: [], versions: [], devices: [], stations: [] });
@@ -59,9 +121,8 @@ export default function CommandCenterAdmin() {
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [status, setStatus] = useState("Ładowanie…");
   const [error, setError] = useState("");
-  const [previewScale, setPreviewScale] = useState(0.4);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [newDeviceToken, setNewDeviceToken] = useState("");
-  const previewRef = useRef<HTMLDivElement | null>(null);
 
   const selectedDashboard = data.dashboards.find((dashboard) => dashboard.id === selectedDashboardId) || null;
   const page = draft?.pages.find((item) => item.id === pageId) || draft?.pages[0] || null;
@@ -121,12 +182,18 @@ export default function CommandCenterAdmin() {
   }, [selectedDashboardId, selectedDashboard]);
 
   useEffect(() => {
-    const container = previewRef.current;
-    if (!container) return;
-    const observer = new ResizeObserver(([entry]) => setPreviewScale(entry.contentRect.width / 1920));
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [tab, selectedDashboardId]);
+    if (!previewFullscreen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewFullscreen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [previewFullscreen]);
 
   function updatePage(update: Partial<CommandCenterPage>) {
     if (!draft || !page) return;
@@ -267,7 +334,10 @@ export default function CommandCenterAdmin() {
                 <div className="grid min-h-[720px] lg:grid-cols-[210px_minmax(0,1fr)_240px]">
                   <aside className="border-r border-slate-200 p-3 dark:border-slate-700"><p className="mb-3 text-xs font-black uppercase tracking-wider text-slate-400">Biblioteka</p><div className="max-h-[640px] space-y-2 overflow-y-auto pr-1">{VISIBLE_COMMAND_CENTER_WIDGETS.map((definition) => <button draggable onDragStart={(event) => event.dataTransfer.setData("application/x-cc-widget-kind", definition.id)} onClick={() => addWidget(definition.id)} key={definition.id} className="w-full cursor-grab rounded-xl border border-slate-200 p-3 text-left hover:border-sky-400 dark:border-slate-700"><strong className="block text-xs">{definition.name}</strong><span className="mt-1 block text-[10px] leading-snug text-slate-500">{definition.description}</span></button>)}</div></aside>
                   <div className="min-w-0 bg-slate-200/60 p-4 dark:bg-slate-950/60">
-                    <div ref={previewRef} className="relative aspect-video w-full overflow-hidden rounded-xl bg-black shadow-2xl"><div style={{ height: 1080, transform: `scale(${previewScale})`, transformOrigin: "top left", width: 1920 }}><CommandCenterCanvas dashboardName={selectedDashboard.name} editing metrics={EMPTY_COMMAND_CENTER_METRICS} onLibraryDrop={addWidget} onSelectWidget={setSelectedWidgetId} onWidgetDrop={swapWidgets} page={page} selectedWidgetId={selectedWidgetId} theme="dark" /></div></div>
+                    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black shadow-2xl">
+                      <FittedPreviewCanvas dashboardName={selectedDashboard.name} onLibraryDrop={addWidget} onSelectWidget={setSelectedWidgetId} onWidgetDrop={swapWidgets} page={page} selectedWidgetId={selectedWidgetId} />
+                      <button type="button" onClick={() => setPreviewFullscreen(true)} className="absolute right-3 top-3 z-10 rounded-lg border border-white/20 bg-slate-950/85 px-3 py-2 text-xs font-black text-white shadow-lg backdrop-blur hover:bg-sky-600">Pełny podgląd</button>
+                    </div>
                     <p className="mt-3 text-center text-[11px] text-slate-500">Logiczna plansza 1920×1080 · ten sam układ skaluje się do 4K</p>
                   </div>
                   <aside className="border-l border-slate-200 p-4 dark:border-slate-700">
@@ -284,6 +354,17 @@ export default function CommandCenterAdmin() {
         {tab === "radio" && <RadioPanel stations={data.stations} onCreate={(name, streamUrl, homepageUrl) => void perform({ action: "create-station", name, streamUrl, homepageUrl }, "Dodawanie stacji…")} onToggle={(stationId, isActive) => void perform({ action: "update-station", stationId, isActive }, "Zapisywanie stacji…")} />}
         {tab === "settings" && <div className="space-y-5">{selectedDashboard ? <DashboardSettingsPanel dashboard={selectedDashboard} key={selectedDashboard.id} versions={versions} onRollback={(versionId) => void rollback(versionId)} onUpdate={(name, description, defaultRotationSeconds) => void perform({ action: "update-dashboard", dashboardId: selectedDashboard.id, name, description, defaultRotationSeconds }, "Zapisywanie ustawień dashboardu…")} /> : <SimplePanel title="Ustawienia dashboardu" subtitle="Najpierw utwórz lub wybierz dashboard."><p className="text-sm text-slate-500">Brak aktywnego dashboardu.</p></SimplePanel>}<SimplePanel title="Niezawodność i definicje" subtitle="Command Center pozostaje warstwą odczytową nad CRM."><div className="grid gap-4 md:grid-cols-2"><InfoCard title="Prywatność" text="TV otrzymuje wyłącznie agregaty. API urządzenia nie zwraca nazw, telefonów, adresów ani innych danych klientów." /><InfoCard title="Odświeżanie" text="Urządzenie sprawdza wersję i dane co 15 sekund; strony rotują domyślnie co 30 sekund." /><InfoCard title="Podejmowalność" text="To udział leadów z co najmniej jedną ręcznie zarejestrowaną aktywnością, a nie liczba połączeń." /><InfoCard title="Radio" text="Stacja, głośność i autoplay są ustawieniami konkretnego urządzenia. Lista nie zawiera zgadywanych adresów streamów." /></div></SimplePanel></div>}
       </div>
+      {previewFullscreen && selectedDashboard && page && (
+        <div className="fixed inset-0 z-[100] flex flex-col bg-black" role="dialog" aria-label="Pełny podgląd dashboardu" aria-modal="true">
+          <div className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-white/15 bg-slate-950 px-5 text-white">
+            <div><strong className="block text-sm">{selectedDashboard.name}</strong><span className="text-xs text-slate-400">{page.name} · podgląd 1920×1080</span></div>
+            <button type="button" autoFocus onClick={() => setPreviewFullscreen(false)} className="rounded-lg bg-white px-4 py-2 text-sm font-black text-slate-950 hover:bg-sky-100">Zamknij podgląd</button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <FittedPreviewCanvas dashboardName={selectedDashboard.name} onLibraryDrop={addWidget} onSelectWidget={setSelectedWidgetId} onWidgetDrop={swapWidgets} page={page} selectedWidgetId={selectedWidgetId} />
+          </div>
+        </div>
+      )}
     </main>
   );
 }
