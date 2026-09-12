@@ -263,7 +263,11 @@ export async function loadCommandCenterMetrics(
     latitude: location.latitude / location.count,
     longitude: location.longitude / location.count,
   }]));
-  const leadMapCounts = new Map<string, CommandCenterPeriodValues<number>>();
+  const leadMapCounts = new Map<string, {
+    campaign: string;
+    counts: CommandCenterPeriodValues<number>;
+    postalCode: string;
+  }>();
   let validPostalCodes = 0;
   let locatedLeads = 0;
   clients.forEach((client) => {
@@ -272,19 +276,26 @@ export async function loadCommandCenterMetrics(
     validPostalCodes += 1;
     if (!locationMap.has(postalCode)) return;
     locatedLeads += 1;
-    const counts = leadMapCounts.get(postalCode) || mapPeriods(() => 0);
+    const campaign = client.lead_source?.trim() || "Brak kampanii";
+    const mapKey = JSON.stringify([postalCode, campaign]);
+    const entry = leadMapCounts.get(mapKey) || {
+      campaign,
+      counts: mapPeriods(() => 0),
+      postalCode,
+    };
     COMMAND_CENTER_PERIODS.forEach((period) => {
       const range = ranges.periods[period];
-      if (inRange(client.created_at, range.start, range.end)) counts[period] += 1;
+      if (inRange(client.created_at, range.start, range.end)) entry.counts[period] += 1;
     });
-    leadMapCounts.set(postalCode, counts);
+    leadMapCounts.set(mapKey, entry);
   });
-  const leadMapPoints = Array.from(leadMapCounts, ([postalCode, counts]) => ({
+  const leadMapPoints = Array.from(leadMapCounts.values(), ({ campaign, counts, postalCode }) => ({
+    campaign,
     postalCode,
     latitude: locationMap.get(postalCode)!.latitude,
     longitude: locationMap.get(postalCode)!.longitude,
     ...counts,
-  })).sort((a, b) => a.postalCode.localeCompare(b.postalCode, "pl"));
+  })).sort((a, b) => a.postalCode.localeCompare(b.postalCode, "pl") || a.campaign.localeCompare(b.campaign, "pl"));
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
   const sumSales = (rows: SaleRow[]) => rows.reduce((sum, row) => sum + numberValue(row.contract_value), 0);
 
@@ -427,7 +438,7 @@ export async function loadCommandCenterMetrics(
       "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; liczba i wartość są liczone według sales.sale_date, a wartość pochodzi z sales.contract_value.",
       "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
       "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
-      "Mapa leadów grupuje rekordy clients po kodzie pocztowym i korzysta z lokalnego katalogu postal_code_locations; nie przekazuje adresów do zewnętrznej mapy.",
+      "Mapa leadów grupuje rekordy clients po kodzie pocztowym i polu lead_source, a współrzędne pobiera z lokalnego katalogu postal_code_locations; nie przekazuje adresów do zewnętrznej mapy.",
     ],
   };
 }

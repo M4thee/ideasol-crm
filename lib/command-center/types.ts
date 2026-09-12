@@ -103,6 +103,7 @@ export type CommandCenterRankingRow = {
 };
 
 export type CommandCenterLeadMapPoint = CommandCenterPeriodValues<number> & {
+  campaign: string;
   postalCode: string;
   latitude: number;
   longitude: number;
