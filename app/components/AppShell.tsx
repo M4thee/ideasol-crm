@@ -61,7 +61,8 @@ export default function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const isCalculatorApp = pathname?.startsWith("/calculator-app");
   const isIdeaSignApp = pathname?.startsWith("/sign");
-  const isCommandCenterTv = pathname?.startsWith("/command-center/tv/");
+  const isCommandCenterTv =
+    pathname === "/command-center/tv" || pathname?.startsWith("/command-center/tv/");
   const isCommandCenterDemo = process.env.NODE_ENV === "development" && pathname === "/command-center/demo";
   const isPublicStandaloneApp = isCalculatorApp || isIdeaSignApp || isCommandCenterTv || isCommandCenterDemo;
 
