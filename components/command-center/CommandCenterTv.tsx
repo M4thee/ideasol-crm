@@ -9,6 +9,8 @@ import type {
 } from "@/lib/command-center/types";
 import CommandCenterCanvas from "./CommandCenterCanvas";
 
+const COMMAND_CENTER_ACHIEVEMENT_VIDEO = "/animations/command-center-achievement.mp4";
+
 function resolveTheme(payload: CommandCenterDevicePayload, date: Date) {
   if (payload.device.theme !== "auto") return payload.device.theme;
   const hour = Number(new Intl.DateTimeFormat("en-US", {
@@ -87,19 +89,20 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
   return (
     <div className="cc-live-event-layer" aria-live="polite" role="status">
       <div className={`cc-live-event-card cc-live-event-${event.kind} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
-        <div className="cc-live-event-medallion" aria-hidden="true">
-          {isSale ? (
-            <svg viewBox="0 0 64 64"><path d="M18 33 28 43 47 20" /><circle cx="32" cy="32" r="25" /></svg>
-          ) : (
-            <svg viewBox="0 0 64 64"><circle cx="27" cy="24" r="9" /><path d="M11 49c2-10 8-15 16-15s14 5 16 15M48 18v18M39 27h18" /></svg>
-          )}
-        </div>
+        <video
+          aria-hidden="true"
+          autoPlay
+          className="cc-live-event-video"
+          muted
+          playsInline
+          preload="auto"
+          src={COMMAND_CENTER_ACHIEVEMENT_VIDEO}
+        />
         <div className="cc-live-event-copy">
-          <span>IdeaSol Achievement</span>
+          <span>Nowe zdarzenie w CRM</span>
           <strong>{isSale ? "Nowa sprzedaż!" : "Nowy lead!"}</strong>
           <small>{value ? `Wartość sprzedaży: ${value}` : "Nowa szansa trafiła do CRM"}</small>
         </div>
-        <div className="cc-live-event-orbit" aria-hidden="true"><i /><i /><i /></div>
       </div>
     </div>
   );
@@ -199,12 +202,12 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     setActiveLiveEvent(nextEvent);
     setLiveEventExiting(false);
     void playLiveEventSound(nextEvent.kind);
-    liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 3_700);
+    liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 5_050);
     liveEventClearTimeoutRef.current = window.setTimeout(() => {
       setActiveLiveEvent(null);
       liveEventActiveRef.current = false;
       showNext();
-    }, 4_400);
+    }, 6_100);
   }, []);
 
   const loadLiveEvents = useCallback(async () => {
@@ -243,6 +246,18 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
       window.clearInterval(refreshId);
     };
   }, [load]);
+
+  useEffect(() => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.src = COMMAND_CENTER_ACHIEVEMENT_VIDEO;
+    video.load();
+    return () => {
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, []);
 
   useEffect(() => {
     if (!payload?.device.id) return;
@@ -378,7 +393,7 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
             </div>
           }
         />
-        {activeLiveEvent && <LiveEventAlert event={activeLiveEvent} exiting={liveEventExiting} />}
+        {activeLiveEvent && <LiveEventAlert event={activeLiveEvent} exiting={liveEventExiting} key={activeLiveEvent.id} />}
       </div>
     </main>
   );

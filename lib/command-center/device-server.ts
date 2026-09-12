@@ -34,13 +34,31 @@ function numericValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseCommandCenterTestEvent(settings: unknown): CommandCenterLiveEvent | null {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+  const candidate = (settings as Record<string, unknown>).testNotification;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const record = candidate as Record<string, unknown>;
+  const kind = record.kind === "sale" ? "sale" : record.kind === "lead" ? "lead" : null;
+  const occurredAt = typeof record.occurredAt === "string" ? record.occurredAt : "";
+  const timestamp = new Date(occurredAt).getTime();
+  if (!kind || !Number.isFinite(timestamp)) return null;
+  const id = typeof record.id === "string" && record.id ? record.id : occurredAt;
+  return {
+    id: `test:${id}`,
+    kind,
+    occurredAt,
+    ...(kind === "sale" ? { value: numericValue(record.value) } : {}),
+  };
+}
+
 export async function loadCommandCenterLiveEvents(
   rawToken: string,
   after?: string | null
 ): Promise<LiveEventsResult> {
   const { data: device, error: deviceError } = await supabaseAdmin
     .from("cc_devices")
-    .select("id")
+    .select("id,settings")
     .eq("access_token_digest", digestCommandCenterSecret(rawToken))
     .maybeSingle();
   if (deviceError || !device) {
@@ -60,6 +78,7 @@ export async function loadCommandCenterLiveEvents(
   const oldestAllowed = new Date(cursorDate.getTime() - 10 * 60 * 1000);
   const lowerBound = requestedAfter > oldestAllowed ? requestedAfter : oldestAllowed;
   const lowerBoundIso = lowerBound.toISOString();
+  const testEvent = parseCommandCenterTestEvent(device.settings);
 
   const [{ data: leads, error: leadsError }, { data: sales, error: salesError }] = await Promise.all([
     supabaseAdmin
@@ -85,6 +104,11 @@ export async function loadCommandCenterLiveEvents(
   }
 
   const events: CommandCenterLiveEvent[] = [
+    ...(testEvent
+      && new Date(testEvent.occurredAt) > lowerBound
+      && new Date(testEvent.occurredAt) <= cursorDate
+      ? [testEvent]
+      : []),
     ...(leads || []).map((lead) => ({
       id: `lead:${lead.id}`,
       kind: "lead" as const,
