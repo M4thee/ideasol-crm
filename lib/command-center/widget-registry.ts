@@ -40,7 +40,7 @@ function periodPresets(
 }
 
 export const COMMAND_CENTER_WIDGETS: CommandCenterWidgetDefinition[] = [
-  ...periodPresets("sales-kpi", "Sprzedaż", "Liczba nieanulowanych sprzedaży w bieżącym okresie"),
+  ...periodPresets("sales-kpi", "Sprzedaż", "Liczba i wartość nieanulowanych sprzedaży w bieżącym okresie"),
   ...periodPresets("meetings-kpi", "Spotkania umówione", "Nowe spotkania zapisane w kalendarzu CRM w bieżącym okresie"),
   ...periodPresets("leads-kpi", "Nowe leady", "Liczba leadów utworzonych w bieżącym okresie"),
   ...periodPresets("calls-kpi", "Wykonane telefony", "Liczba aktywności telefonicznych zapisanych w CRM w bieżącym okresie"),
@@ -49,7 +49,7 @@ export const COMMAND_CENTER_WIDGETS: CommandCenterWidgetDefinition[] = [
   ...periodPresets("lead-sources", "Źródła leadów", "Rozkład pola lead_source dla nowych leadów", { w: 4, h: 4 }),
   ...periodPresets("lead-statuses", "Statusy leadów", "Rozkład bieżącego statusu nowych leadów", { w: 4, h: 4 }),
   ...periodPresets("lead-map", "Mapa leadów — Polska", "Punkty leadów według kodów pocztowych i lokalnego katalogu współrzędnych", { w: 6, h: 5 }),
-  ...periodPresets("advisor-ranking", "Ranking doradców", "Informacyjne zestawienie sprzedaży, konwersji i podejmowalności", { w: 7, h: 5 }),
+  ...periodPresets("advisor-ranking", "Ranking doradców", "Przypisane leady, wykonane telefony i oferty oraz wartość sprzedaży", { w: 7, h: 5 }),
   ...periodPresets("monthly-target", "Cel sprzedażowy", "Realizacja celu ustawionego dla wybranego okresu", { w: 4, h: 3 }),
   ...periodPresets("status-ticker", "Pasek informacyjny", "Podsumowanie zagregowanych danych dla wybranego okresu", { w: 12, h: 1 }),
   { id: "meetings-today-legacy", kind: "meetings-today", name: "Spotkania dziś", description: "Spotkania z kalendarza CRM zaplanowane na dziś.", defaultSize: { w: 3, h: 2 }, hidden: true },
@@ -124,7 +124,7 @@ export function createWidget(definitionId: string): CommandCenterWidget {
     h: definition.defaultSize.h,
     config: {
       ...(definition.defaultPeriod ? { period: definition.defaultPeriod } : {}),
-      ...(definition.kind === "advisor-ranking" ? { rankingMetric: "salesValue" as const, limit: 6 } : {}),
+      ...(definition.kind === "advisor-ranking" ? { limit: 6 } : {}),
     },
   };
 }

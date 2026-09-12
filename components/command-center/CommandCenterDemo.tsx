@@ -21,10 +21,10 @@ const demoStatuses = [
   { label: "Sprzedaż", value: 21 },
 ];
 const demoRanking = [
-  { advisorId: "demo-a", advisorName: "Doradca A", leads: 38, contactedLeads: 31, contactRate: 82, sales: 9, salesValue: 194_000, conversion: 24 },
-  { advisorId: "demo-b", advisorName: "Doradca B", leads: 41, contactedLeads: 33, contactRate: 80, sales: 8, salesValue: 171_000, conversion: 20 },
-  { advisorId: "demo-c", advisorName: "Doradca C", leads: 35, contactedLeads: 25, contactRate: 71, sales: 6, salesValue: 139_000, conversion: 17 },
-  { advisorId: "demo-d", advisorName: "Doradca D", leads: 32, contactedLeads: 24, contactRate: 75, sales: 5, salesValue: 102_000, conversion: 16 },
+  { advisorId: "demo-a", advisorName: "Doradca A", leads: 38, calls: 91, offers: 14, contactedLeads: 31, contactRate: 82, sales: 9, salesValue: 194_000, conversion: 24 },
+  { advisorId: "demo-b", advisorName: "Doradca B", leads: 41, calls: 84, offers: 12, contactedLeads: 33, contactRate: 80, sales: 8, salesValue: 171_000, conversion: 20 },
+  { advisorId: "demo-c", advisorName: "Doradca C", leads: 35, calls: 73, offers: 10, contactedLeads: 25, contactRate: 71, sales: 6, salesValue: 139_000, conversion: 17 },
+  { advisorId: "demo-d", advisorName: "Doradca D", leads: 32, calls: 69, offers: 8, contactedLeads: 24, contactRate: 75, sales: 5, salesValue: 102_000, conversion: 16 },
 ];
 
 const demoMetrics: CommandCenterMetrics = {

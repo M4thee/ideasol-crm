@@ -188,8 +188,14 @@ function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics:
     return <div className="cc-kpi"><strong>{value}</strong><span>leadów {periodLabel(period)}</span></div>;
   }
   if (widget.kind === "sales-kpi") {
-    const value = periodValue(metrics.sales, period);
-    return <div className="cc-kpi"><strong>{value}</strong><span>sprzedaży {periodLabel(period)}</span></div>;
+    const count = periodValue(metrics.sales, period);
+    const salesValue = periodValue(metrics.sales.valueByPeriod, period);
+    return (
+      <div className="cc-kpi cc-kpi-sales">
+        <div><strong>{count}</strong><span>sprzedaży {periodLabel(period)}</span></div>
+        <small>{formatCurrency(salesValue)}</small>
+      </div>
+    );
   }
   if (widget.kind === "sales-value") {
     const value = periodValue(metrics.sales.valueByPeriod, period);
@@ -234,20 +240,26 @@ function WidgetBody({ widget, metrics }: { widget: CommandCenterWidget; metrics:
     );
   }
   if (widget.kind === "advisor-ranking") {
-    const metric = widget.config.rankingMetric || "salesValue";
     const rows = [...metrics.rankingByPeriod[period]]
-      .sort((a, b) => Number(b[metric]) - Number(a[metric]) || b.salesValue - a.salesValue)
+      .sort((a, b) => b.salesValue - a.salesValue || b.sales - a.sales || a.advisorName.localeCompare(b.advisorName, "pl"))
       .slice(0, widget.config.limit || 6);
-    const max = Math.max(...rows.map((row) => Number(row[metric])), 1);
     if (!rows.length) return <p className="cc-empty">Brak aktywności doradców {periodLabel(period)}</p>;
     return (
-      <div className="cc-ranking">
+      <div className="cc-ranking" role="table" aria-label={`Ranking doradców ${periodLabel(period)}`}>
+        <div className="cc-ranking-header" role="row">
+          <span role="columnheader">Doradca</span>
+          <span role="columnheader">Leady</span>
+          <span role="columnheader">Telefony</span>
+          <span role="columnheader">Oferty</span>
+          <span role="columnheader">Wartość sprzedaży</span>
+        </div>
         {rows.map((row, index) => (
-          <div className="cc-ranking-row" key={row.advisorId}>
-            <b>{index + 1}</b>
-            <span>{row.advisorName}</span>
-            <div><i style={{ width: `${Math.max(5, (Number(row[metric]) / max) * 100)}%` }} /></div>
-            <strong>{metric === "salesValue" ? formatCurrency(row.salesValue) : metric === "sales" ? row.sales : `${row[metric]}%`}</strong>
+          <div className="cc-ranking-row" key={row.advisorId} role="row">
+            <span className="cc-ranking-advisor" role="cell"><b>{index + 1}</b><span>{row.advisorName}</span></span>
+            <strong role="cell">{row.leads}</strong>
+            <strong role="cell">{row.calls}</strong>
+            <strong role="cell">{row.offers}</strong>
+            <strong className="cc-ranking-sales" role="cell">{formatCurrency(row.salesValue)}</strong>
           </div>
         ))}
       </div>

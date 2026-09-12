@@ -95,6 +95,8 @@ export type CommandCenterRankingRow = {
   advisorId: string;
   advisorName: string;
   leads: number;
+  calls: number;
+  offers: number;
   contactedLeads: number;
   contactRate: number;
   sales: number;

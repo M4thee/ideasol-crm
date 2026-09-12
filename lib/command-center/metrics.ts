@@ -36,6 +36,7 @@ type LeadIntegrationRow = {
 type ActivityRow = {
   id: string;
   client_id: string | null;
+  created_by: string | null;
   created_at: string;
   activity_type: string | null;
 };
@@ -49,7 +50,7 @@ type CalendarRow = {
   status: string | null;
 };
 
-type OfferRow = { id: string; client_id: string | null; created_at: string };
+type OfferRow = { id: string; client_id: string | null; created_by: string | null; created_at: string };
 type SaleRow = {
   id: string;
   client_id: string | null;
@@ -243,10 +244,10 @@ export async function loadCommandCenterMetrics(
 
   const [clients, activities, calendarByEventDate, calendarCreated, offers, unfilteredSales, profiles] = await Promise.all([
     fetchAllRows<ClientRow>((from, to) => supabase.from("clients").select("id, created_at, status, lead_source, assigned_user_id, postal_code").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_at, activity_type").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<ActivityRow>((from, to) => supabase.from("client_activities").select("id, client_id, created_by, created_at, activity_type").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", queryStartIso).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id, created_by, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ProfileRow>((from, to) => supabase.from("profiles").select("id, display_name, role").order("id", { ascending: true }).range(from, to)),
   ]);
@@ -410,47 +411,51 @@ export async function loadCommandCenterMetrics(
 
   const ranking = mapPeriods((period) => {
     const rankingMap = new Map<string, CommandCenterRankingRow>();
+    const createRankingRow = (advisorId: string): CommandCenterRankingRow => ({
+      advisorId,
+      advisorName: profileMap.get(advisorId)?.display_name || "Doradca",
+      leads: 0,
+      calls: 0,
+      offers: 0,
+      contactedLeads: 0,
+      contactRate: 0,
+      sales: 0,
+      salesValue: 0,
+      conversion: 0,
+    });
+    const getRankingRow = (advisorId: string) => {
+      const row = rankingMap.get(advisorId) || createRankingRow(advisorId);
+      rankingMap.set(advisorId, row);
+      return row;
+    };
     profiles
       .filter((profile) => ["seller", "manager", "owner", "admin"].includes(normalize(profile.role)))
-      .forEach((profile) => rankingMap.set(profile.id, {
-        advisorId: profile.id,
-        advisorName: profile.display_name || "Doradca",
-        leads: 0,
-        contactedLeads: 0,
-        contactRate: 0,
-        sales: 0,
-        salesValue: 0,
-        conversion: 0,
-      }));
+      .forEach((profile) => rankingMap.set(profile.id, createRankingRow(profile.id)));
     clientsByPeriod[period].forEach((client) => {
       if (!client.assigned_user_id) return;
-      const row = rankingMap.get(client.assigned_user_id);
-      if (!row) return;
+      const row = getRankingRow(client.assigned_user_id);
       row.leads += 1;
       if (leadStats[period].contactedClientIds.has(client.id)) row.contactedLeads += 1;
     });
+    callsByPeriod[period].forEach((activity) => {
+      if (!activity.created_by) return;
+      getRankingRow(activity.created_by).calls += 1;
+    });
+    rowsInPeriod(offers, period, (offer) => offer.created_at).forEach((offer) => {
+      if (!offer.created_by) return;
+      getRankingRow(offer.created_by).offers += 1;
+    });
     salesByPeriod[period].forEach((sale) => {
       if (!sale.seller_id) return;
-      const profile = profileMap.get(sale.seller_id);
-      const row = rankingMap.get(sale.seller_id) || {
-        advisorId: sale.seller_id,
-        advisorName: profile?.display_name || "Doradca",
-        leads: 0,
-        contactedLeads: 0,
-        contactRate: 0,
-        sales: 0,
-        salesValue: 0,
-        conversion: 0,
-      };
+      const row = getRankingRow(sale.seller_id);
       row.sales += 1;
       row.salesValue += numberValue(sale.contract_value);
-      rankingMap.set(sale.seller_id, row);
     });
     return Array.from(rankingMap.values()).map((row) => ({
       ...row,
       contactRate: row.leads > 0 ? Math.round((row.contactedLeads / row.leads) * 100) : 0,
       conversion: row.leads > 0 ? Math.round((row.sales / row.leads) * 100) : 0,
-    })).filter((row) => row.leads > 0 || row.sales > 0);
+    })).filter((row) => row.leads > 0 || row.calls > 0 || row.offers > 0 || row.sales > 0);
   });
 
   const meetingsToday = calendarByEventDate.filter((row) =>
@@ -507,6 +512,7 @@ export async function loadCommandCenterMetrics(
       "Leady są liczone z rekordów clients według created_at; podjęty lead oznacza co najmniej jedną zarejestrowaną aktywność w tym samym okresie.",
       "Sprzedaż wyklucza statusy anulowane, utracone i rezygnacje; liczba i wartość są liczone według sales.sale_date, a wartość pochodzi z sales.contract_value.",
       "Wykonane telefony są liczone z aktywności client_activities o typie phone; CRM nie rejestruje czasu rozmów.",
+      "Ranking przypisuje nowe leady po clients.assigned_user_id, telefony i oferty po created_by, a sprzedaż po sales.seller_id.",
       "Spotkania umówione są liczone według daty utworzenia spotkania w kalendarzu; spotkania anulowane są wykluczone.",
       "Mapa pokazuje leady Meta Ads według nazwy integratora, Kalkulator ME, Lead doradcy i Załatwione z roboty; grupuje je po kodzie pocztowym i korzysta z lokalnego katalogu postal_code_locations.",
     ],

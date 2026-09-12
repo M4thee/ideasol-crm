@@ -59,6 +59,9 @@
 .cc-kpi { align-items: end; display: flex; gap: 16px; height: calc(100% - 26px); }
 .cc-kpi strong { color: var(--cc-text); font-size: 70px; letter-spacing: -0.05em; line-height: 0.92; }
 .cc-kpi span { color: var(--cc-muted); font-size: 17px; line-height: 1.25; max-width: 130px; }
+.cc-kpi-sales { align-items: start; flex-direction: column; gap: 10px; justify-content: end; }
+.cc-kpi-sales > div { align-items: end; display: flex; gap: 16px; }
+.cc-kpi-sales small { color: var(--cc-muted); font-size: 24px; font-weight: 800; line-height: 1; }
 .cc-kpi-currency { align-items: start; flex-direction: column; gap: 6px; justify-content: end; }
 .cc-kpi-currency strong { font-size: 46px; }
 .cc-kpi-currency span { max-width: none; }
@@ -94,13 +97,18 @@
 .cc-funnel-row strong { font-size: 24px; }
 .cc-funnel-row em { font-size: 14px; font-style: normal; opacity: 0.85; text-align: right; }
 
-.cc-ranking { display: grid; gap: 13px; }
-.cc-ranking-row { align-items: center; display: grid; gap: 14px; grid-template-columns: 28px 180px 1fr 150px; }
-.cc-ranking-row > b { align-items: center; background: var(--cc-panel-strong); border-radius: 50%; display: flex; height: 28px; justify-content: center; }
-.cc-ranking-row > span { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cc-ranking-row > div { background: var(--cc-panel-strong); border-radius: 99px; height: 11px; overflow: hidden; }
-.cc-ranking-row i { background: linear-gradient(90deg, var(--cc-blue), var(--cc-green)); border-radius: inherit; display: block; height: 100%; }
-.cc-ranking-row strong { font-size: 18px; text-align: right; }
+.cc-ranking { display: grid; gap: 5px; }
+.cc-ranking-header,
+.cc-ranking-row { align-items: center; display: grid; gap: 12px; grid-template-columns: minmax(190px, 1.35fr) repeat(3, minmax(72px, 0.52fr)) minmax(135px, 0.9fr); }
+.cc-ranking-header { border-bottom: 1px solid var(--cc-line); color: var(--cc-muted); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; padding: 0 12px 9px; text-transform: uppercase; }
+.cc-ranking-header span:not(:first-child) { text-align: right; }
+.cc-ranking-row { border-radius: 12px; min-height: 43px; padding: 5px 12px; }
+.cc-ranking-row:nth-child(odd) { background: color-mix(in srgb, var(--cc-panel-strong) 55%, transparent); }
+.cc-ranking-advisor { align-items: center; display: flex; font-size: 16px; gap: 10px; min-width: 0; }
+.cc-ranking-advisor > b { align-items: center; background: var(--cc-panel-strong); border-radius: 50%; display: flex; flex: 0 0 auto; font-size: 13px; height: 27px; justify-content: center; width: 27px; }
+.cc-ranking-advisor > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-ranking-row > strong { font-size: 18px; text-align: right; }
+.cc-ranking-row > .cc-ranking-sales { color: var(--cc-green); font-size: 17px; }
 .cc-target { display: flex; flex-direction: column; gap: 20px; height: calc(100% - 30px); justify-content: center; }
 .cc-target > div:first-child { align-items: baseline; display: flex; justify-content: space-between; }
 .cc-target strong { color: var(--cc-green); font-size: 58px; }
