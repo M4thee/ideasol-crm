@@ -93,7 +93,9 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
           aria-hidden="true"
           autoPlay
           className="cc-live-event-video"
-          muted
+          onLoadedMetadata={(videoEvent) => {
+            videoEvent.currentTarget.volume = 0.62;
+          }}
           playsInline
           preload="auto"
           src={COMMAND_CENTER_ACHIEVEMENT_VIDEO}
@@ -106,31 +108,6 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
       </div>
     </div>
   );
-}
-
-async function playLiveEventSound(kind: CommandCenterLiveEvent["kind"]) {
-  try {
-    const context = new AudioContext();
-    await context.resume();
-    const frequencies = kind === "sale" ? [523.25, 783.99, 1046.5] : [440, 659.25, 880];
-    const start = context.currentTime + 0.02;
-    frequencies.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.value = frequency;
-      const noteStart = start + index * 0.09;
-      gain.gain.setValueAtTime(0.0001, noteStart);
-      gain.gain.exponentialRampToValueAtTime(0.055, noteStart + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.42);
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(noteStart);
-      oscillator.stop(noteStart + 0.45);
-    });
-    window.setTimeout(() => void context.close(), 900);
-  } catch {
-    // Nie blokujemy powiadomienia wizualnego, jeśli przeglądarka nie pozwoli uruchomić dźwięku.
-  }
 }
 
 export default function CommandCenterTv({ token, buildVersion }: { token?: string; buildVersion: string }) {
@@ -201,7 +178,6 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     liveEventActiveRef.current = true;
     setActiveLiveEvent(nextEvent);
     setLiveEventExiting(false);
-    void playLiveEventSound(nextEvent.kind);
     liveEventExitTimeoutRef.current = window.setTimeout(() => setLiveEventExiting(true), 5_050);
     liveEventClearTimeoutRef.current = window.setTimeout(() => {
       setActiveLiveEvent(null);
@@ -306,9 +282,22 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
   const radioVolume = radioVolumeOverride ?? payload?.device.radio_volume ?? 0;
 
   useEffect(() => {
-    if (!audioRef.current || !payload) return;
-    audioRef.current.volume = radioVolume / 100;
-  }, [payload, radioVolume]);
+    const audio = audioRef.current;
+    if (!audio || !payload?.device.id) return;
+    const startVolume = audio.volume;
+    const targetVolume = (radioVolume / 100) * (activeLiveEvent ? 0.15 : 1);
+    const duration = activeLiveEvent ? 260 : 700;
+    const startedAt = performance.now();
+    let animationFrame = 0;
+    const updateVolume = (timestamp: number) => {
+      const progress = Math.min(1, (timestamp - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      audio.volume = startVolume + (targetVolume - startVolume) * eased;
+      if (progress < 1) animationFrame = window.requestAnimationFrame(updateVolume);
+    };
+    animationFrame = window.requestAnimationFrame(updateVolume);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [activeLiveEvent, payload?.device.id, radioVolume]);
 
   useEffect(() => {
     const audio = audioRef.current;

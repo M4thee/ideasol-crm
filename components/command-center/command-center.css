@@ -123,9 +123,9 @@
 }
 
 .cc-live-event-video {
+  clip-path: inset(14% 8% 15% 8% round 76px);
   height: 100%;
   inset: 0;
-  mix-blend-mode: screen;
   object-fit: contain;
   position: absolute;
   width: 100%;
@@ -148,8 +148,8 @@
 .cc-live-event-exiting .cc-live-event-copy { animation: cc-live-event-copy-out 400ms ease-in both; }
 .cc-live-event-copy span { color: #4fc4ff; font-size: 17px; font-weight: 850; letter-spacing: 0.2em; text-transform: uppercase; }
 .cc-live-event-sale .cc-live-event-copy span { color: #ffb548; }
-.cc-live-event-copy strong { color: #fff; font-size: 52px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.05; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.7); }
-.cc-live-event-copy small { color: #bfd3df; font-size: 21px; font-weight: 650; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85); }
+.cc-live-event-copy strong { color: #fff; font-size: 60px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.05; text-shadow: 0 2px 20px rgba(0, 0, 0, 0.7); }
+.cc-live-event-copy small { color: #bfd3df; font-size: 24px; font-weight: 650; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85); }
 
 @keyframes cc-live-event-copy-in {
   from { filter: blur(5px); opacity: 0; transform: translateY(12px) scale(0.97); }
