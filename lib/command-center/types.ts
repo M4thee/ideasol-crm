@@ -181,4 +181,5 @@ export type CommandCenterDevicePayload = {
   snapshot: CommandCenterSnapshot;
   metrics: CommandCenterMetrics;
   radioStation: CommandCenterRadioStationRow | null;
+  radioStations: CommandCenterRadioStationRow[];
 };

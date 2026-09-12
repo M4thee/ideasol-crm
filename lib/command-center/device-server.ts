@@ -152,23 +152,24 @@ export async function loadCommandCenterDevicePayload(rawToken: string): Promise<
     return { ok: false, error: "Dashboard nie ma opublikowanej wersji.", status: 409 };
   }
 
-  const [{ data: version, error: versionError }, { data: station }] = await Promise.all([
+  const [{ data: version, error: versionError }, { data: stations, error: stationsError }] = await Promise.all([
     supabaseAdmin
       .from("cc_dashboard_versions")
       .select("id,version_number,snapshot,published_at")
       .eq("id", dashboard.published_version_id)
       .single(),
-    device.radio_station_id
-      ? supabaseAdmin
-        .from("cc_radio_stations")
-        .select("id,name,stream_url,homepage_url,is_active,sort_order")
-        .eq("id", device.radio_station_id)
-        .eq("is_active", true)
-        .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+    supabaseAdmin
+      .from("cc_radio_stations")
+      .select("id,name,stream_url,homepage_url,is_active,sort_order")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
   ]);
   if (versionError || !version) {
     return { ok: false, error: "Nie udało się odczytać opublikowanej wersji.", status: 500 };
+  }
+  if (stationsError) {
+    return { ok: false, error: "Nie udało się odczytać listy stacji radiowych.", status: 500 };
   }
 
   try {
@@ -192,7 +193,8 @@ export async function loadCommandCenterDevicePayload(rawToken: string): Promise<
         },
         snapshot,
         metrics,
-        radioStation: station || null,
+        radioStation: stations?.find((station) => station.id === device.radio_station_id) || null,
+        radioStations: stations || [],
       },
     };
   } catch (error) {

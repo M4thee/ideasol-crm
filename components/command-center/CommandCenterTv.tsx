@@ -9,7 +9,8 @@ import type {
 } from "@/lib/command-center/types";
 import CommandCenterCanvas from "./CommandCenterCanvas";
 
-const COMMAND_CENTER_ACHIEVEMENT_VIDEO = "/animations/command-center-achievement.mp4";
+const COMMAND_CENTER_ACHIEVEMENT_VIDEO = "/animations/command-center-achievement.webm";
+const COMMAND_CENTER_ACHIEVEMENT_AUDIO = "/animations/command-center-achievement.m4a";
 
 function resolveTheme(payload: CommandCenterDevicePayload, date: Date) {
   if (payload.device.theme !== "auto") return payload.device.theme;
@@ -82,10 +83,26 @@ function DeviceActivation({ onActivated }: { onActivated: () => Promise<void> })
 }
 
 function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exiting: boolean }) {
+  const notificationAudioRef = useRef<HTMLAudioElement>(null);
   const isSale = event.kind === "sale";
   const value = isSale && event.value
     ? new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(event.value)
     : null;
+
+  useEffect(() => {
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+    audio.volume = 0.62;
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      // Brak dźwięku nie może zatrzymać ani zasłonić animacji na starszym WebView.
+    });
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [event.id]);
+
   return (
     <div className="cc-live-event-layer" aria-live="polite" role="status">
       <div className={`cc-live-event-card cc-live-event-${event.kind} ${exiting ? "cc-live-event-exiting" : "cc-live-event-entering"}`}>
@@ -93,12 +110,16 @@ function LiveEventAlert({ event, exiting }: { event: CommandCenterLiveEvent; exi
           aria-hidden="true"
           autoPlay
           className="cc-live-event-video"
-          onLoadedMetadata={(videoEvent) => {
-            videoEvent.currentTarget.volume = 0.62;
-          }}
+          muted
           playsInline
           preload="auto"
           src={COMMAND_CENTER_ACHIEVEMENT_VIDEO}
+        />
+        <audio
+          aria-hidden="true"
+          preload="auto"
+          ref={notificationAudioRef}
+          src={COMMAND_CENTER_ACHIEVEMENT_AUDIO}
         />
         <div className="cc-live-event-copy">
           <span>Nowe zdarzenie w CRM</span>
@@ -119,9 +140,14 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
   const [now, setNow] = useState(new Date());
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioVolumeOverride, setRadioVolumeOverride] = useState<number | null>(null);
+  const [radioMenuOpen, setRadioMenuOpen] = useState(false);
+  const [radioPreference, setRadioPreference] = useState<{ deviceId: string; stationId: string | null } | null>(null);
   const [activeLiveEvent, setActiveLiveEvent] = useState<CommandCenterLiveEvent | null>(null);
   const [liveEventExiting, setLiveEventExiting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const radioMenuRef = useRef<HTMLDivElement | null>(null);
+  const radioPickerButtonRef = useRef<HTMLButtonElement | null>(null);
+  const resumeRadioAfterStationChangeRef = useRef(false);
   const autoplayAttemptedStationRef = useRef<string | null>(null);
   const liveEventCursorRef = useRef<string | null>(null);
   const seenLiveEventIdsRef = useRef(new Set<string>());
@@ -134,6 +160,19 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     () => (payload?.snapshot.pages || []).filter((page) => page.enabled).sort((a, b) => a.order - b.order),
     [payload]
   );
+  const availableRadioStations = useMemo(
+    () => payload?.radioStations || (payload?.radioStation ? [payload.radioStation] : []),
+    [payload?.radioStation, payload?.radioStations]
+  );
+  const radioPreferenceReady = Boolean(payload?.device.id && radioPreference?.deviceId === payload.device.id);
+  const selectedRadioStation = useMemo(() => {
+    if (!payload) return null;
+    if (radioPreferenceReady && radioPreference?.stationId) {
+      const selected = availableRadioStations.find((station) => station.id === radioPreference.stationId);
+      if (selected) return selected;
+    }
+    return payload.radioStation || availableRadioStations[0] || null;
+  }, [availableRadioStations, payload, radioPreference?.stationId, radioPreferenceReady]);
 
   const load = useCallback(async () => {
     try {
@@ -229,9 +268,15 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     video.preload = "auto";
     video.src = COMMAND_CENTER_ACHIEVEMENT_VIDEO;
     video.load();
+    const audio = document.createElement("audio");
+    audio.preload = "auto";
+    audio.src = COMMAND_CENTER_ACHIEVEMENT_AUDIO;
+    audio.load();
     return () => {
       video.removeAttribute("src");
       video.load();
+      audio.removeAttribute("src");
+      audio.load();
     };
   }, []);
 
@@ -279,6 +324,26 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     return () => window.clearTimeout(rotationId);
   }, [activePages, pageIndex, payload?.dashboard.defaultRotationSeconds]);
 
+  useEffect(() => {
+    const deviceId = payload?.device.id;
+    if (!deviceId) return;
+    const storedStationId = window.localStorage.getItem(`cc-radio-station:${deviceId}`);
+    const stationId = storedStationId && availableRadioStations.some((station) => station.id === storedStationId)
+      ? storedStationId
+      : null;
+    setRadioPreference({ deviceId, stationId });
+  }, [availableRadioStations, payload?.device.id]);
+
+  useEffect(() => {
+    if (!radioMenuOpen) return;
+    const focusId = window.requestAnimationFrame(() => {
+      const options = radioMenuRef.current?.querySelectorAll<HTMLButtonElement>("[data-radio-station]");
+      const selectedIndex = availableRadioStations.findIndex((station) => station.id === selectedRadioStation?.id);
+      options?.[Math.max(0, selectedIndex)]?.focus();
+    });
+    return () => window.cancelAnimationFrame(focusId);
+  }, [availableRadioStations, radioMenuOpen, selectedRadioStation?.id]);
+
   const radioVolume = radioVolumeOverride ?? payload?.device.radio_volume ?? 0;
 
   useEffect(() => {
@@ -301,11 +366,52 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
 
   useEffect(() => {
     const audio = audioRef.current;
-    const stationId = payload?.radioStation?.id || null;
-    if (!audio || !payload?.device.radio_autoplay || !stationId || autoplayAttemptedStationRef.current === stationId) return;
+    const stationId = selectedRadioStation?.id || null;
+    if (!audio || !stationId || !radioPreferenceReady) return;
+    audio.load();
+    const shouldResume = resumeRadioAfterStationChangeRef.current;
+    resumeRadioAfterStationChangeRef.current = false;
+    const shouldAutoplay = payload?.device.radio_autoplay
+      && autoplayAttemptedStationRef.current !== stationId;
+    if (!shouldResume && !shouldAutoplay) {
+      setRadioPlaying(false);
+      return;
+    }
     autoplayAttemptedStationRef.current = stationId;
-    void audio.play().then(() => setRadioPlaying(true)).catch(() => undefined);
-  }, [payload?.device.radio_autoplay, payload?.radioStation?.id]);
+    void audio.play()
+      .then(() => setRadioPlaying(true))
+      .catch(() => setRadioPlaying(false));
+  }, [payload?.device.radio_autoplay, radioPreferenceReady, selectedRadioStation?.id]);
+
+  function selectRadioStation(stationId: string) {
+    const deviceId = payload?.device.id;
+    if (!deviceId || stationId === selectedRadioStation?.id) {
+      setRadioMenuOpen(false);
+      radioPickerButtonRef.current?.focus();
+      return;
+    }
+    resumeRadioAfterStationChangeRef.current = true;
+    audioRef.current?.pause();
+    setRadioPreference({ deviceId, stationId });
+    window.localStorage.setItem(`cc-radio-station:${deviceId}`, stationId);
+    setRadioMenuOpen(false);
+    window.requestAnimationFrame(() => radioPickerButtonRef.current?.focus());
+  }
+
+  function handleRadioMenuKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      setRadioMenuOpen(false);
+      radioPickerButtonRef.current?.focus();
+      return;
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-radio-station]"));
+    const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
+    if (currentIndex < 0) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowUp" ? -1 : 1;
+    options[(currentIndex + direction + options.length) % options.length]?.focus();
+  }
 
   async function toggleRadio() {
     const audio = audioRef.current;
@@ -363,14 +469,62 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
           footer={
             <div className="flex w-full items-center justify-between gap-8 text-[17px]">
               <div className="flex items-center gap-4">
-                {payload.radioStation ? (
+                {selectedRadioStation ? (
                   <>
                     <button type="button" onClick={() => void toggleRadio()} className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-500 text-xl text-white">
                       {radioPlaying ? "Ⅱ" : "▶"}
                     </button>
-                    <div><strong className="block">{payload.radioStation.name}</strong><span className="text-slate-400">Radio dla tego urządzenia · {radioVolume}%</span></div>
+                    <div
+                      className="cc-radio-picker"
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) setRadioMenuOpen(false);
+                      }}
+                    >
+                      {radioMenuOpen && (
+                        <div
+                          aria-label="Wybierz stację radiową"
+                          className="cc-radio-station-menu"
+                          onKeyDown={handleRadioMenuKeyDown}
+                          ref={radioMenuRef}
+                          role="listbox"
+                        >
+                          <span className="cc-radio-station-menu-title">Wybierz radio</span>
+                          {availableRadioStations.map((station) => (
+                            <button
+                              aria-selected={station.id === selectedRadioStation.id}
+                              className="cc-radio-station-option"
+                              data-radio-station
+                              key={station.id}
+                              onClick={() => selectRadioStation(station.id)}
+                              role="option"
+                              type="button"
+                            >
+                              <span>{station.name}</span>
+                              {station.id === selectedRadioStation.id && <b aria-hidden="true">✓</b>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        aria-expanded={radioMenuOpen}
+                        aria-haspopup="listbox"
+                        className="cc-radio-station-trigger"
+                        onClick={() => setRadioMenuOpen((open) => !open)}
+                        onKeyDown={(event) => {
+                          if (!radioMenuOpen && (event.key === "ArrowUp" || event.key === "Enter")) {
+                            event.preventDefault();
+                            setRadioMenuOpen(true);
+                          }
+                        }}
+                        ref={radioPickerButtonRef}
+                        type="button"
+                      >
+                        <span><strong>{selectedRadioStation.name}</strong><small>Wybierz stację · {radioVolume}%</small></span>
+                        <b aria-hidden="true">⌃</b>
+                      </button>
+                    </div>
                     <label className="flex items-center gap-3 text-sm text-slate-400"><span>Głośność</span><input aria-label="Głośność radia" className="w-32 accent-sky-500" type="range" min={0} max={100} value={radioVolume} onChange={(event) => setRadioVolumeOverride(Number(event.target.value))} /></label>
-                    <audio ref={audioRef} src={payload.radioStation.stream_url} preload="none" />
+                    <audio ref={audioRef} src={selectedRadioStation.stream_url} preload="none" />
                   </>
                 ) : <span className="text-slate-400">Radio wyłączone na tym urządzeniu</span>}
               </div>
