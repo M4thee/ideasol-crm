@@ -92,9 +92,13 @@ function LiveEventAlert({
 }) {
   const notificationAudioRef = useRef<HTMLAudioElement>(null);
   const isSale = event.kind === "sale";
-  const value = isSale && event.value
-    ? new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(event.value)
-    : null;
+  const formatPower = (value: number) => new Intl.NumberFormat("pl-PL", {
+    maximumFractionDigits: 2,
+  }).format(value);
+  const saleDetails = [
+    event.pvPowerKwp && event.pvPowerKwp > 0 ? `${formatPower(event.pvPowerKwp)} kWp` : null,
+    event.storageCapacityKwh && event.storageCapacityKwh > 0 ? `${formatPower(event.storageCapacityKwh)} kWh` : null,
+  ].filter((value): value is string => Boolean(value)).join(" + ");
 
   useEffect(() => {
     const audio = notificationAudioRef.current;
@@ -126,9 +130,9 @@ function LiveEventAlert({
           src={COMMAND_CENTER_ACHIEVEMENT_AUDIO}
         />
         <div className="cc-live-event-copy">
-          <span>Nowe zdarzenie w CRM</span>
-          <strong>{isSale ? "Nowa sprzedaż!" : "Nowy lead!"}</strong>
-          <small>{value ? `Wartość sprzedaży: ${value}` : "Nowa szansa trafiła do CRM"}</small>
+          <strong>{isSale ? "NOWA SPRZEDAŻ W CRM!" : "NOWY LEAD W CRM!"}</strong>
+          <span>{isSale ? saleDetails || "Sprzedaż dodana do CRM" : event.campaignName || "Lead doradcy"}</span>
+          <small>{isSale ? event.advisorName || "Nieprzypisany doradca" : `przypisano do: ${event.advisorName || "Nieprzypisany doradca"}`}</small>
         </div>
       </div>
     </div>
@@ -426,6 +430,10 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     }
   }
 
+  function changePage(direction: -1 | 1) {
+    setPageIndex((current) => (current + direction + activePages.length) % activePages.length);
+  }
+
   if (activationRequired && !token) {
     return <DeviceActivation onActivated={load} />;
   }
@@ -442,7 +450,8 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     );
   }
 
-  const page = activePages[pageIndex % activePages.length];
+  const currentPageIndex = pageIndex % activePages.length;
+  const page = activePages[currentPageIndex];
   const theme = resolveTheme(payload, now);
   return (
     <main className="relative h-dvh w-dvw overflow-hidden bg-black">
@@ -525,10 +534,33 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
                   </>
                 ) : <span className="text-slate-400">Radio wyłączone na tym urządzeniu</span>}
               </div>
-              <div className="flex items-center gap-6 text-slate-400">
-                <span>Ekran {pageIndex + 1}/{activePages.length}</span>
+              <div className="flex items-center gap-5 text-slate-400">
                 <span>Wersja {payload.dashboard.versionNumber}</span>
                 <span className="h-2 w-2 rounded-full bg-emerald-400" aria-label="Urządzenie online" />
+                <div aria-label="Zmień ekran dashboardu" className="flex items-center gap-2" role="group">
+                  <button
+                    aria-label="Poprzedni ekran"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-600 bg-slate-900/70 text-2xl font-black text-white outline-none hover:border-sky-400 hover:bg-sky-500 focus-visible:border-sky-300 focus-visible:ring-2 focus-visible:ring-sky-300 disabled:opacity-35"
+                    disabled={activePages.length < 2}
+                    onClick={() => changePage(-1)}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <span className="min-w-36 text-center">
+                    <strong className="block max-w-48 truncate text-sm text-white">{page.name}</strong>
+                    <small className="text-xs text-slate-400">Ekran {currentPageIndex + 1}/{activePages.length}</small>
+                  </span>
+                  <button
+                    aria-label="Następny ekran"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-600 bg-slate-900/70 text-2xl font-black text-white outline-none hover:border-sky-400 hover:bg-sky-500 focus-visible:border-sky-300 focus-visible:ring-2 focus-visible:ring-sky-300 disabled:opacity-35"
+                    disabled={activePages.length < 2}
+                    onClick={() => changePage(1)}
+                    type="button"
+                  >
+                    ›
+                  </button>
+                </div>
               </div>
             </div>
           }

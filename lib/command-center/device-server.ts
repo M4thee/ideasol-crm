@@ -34,6 +34,61 @@ function numericValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonRecord
+    : null;
+}
+
+function valueAtPath(source: unknown, path: string[]) {
+  return path.reduce<unknown>((current, key) => asRecord(current)?.[key], source);
+}
+
+function firstPositiveNumber(source: unknown, paths: string[][]) {
+  for (const path of paths) {
+    const value = numericValue(valueAtPath(source, path));
+    if (value > 0) return value;
+  }
+  return 0;
+}
+
+function saleTechnicalDetails(offerSnapshot: unknown) {
+  return {
+    pvPowerKwp: firstPositiveNumber(offerSnapshot, [
+      ["pv_power_kw"],
+      ["pvPowerKw"],
+      ["offer_data", "pv_power_kw"],
+      ["offer_data", "result", "pvPowerKw"],
+    ]),
+    storageCapacityKwh: firstPositiveNumber(offerSnapshot, [
+      ["storage_capacity_kwh"],
+      ["storageCapacityKwh"],
+      ["offer_data", "storage_capacity_kwh"],
+      ["offer_data", "result", "storageCapacityKwh"],
+    ]),
+  };
+}
+
+function normalize(value: unknown) {
+  return String(value || "").trim().toLocaleLowerCase("pl-PL");
+}
+
+function leadCampaignName(leadSource: string | null, integrationName?: string | null) {
+  const source = normalize(leadSource);
+  if (!source) return "Lead doradcy";
+  if (source === "kalkulatorme") return "Kalkulator ME";
+  if (source === "import ze zdjęcia") return "Załatwione z roboty";
+  if (source !== "meta ads") return leadSource?.trim() || "Lead doradcy";
+
+  const name = integrationName?.trim() || "";
+  const normalizedName = normalize(name);
+  if (normalizedName.includes("arimr")) return "ARiMR";
+  if (normalizedName.includes("magazyn") || normalizedName.includes("kwh")) return "ME";
+  return name.split("|")[0]?.trim() || "Meta Ads";
+}
+
 function parseCommandCenterTestEvent(settings: unknown): CommandCenterLiveEvent | null {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
   const candidate = (settings as Record<string, unknown>).testNotification;
@@ -48,7 +103,20 @@ function parseCommandCenterTestEvent(settings: unknown): CommandCenterLiveEvent 
     id: `test:${id}`,
     kind,
     occurredAt,
-    ...(kind === "sale" ? { value: numericValue(record.value) } : {}),
+    advisorName: typeof record.advisorName === "string" && record.advisorName.trim()
+      ? record.advisorName.trim()
+      : "Doradca testowy",
+    ...(kind === "lead"
+      ? {
+          campaignName: typeof record.campaignName === "string" && record.campaignName.trim()
+            ? record.campaignName.trim()
+            : "Kampania testowa",
+        }
+      : {
+          value: numericValue(record.value),
+          pvPowerKwp: numericValue(record.pvPowerKwp) || 8.37,
+          storageCapacityKwh: numericValue(record.storageCapacityKwh) || 28.42,
+        }),
   };
 }
 
@@ -83,7 +151,7 @@ export async function loadCommandCenterLiveEvents(
   const [{ data: leads, error: leadsError }, { data: sales, error: salesError }] = await Promise.all([
     supabaseAdmin
       .from("clients")
-      .select("id,created_at")
+      .select("id,created_at,lead_source,assigned_user_id")
       .gt("created_at", lowerBoundIso)
       .lte("created_at", cursor)
       .order("created_at", { ascending: true })
@@ -91,7 +159,7 @@ export async function loadCommandCenterLiveEvents(
       .limit(25),
     supabaseAdmin
       .from("sales")
-      .select("id,created_at,contract_value,status")
+      .select("id,created_at,contract_value,status,seller_id,offer_snapshot")
       .gt("created_at", lowerBoundIso)
       .lte("created_at", cursor)
       .order("created_at", { ascending: true })
@@ -103,25 +171,83 @@ export async function loadCommandCenterLiveEvents(
     return { ok: false, error: "Nie udało się pobrać zdarzeń live.", status: 500 };
   }
 
+  const leadRows = leads || [];
+  const saleRows = (sales || []).filter(isCountedCommandCenterSale);
+  const profileIds = Array.from(new Set([
+    ...leadRows.map((lead) => lead.assigned_user_id),
+    ...saleRows.map((sale) => sale.seller_id),
+  ].filter((id): id is string => Boolean(id))));
+  const metaClientIds = leadRows
+    .filter((lead) => normalize(lead.lead_source) === "meta ads")
+    .map((lead) => lead.id);
+
+  const [{ data: profiles, error: profilesError }, { data: metaLeads, error: metaLeadsError }] = await Promise.all([
+    profileIds.length
+      ? supabaseAdmin.from("profiles").select("id,display_name").in("id", profileIds)
+      : Promise.resolve({ data: [], error: null }),
+    metaClientIds.length
+      ? supabaseAdmin.from("meta_leads").select("client_id,integration_id,created_at").in("client_id", metaClientIds).order("created_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (profilesError || metaLeadsError) {
+    console.error("Command Center live event details error:", profilesError || metaLeadsError);
+    return { ok: false, error: "Nie udało się pobrać szczegółów zdarzeń live.", status: 500 };
+  }
+
+  const integrationIds = Array.from(new Set((metaLeads || [])
+    .map((metaLead) => metaLead.integration_id)
+    .filter((id): id is string => Boolean(id))));
+  const { data: integrations, error: integrationsError } = integrationIds.length
+    ? await supabaseAdmin.from("lead_integrations").select("id,campaign_name").in("id", integrationIds)
+    : { data: [], error: null };
+  if (integrationsError) {
+    console.error("Command Center live event campaign error:", integrationsError);
+    return { ok: false, error: "Nie udało się pobrać kampanii zdarzenia live.", status: 500 };
+  }
+
+  const profileNames = new Map((profiles || []).map((profile) => [profile.id, profile.display_name?.trim() || "Doradca"]));
+  const integrationNames = new Map((integrations || []).map((integration) => [integration.id, integration.campaign_name]));
+  const integrationByClient = new Map<string, string | null>();
+  (metaLeads || []).forEach((metaLead) => {
+    if (metaLead.client_id && !integrationByClient.has(metaLead.client_id)) {
+      integrationByClient.set(metaLead.client_id, metaLead.integration_id);
+    }
+  });
+
   const events: CommandCenterLiveEvent[] = [
     ...(testEvent
       && new Date(testEvent.occurredAt) > lowerBound
       && new Date(testEvent.occurredAt) <= cursorDate
       ? [testEvent]
       : []),
-    ...(leads || []).map((lead) => ({
-      id: `lead:${lead.id}`,
-      kind: "lead" as const,
-      occurredAt: lead.created_at,
-    })),
-    ...(sales || [])
-      .filter(isCountedCommandCenterSale)
-      .map((sale) => ({
+    ...leadRows.map((lead) => {
+      const integrationId = integrationByClient.get(lead.id);
+      return {
+        id: `lead:${lead.id}`,
+        kind: "lead" as const,
+        occurredAt: lead.created_at,
+        campaignName: leadCampaignName(
+          lead.lead_source,
+          integrationId ? integrationNames.get(integrationId) : null
+        ),
+        advisorName: lead.assigned_user_id
+          ? profileNames.get(lead.assigned_user_id) || "Nieprzypisany doradca"
+          : "Nieprzypisany doradca",
+      };
+    }),
+    ...saleRows.map((sale) => {
+      const technicalDetails = saleTechnicalDetails(sale.offer_snapshot);
+      return {
         id: `sale:${sale.id}`,
         kind: "sale" as const,
         occurredAt: sale.created_at,
         value: numericValue(sale.contract_value),
-      })),
+        advisorName: sale.seller_id
+          ? profileNames.get(sale.seller_id) || "Nieprzypisany doradca"
+          : "Nieprzypisany doradca",
+        ...technicalDetails,
+      };
+    }),
   ]
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id))
     .slice(-25);

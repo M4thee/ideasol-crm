@@ -282,9 +282,9 @@
 }
 
 .cc-live-event-entering .cc-live-event-copy { animation: cc-live-event-copy-in 480ms 330ms cubic-bezier(0.16, 1, 0.3, 1) both; }
-.cc-live-event-copy span { color: #4fc4ff; font-size: 15px; font-weight: 850; letter-spacing: 0.22em; text-transform: uppercase; }
+.cc-live-event-copy span { color: #4fc4ff; font-size: 28px; font-weight: 850; letter-spacing: 0.02em; line-height: 1.1; }
 .cc-live-event-sale .cc-live-event-copy span { color: #fbbf24; }
-.cc-live-event-copy strong { color: #fff; font-size: 52px; font-weight: 900; letter-spacing: -0.035em; line-height: 1.02; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.4); }
+.cc-live-event-copy strong { color: #fff; font-size: 44px; font-weight: 900; letter-spacing: -0.025em; line-height: 1.02; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.4); }
 .cc-live-event-copy small { color: #bfd3df; font-size: 20px; font-weight: 650; }
 .cc-live-event-theme-light .cc-live-event-copy strong { color: #0b2238; text-shadow: 0 2px 14px rgba(255, 255, 255, 0.75); }
 .cc-live-event-theme-light .cc-live-event-copy small { color: #38556c; }

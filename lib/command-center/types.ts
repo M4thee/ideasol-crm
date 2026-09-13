@@ -164,6 +164,10 @@ export type CommandCenterLiveEvent = {
   kind: "lead" | "sale";
   occurredAt: string;
   value?: number;
+  campaignName?: string;
+  advisorName?: string;
+  pvPowerKwp?: number;
+  storageCapacityKwh?: number;
 };
 
 export type CommandCenterLiveEventsPayload = {
