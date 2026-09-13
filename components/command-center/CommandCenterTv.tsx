@@ -147,7 +147,6 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
   const [scale, setScale] = useState(1);
   const [now, setNow] = useState(new Date());
   const [radioPlaying, setRadioPlaying] = useState(false);
-  const [radioVolumeOverride, setRadioVolumeOverride] = useState<number | null>(null);
   const [radioMenuOpen, setRadioMenuOpen] = useState(false);
   const [radioPreference, setRadioPreference] = useState<{ deviceId: string; stationId: string | null } | null>(null);
   const [activeLiveEvent, setActiveLiveEvent] = useState<CommandCenterLiveEvent | null>(null);
@@ -345,13 +344,11 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     return () => window.cancelAnimationFrame(focusId);
   }, [availableRadioStations, radioMenuOpen, selectedRadioStation?.id]);
 
-  const radioVolume = radioVolumeOverride ?? payload?.device.radio_volume ?? 0;
-
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !payload?.device.id) return;
     const startVolume = audio.volume;
-    const targetVolume = (radioVolume / 100) * (activeLiveEvent ? 0.15 : 1);
+    const targetVolume = activeLiveEvent ? 0.15 : 1;
     const duration = activeLiveEvent ? 260 : 700;
     const startedAt = performance.now();
     let animationFrame = 0;
@@ -363,7 +360,7 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
     };
     animationFrame = window.requestAnimationFrame(updateVolume);
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [activeLiveEvent, payload?.device.id, radioVolume]);
+  }, [activeLiveEvent, payload?.device.id]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -525,11 +522,10 @@ export default function CommandCenterTv({ token, buildVersion }: { token?: strin
                         ref={radioPickerButtonRef}
                         type="button"
                       >
-                        <span><strong>{selectedRadioStation.name}</strong><small>Wybierz stację · {radioVolume}%</small></span>
+                        <span><strong>{selectedRadioStation.name}</strong><small>Wybierz stację · 100%</small></span>
                         <b aria-hidden="true">⌃</b>
                       </button>
                     </div>
-                    <label className="flex items-center gap-3 text-sm text-slate-400"><span>Głośność</span><input aria-label="Głośność radia" className="w-32 accent-sky-500" type="range" min={0} max={100} value={radioVolume} onChange={(event) => setRadioVolumeOverride(Number(event.target.value))} /></label>
                     <audio ref={audioRef} src={selectedRadioStation.stream_url} preload="none" />
                   </>
                 ) : <span className="text-slate-400">Radio wyłączone na tym urządzeniu</span>}
