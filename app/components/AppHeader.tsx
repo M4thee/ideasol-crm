@@ -98,14 +98,6 @@ type InfobarRow = {
   link_url: string | null;
 };
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-};
-
 type SearchableClient = {
   id: string;
   public_id?: string | null;
@@ -221,9 +213,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
   const [toastNotification, setToastNotification] = useState<HeaderNotification | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>("auto");
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalledPwa, setIsInstalledPwa] = useState(false);
-  const [isSafariBrowser, setIsSafariBrowser] = useState(false);
   const [infobars, setInfobars] = useState<InfobarItem[]>([]);
   const [closedInfobarIds, setClosedInfobarIds] = useState<string[]>([]);
   const knownNotificationIdsRef = useRef<Set<string>>(new Set());
@@ -395,62 +384,6 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
       mediaQuery.removeEventListener("change", handleSystemThemeChange);
     };
   }, []);
-
-  useEffect(() => {
-    function updateInstalledState() {
-      const isStandalone =
-        window.matchMedia("(display-mode: standalone)").matches ||
-        (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-
-      setIsInstalledPwa(isStandalone);
-    }
-
-    function handleBeforeInstallPrompt(event: Event) {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    }
-
-    function handleAppInstalled() {
-      setIsInstalledPwa(true);
-      setInstallPromptEvent(null);
-    }
-
-    updateInstalledState();
-
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    setIsSafariBrowser(
-      userAgent.includes("safari") &&
-        !userAgent.includes("chrome") &&
-        !userAgent.includes("chromium") &&
-        !userAgent.includes("crios") &&
-        !userAgent.includes("edg") &&
-        !userAgent.includes("android")
-    );
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
-
-  async function installOfflineCalculator() {
-    if (!installPromptEvent) {
-      router.push("/calculator-app?install=1");
-      return;
-    }
-
-    await installPromptEvent.prompt();
-    const choice = await installPromptEvent.userChoice.catch(() => null);
-
-    if (choice?.outcome === "accepted") {
-      setIsInstalledPwa(true);
-    }
-
-    setInstallPromptEvent(null);
-  }
 
   function playNotificationSound() {
     try {
@@ -1072,44 +1005,23 @@ const canManageUsers = profile?.role === "admin";
           </div>
 
           {authChecked && profile && (
-            <>
-              <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 sm:text-xs">
-                <span className="truncate max-w-[220px] sm:max-w-none">
-                  Witaj, {profile.display_name || profile.email}
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 sm:text-xs">
+              <span className="truncate max-w-[220px] sm:max-w-none">
+                Witaj, {profile.display_name || profile.email}
+              </span>
+
+              {profile.role && (
+                <span className="text-slate-400">
+                  • {roleLabels[profile.role] || profile.role}
                 </span>
-
-                {profile.role && (
-                  <span className="text-slate-400">
-                    • {roleLabels[profile.role] || profile.role}
-                  </span>
-                )}
-
-                {profile.user_number && (
-                  <span className="text-slate-400">
-                    • UID #{profile.user_number}
-                  </span>
-                )}
-              </p>
-
-              {installPromptEvent && !isInstalledPwa && (
-                <button
-                  type="button"
-                  onClick={installOfflineCalculator}
-                  className="mt-1 inline-block text-left text-[10px] font-semibold text-emerald-700 transition hover:text-emerald-600 hover:underline sm:text-[11px]"
-                >
-                  Zainstaluj kalkulator offline na swój pulpit ⬇
-                </button>
               )}
 
-              {!installPromptEvent && !isInstalledPwa && isSafariBrowser && (
-                <Link
-                  href="/calculator-app?install=1"
-                  className="mt-1 inline-block text-[10px] font-semibold text-slate-500 transition hover:text-slate-700 hover:underline sm:text-[11px]"
-                >
-                  Jak zainstalować kalkulator offline w Safari? ⬇
-                </Link>
+              {profile.user_number && (
+                <span className="text-slate-400">
+                  • UID #{profile.user_number}
+                </span>
               )}
-            </>
+            </p>
           )}
         </div>
 

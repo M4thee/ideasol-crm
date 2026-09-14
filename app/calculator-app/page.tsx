@@ -268,13 +268,6 @@ type OfflineSyncStatusPayload = OfflineSyncBannerState & {
   updatedAt: string;
 };
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-};
 type OfflineOfferQueueItem = {
   id: string;
   createdAt: string;
@@ -429,7 +422,7 @@ function writeCachedCalculatorProfile(profile: UserProfile, email: string) {
       })
     );
   } catch {
-    // Cache profilu jest tylko dodatkiem do PWA offline.
+    // Cache profilu jest tylko dodatkiem do trybu offline.
   }
 }
 function createOfflineQueueId() {
@@ -666,10 +659,6 @@ export default function Home() {
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
   const [syncingOfflineOffers, setSyncingOfflineOffers] = useState(false);
   const [offlineSyncBanner, setOfflineSyncBanner] = useState<OfflineSyncBannerState | null>(null);
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showInstallInstructions, setShowInstallInstructions] = useState(false);
-  const [isInstalledPwa, setIsInstalledPwa] = useState(false);
-  const installRequestedFromUrlRef = useRef(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -816,65 +805,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    function updateInstalledState() {
-      const isStandalone =
-        window.matchMedia("(display-mode: standalone)").matches ||
-        (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
-
-      setIsInstalledPwa(isStandalone);
-    }
-
-    function handleBeforeInstallPrompt(event: Event) {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    }
-
-    function handleAppInstalled() {
-      setIsInstalledPwa(true);
-      setInstallPromptEvent(null);
-      setShowInstallInstructions(false);
-    }
-
-    updateInstalledState();
-
-    const params = new URLSearchParams(window.location.search);
-
-    if (params.get("install") === "1") {
-      installRequestedFromUrlRef.current = true;
-      setShowInstallInstructions(true);
-    }
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    window.addEventListener("appinstalled", handleAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", handleAppInstalled);
-    };
-  }, []);
-
-  async function installCalculatorApp() {
-    if (isInstalledPwa) {
-      setShowInstallInstructions(true);
-      return;
-    }
-
-    if (!installPromptEvent) {
-      setShowInstallInstructions(true);
-      return;
-    }
-
-    await installPromptEvent.prompt();
-    const choice = await installPromptEvent.userChoice.catch(() => null);
-
-    if (choice?.outcome === "accepted") {
-      setIsInstalledPwa(true);
-      setShowInstallInstructions(false);
-    }
-
-    setInstallPromptEvent(null);
-  }
   useEffect(() => {
     function updateOnlineStatus() {
       const online = isCalculatorOnline();
@@ -3076,62 +3006,6 @@ IdeaSol`;
           >
             {offlineSyncBanner.message}
           </div>
-        )}
-
-        {showInstallInstructions && (
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                  PWA offline
-                </p>
-                <h2 className="mt-1 text-lg font-bold text-slate-950 dark:text-white">
-                  Kalkulator IdeaSol w wersji offline
-                </h2>
-                <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600 dark:text-slate-300 sm:text-sm">
-                  {isInstalledPwa
-                    ? "Aplikacja jest już uruchomiona w trybie zainstalowanym."
-                    : installPromptEvent
-                      ? "Przeglądarka jest gotowa do instalacji kalkulatora jako aplikacji na pulpicie."
-                      : "Ta przeglądarka nie udostępnia automatycznej instalacji. Skorzystaj z krótkiej instrukcji poniżej."}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {installPromptEvent && !isInstalledPwa && (
-                  <button
-                    type="button"
-                    onClick={installCalculatorApp}
-                    className="rounded-2xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 sm:text-sm"
-                  >
-                    Zainstaluj kalkulator ⬇
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setShowInstallInstructions(false)}
-                  className="rounded-2xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-                >
-                  Zamknij
-                </button>
-              </div>
-            </div>
-
-            {!installPromptEvent && !isInstalledPwa && (
-              <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300 sm:text-xs">
-                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
-                  🌐 Chrome/Edge: ikona instalacji w pasku adresu
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
-                  🧭 Safari: Plik → Dodaj do Docka
-                </span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800">
-                  📱 iOS: Udostępnij → Do ekranu początkowego
-                </span>
-              </div>
-            )}
-          </section>
         )}
 
         {(isOffline || queuedOfferCount > 0) && (

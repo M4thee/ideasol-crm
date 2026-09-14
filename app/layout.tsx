@@ -16,12 +16,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "IdeaSol CRM",
   description: "",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: {
-    capable: true,
-    title: "IdeaSol Kalkulator",
-    statusBarStyle: "default",
-  },
   icons: {
     icon: "/logo.png",
     shortcut: "/logo.png",
@@ -45,16 +39,56 @@ const themeInitScript = `
   })();
 `;
 
-const serviceWorkerRegistrationScript = `
+const legacyPwaCleanupScript = `
   (function () {
     if (!("serviceWorker" in navigator)) {
       return;
     }
 
     window.addEventListener("load", function () {
-      navigator.serviceWorker.register("/sw.js").catch(function (error) {
-        console.warn("Nie udało się zarejestrować service workera IdeaSol", error);
-      });
+      navigator.serviceWorker.getRegistrations()
+        .then(function (registrations) {
+          return Promise.all(
+            registrations.map(function (registration) {
+              var worker = registration.active || registration.waiting || registration.installing;
+
+              if (!worker) {
+                return false;
+              }
+
+              try {
+                if (new URL(worker.scriptURL).pathname === "/sw.js") {
+                  return registration.unregister();
+                }
+              } catch (error) {
+                console.warn("Nie udało się rozpoznać starego service workera IdeaSol", error);
+              }
+
+              return false;
+            })
+          );
+        })
+        .catch(function (error) {
+          console.warn("Nie udało się usunąć starego service workera IdeaSol", error);
+        });
+
+      if ("caches" in window) {
+        caches.keys()
+          .then(function (cacheNames) {
+            return Promise.all(
+              cacheNames
+                .filter(function (cacheName) {
+                  return cacheName.indexOf("ideasol-calculator-app-") === 0;
+                })
+                .map(function (cacheName) {
+                  return caches.delete(cacheName);
+                })
+            );
+          })
+          .catch(function (error) {
+            console.warn("Nie udało się usunąć starego cache PWA IdeaSol", error);
+          });
+      }
     });
   })();
 `;
@@ -71,8 +105,8 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-slate-100 antialiased dark:bg-slate-950`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-        <script dangerouslySetInnerHTML={{ __html: serviceWorkerRegistrationScript }} />
+        <script id="theme-init" dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script id="legacy-pwa-cleanup" dangerouslySetInnerHTML={{ __html: legacyPwaCleanupScript }} />
       </head>
       <body className="min-h-screen w-full bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         <AppShell>{children}</AppShell>
