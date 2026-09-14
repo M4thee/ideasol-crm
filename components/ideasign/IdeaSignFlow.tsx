@@ -631,7 +631,7 @@ export default function IdeaSignFlow({ demo = false }: { demo?: boolean }) {
             )}
 
             {step === "error" && (
-              <div className="p-10 text-center sm:p-16"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-2xl text-red-700">!</div><h1 className="mt-5 text-3xl font-black">Nie udało się otworzyć umowy</h1><p className="mx-auto mt-3 max-w-lg leading-7 text-slate-600">{error || "Link wygasł albo został już użyty."}</p><p className="mt-5 text-sm font-semibold text-slate-400">Skontaktuj się z opiekunem IdeaSol, aby otrzymać nowy link.</p></div>
+              <div className="p-10 text-center sm:p-16"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-2xl text-red-700">!</div><h1 className="mt-5 text-3xl font-black">Nie udało się otworzyć umowy</h1><p className="mx-auto mt-3 max-w-lg leading-7 text-slate-600">{error || "Link wygasł albo proces został zakończony."}</p><p className="mt-5 text-sm font-semibold text-slate-400">Skontaktuj się z opiekunem IdeaSol, aby otrzymać nowy link.</p></div>
             )}
           </div>
         </section>

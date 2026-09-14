@@ -12,6 +12,10 @@ import type {
 } from "./types";
 import { expireIdeaSignSession } from "./lifecycle";
 import {
+  canExchangeIdeaSignLink,
+  type IdeaSignLinkSignerStatus,
+} from "./link-access";
+import {
   IDEA_SIGN_ACCESS_COOKIE,
   IDEA_SIGN_ACCESS_TTL_SECONDS,
   IDEA_SIGN_CSRF_COOKIE,
@@ -60,7 +64,7 @@ type SignerRow = {
   name: string;
   email: string;
   phone: string;
-  status: "oczekuje" | "otwarty" | "uwierzytelniony" | "podpisany";
+  status: IdeaSignLinkSignerStatus;
   signed_at: string | null;
 };
 
@@ -183,7 +187,7 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
   const tokenHash = sha256(token);
   const { data: signer, error } = await supabaseAdmin
     .from("contract_signature_signers")
-    .select("id, signature_session_id, link_expires_at, link_consumed_at")
+    .select("id, signature_session_id, status, link_expires_at, link_consumed_at, opened_at")
     .eq("link_token_hash", tokenHash)
     .maybeSingle();
 
@@ -203,14 +207,12 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
     await expireIdeaSignSession({ sessionId: signature.id, saleId: signature.sale_id });
   }
 
-  if (
-    error ||
-    !signature || !signer ||
-    signer.link_consumed_at ||
-    isExpired(signer.link_expires_at) ||
-    isExpired(signature.expires_at) ||
-    ["zawarta", "wygasła", "anulowana"].includes(signature.status)
-  ) {
+  if (error || !signature || !signer || !canExchangeIdeaSignLink({
+    signerStatus: signer.status as IdeaSignLinkSignerStatus,
+    signerExpiresAt: signer.link_expires_at,
+    sessionStatus: signature.status as IdeaSignStatus,
+    sessionExpiresAt: signature.expires_at,
+  })) {
     return null;
   }
 
@@ -233,16 +235,19 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
   if (accessError) throw new Error(`Nie udało się utworzyć sesji IdeaSign: ${accessError.message}`);
 
   const now = new Date().toISOString();
+  const previouslyOpened = Boolean(signer.opened_at || signer.link_consumed_at);
   const { data: exchanged, error: exchangeError } = await supabaseAdmin
     .from("contract_signature_signers")
     .update({
-      link_consumed_at: now,
-      opened_at: now,
-      status: "otwarty",
+      opened_at: signer.opened_at || now,
+      ...(signer.status === "oczekuje" ? { status: "otwarty" } : {}),
       updated_at: now,
     })
     .eq("id", signer.id)
-    .is("link_consumed_at", null)
+    .eq("signature_session_id", signature.id)
+    .eq("link_token_hash", tokenHash)
+    .eq("status", signer.status)
+    .gt("link_expires_at", now)
     .select("id")
     .maybeSingle();
 
@@ -251,6 +256,28 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
       .from("contract_signature_access_sessions")
       .update({ invalidated_at: now })
       .eq("id", accessSessionId);
+    return null;
+  }
+
+  const { data: currentSignature, error: currentSignatureError } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .select("status, expires_at")
+    .eq("id", signature.id)
+    .maybeSingle();
+
+  if (currentSignatureError || !currentSignature || !canExchangeIdeaSignLink({
+    signerStatus: signer.status as IdeaSignLinkSignerStatus,
+    signerExpiresAt: signer.link_expires_at,
+    sessionStatus: currentSignature.status as IdeaSignStatus,
+    sessionExpiresAt: currentSignature.expires_at,
+  })) {
+    await supabaseAdmin
+      .from("contract_signature_access_sessions")
+      .update({ invalidated_at: now })
+      .eq("id", accessSessionId);
+    if (currentSignature && isExpired(currentSignature.expires_at)) {
+      await expireIdeaSignSession({ sessionId: signature.id, saleId: signature.sale_id });
+    }
     return null;
   }
 
@@ -265,7 +292,7 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
     signerId: signer.id,
     eventType: "secure_link_exchanged",
     request,
-    eventData: { accessSessionId },
+    eventData: { accessSessionId, previouslyOpened },
   });
 
   return { accessToken, csrfToken, accessSessionId, expiresAt };

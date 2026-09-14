@@ -975,7 +975,7 @@ export async function authorizeAndSendIdeaSignSession(params: {
       from,
       to: signer.signerEmail,
       subject: `Umowa ${sale.contract_number || "IdeaSol"} — bezpieczne zawarcie w IdeaSign`,
-      text: `Dzień dobry,\n\nIdeaSol przesłało umowę do zapoznania i zawarcia. Twój bezpieczny, jednorazowy link jest ważny przez 7 dni:\n${signer.url}\n\nKażda osoba podpisująca korzysta z własnego linku i kodów SMS. Nie przekazuj tego linku ani kodów drugiej osobie.\n\nIdeaSol Sp. z o.o.`,
+      text: `Dzień dobry,\n\nIdeaSol przesłało umowę do zapoznania i zawarcia. Twój bezpieczny link jest ważny przez 7 dni i możesz otwierać go wielokrotnie, dopóki nie podpiszesz umowy lub proces nie zostanie anulowany:\n${signer.url}\n\nKażda osoba podpisująca korzysta z własnego linku i kodów SMS. Nie przekazuj tego linku ani kodów drugiej osobie.\n\nIdeaSol Sp. z o.o.`,
       html: renderIdeaSignInvitationEmail({
         signerName: signer.signerName,
         contractNumber: sale.contract_number || "IdeaSol",

@@ -125,12 +125,12 @@ export function renderIdeaSignInvitationEmail(params: {
     eyebrow: "Dokumenty gotowe do podpisu",
     title: `Umowa ${params.contractNumber} czeka na Twój podpis`,
     accentColor: "#0b79e5",
-    contentHtml: `<p style="margin:0 0 14px;">Dzień dobry, <strong style="color:#0f172a;font-weight:500;">${signerName}</strong>,</p><p style="margin:0;">IdeaSol przygotowało dla Ciebie umowę <strong style="color:#0f172a;font-weight:500;">${contractNumber}</strong>. Otwórz bezpieczny proces IdeaSign, zapoznaj się z dokumentami i potwierdź je kodem SMS.</p>`,
+    contentHtml: `<p style="margin:0 0 14px;">Dzień dobry, <strong style="color:#0f172a;font-weight:500;">${signerName}</strong>,</p><p style="margin:0;">IdeaSol przygotowało dla Ciebie umowę <strong style="color:#0f172a;font-weight:500;">${contractNumber}</strong>. Otwórz bezpieczny proces IdeaSign, zapoznaj się z dokumentami i potwierdź je kodem SMS. Możesz wracać do procesu tym samym linkiem przez 7 dni, dopóki nie podpiszesz umowy lub proces nie zostanie anulowany.</p>`,
     action: { label: "Otwórz umowę w IdeaSign", url: params.signUrl },
     details: [
       { label: "Ważność linku", value: "7 dni od wysłania wiadomości" },
       { label: "Weryfikacja", value: "Dwa niezależne kody SMS" },
-      { label: "Bezpieczeństwo", value: "Jednorazowy link przypisany wyłącznie do Ciebie" },
+      { label: "Bezpieczeństwo", value: "Indywidualny link przypisany wyłącznie do Ciebie" },
     ],
     noticeHtml: `<strong style="color:#5f3700;font-weight:500;">Ważne:</strong> każda osoba podpisująca otrzymuje własny link i własne kody SMS. Nie przekazuj tej wiadomości ani kodów drugiej osobie.`,
   });

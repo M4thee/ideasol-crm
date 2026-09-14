@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   const exchanged = await exchangeIdeaSignLink(token, request);
   if (!exchanged) {
     return NextResponse.json(
-      { ok: false, error: "Link został już użyty, wygasł albo proces został zakończony." },
+      { ok: false, error: "Link wygasł, podpis został już złożony albo proces został zakończony." },
       { status: 410 }
     );
   }
@@ -48,4 +48,3 @@ export async function POST(request: Request) {
 
   return response;
 }
-
