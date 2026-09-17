@@ -64,7 +64,13 @@ export default function AppShell({ children }: AppShellProps) {
   const isCommandCenterTv =
     pathname === "/command-center/tv" || pathname?.startsWith("/command-center/tv/");
   const isCommandCenterDemo = process.env.NODE_ENV === "development" && pathname === "/command-center/demo";
-  const isPublicStandaloneApp = isCalculatorApp || isIdeaSignApp || isCommandCenterTv || isCommandCenterDemo;
+  const isPrivacyPolicy = pathname?.startsWith("/privacy");
+  const isPublicStandaloneApp =
+    isCalculatorApp ||
+    isIdeaSignApp ||
+    isCommandCenterTv ||
+    isCommandCenterDemo ||
+    isPrivacyPolicy;
 
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
