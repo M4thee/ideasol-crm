@@ -12,15 +12,15 @@ import {
   sendTeamsGeneralMetaLeadNotification,
 } from "@/lib/microsoftTeams";
 import { buildTeamsGeneralMetaLeadMessage } from "@/lib/metaLeadGeneralNotification";
+import {
+  normalizeMetaLead,
+  type MetaLeadField,
+  type NormalizedMetaLead,
+} from "@/lib/metaLeadNormalization";
 import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-
-type MetaLeadField = {
-  name?: string;
-  values?: string[];
-};
 
 type MetaLeadResponse = {
   id?: string;
@@ -30,26 +30,6 @@ type MetaLeadResponse = {
   campaign_id?: string | number;
   campaign_name?: string;
   field_data?: MetaLeadField[];
-};
-
-type NormalizedMetaLead = {
-  fullName: string | null;
-  phone: string | null;
-  postalCode: string | null;
-  extraAnswers: Array<{ label: string; value: string }>;
-  rawFieldData: MetaLeadField[];
-};
-
-const DEFAULT_FIELD_MAPPING: Record<string, string[]> = {
-  fullName: ["full_name", "full name", "imie_i_nazwisko", "imię i nazwisko", "imie"],
-  phone: ["phone_number", "phone", "numer_telefonu", "numer telefonu", "telefon"],
-  postalCode: [
-    "postal_code",
-    "postal code",
-    "kod_pocztowy",
-    "kod pocztowy",
-    "kod_pocztowy_inwestycji",
-  ],
 };
 
 export async function GET(request: NextRequest) {
@@ -63,50 +43,6 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-}
-
-function normalizeFieldName(value?: string) {
-  return String(value ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function getFieldValue(fields: MetaLeadField[], candidates: string[]) {
-  const normalizedCandidates = candidates.map(normalizeFieldName);
-  const field = fields.find((item) =>
-    normalizedCandidates.includes(normalizeFieldName(item.name))
-  );
-  return field?.values?.[0]?.trim() || null;
-}
-
-function normalizePostalCode(value: string | null) {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  return digits.length === 5 ? `${digits.slice(0, 2)}-${digits.slice(2)}` : value?.trim() || null;
-}
-
-function normalizeMetaLead(fields: MetaLeadField[], integration: LeadIntegration) {
-  const mapping = { ...DEFAULT_FIELD_MAPPING, ...(integration.field_mapping ?? {}) };
-  const mappedNames = new Set(
-    Object.values(mapping).flat().map((fieldName) => normalizeFieldName(fieldName))
-  );
-
-  return {
-    fullName: getFieldValue(fields, mapping.fullName ?? DEFAULT_FIELD_MAPPING.fullName),
-    phone: getFieldValue(fields, mapping.phone ?? DEFAULT_FIELD_MAPPING.phone),
-    postalCode: normalizePostalCode(
-      getFieldValue(fields, mapping.postalCode ?? DEFAULT_FIELD_MAPPING.postalCode)
-    ),
-    extraAnswers: fields
-      .filter((field) => !mappedNames.has(normalizeFieldName(field.name)))
-      .map((field) => ({
-        label: field.name || "Pole formularza",
-        value: field.values?.join(", ") || "brak danych",
-      })),
-    rawFieldData: fields,
-  } satisfies NormalizedMetaLead;
 }
 
 type MetaWebhookBody = {
@@ -216,6 +152,7 @@ async function createClient(
     .from("clients")
     .insert({
       full_name: lead.fullName || "Lead Meta Ads",
+      email: lead.email,
       phone: lead.phone,
       postal_code: lead.postalCode,
       status: assignedUserId ? "Przypisany" : "Nowy lead",
@@ -344,7 +281,10 @@ async function processLeadEvent(
     throw new Error(`Brak aktywnej konfiguracji Meta dla formularza ${formId || "bez ID"}.`);
   }
 
-  const lead = normalizeMetaLead((metaLead?.field_data ?? []) as MetaLeadField[], integration);
+  const lead = normalizeMetaLead(
+    (metaLead?.field_data ?? []) as MetaLeadField[],
+    integration.field_mapping ?? {}
+  );
   if (!lead.phone) throw new Error("Lead Meta nie zawiera numeru telefonu.");
 
   const assignment = await assignLead(integration, { postalCode: lead.postalCode });
