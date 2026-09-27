@@ -46,3 +46,42 @@ test("uwzględnia mapowanie pól ustawione dla integracji", () => {
   assert.equal(lead.email, "jan@example.com");
   assert.deepEqual(lead.extraAnswers, []);
 });
+
+test("stare mapowanie integracji nie wyłącza nowszych aliasów Meta", () => {
+  const lead = normalizeMetaLead(
+    [
+      { name: "name", values: ["Maria Zielińska"] },
+      { name: "email_address", values: ["maria@example.com"] },
+    ],
+    {
+      fullName: ["full_name", "imie_i_nazwisko"],
+      email: ["email"],
+    }
+  );
+
+  assert.equal(lead.fullName, "Maria Zielińska");
+  assert.equal(lead.email, "maria@example.com");
+  assert.deepEqual(lead.extraAnswers, []);
+});
+
+test("rozpoznaje opisowe polskie pole imienia i nazwiska", () => {
+  const lead = normalizeMetaLead([
+    { name: "Podaj proszę swoje imię i nazwisko", values: ["Piotr Wiśniewski"] },
+    { name: "czy_posiadasz_instalację_pv?", values: ["Tak"] },
+  ]);
+
+  assert.equal(lead.fullName, "Piotr Wiśniewski");
+  assert.deepEqual(lead.extraAnswers, [
+    { label: "czy_posiadasz_instalację_pv?", value: "Tak" },
+  ]);
+});
+
+test("rozpoznaje opisowe osobne pola imienia i nazwiska", () => {
+  const lead = normalizeMetaLead([
+    { name: "Twoje imię", values: ["Adam"] },
+    { name: "Nazwisko klienta", values: ["Kowalski"] },
+  ]);
+
+  assert.equal(lead.fullName, "Adam Kowalski");
+  assert.deepEqual(lead.extraAnswers, []);
+});

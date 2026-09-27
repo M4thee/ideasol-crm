@@ -30,6 +30,12 @@ type User = {
 
 type Tag = { name: string; color: string | null };
 
+type RepairReport = {
+  repairedNames: number;
+  repairedEmails: number;
+  unresolved: Array<{ campaignName: string; formId: string }>;
+};
+
 const RULES: Array<{
   value: AssignmentRule;
   title: string;
@@ -77,6 +83,8 @@ export default function LeadIntegrationsPage() {
   const [draft, setDraft] = useState<Integration | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [repairReport, setRepairReport] = useState<RepairReport | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const isCreating = draft?.id === "";
@@ -246,6 +254,33 @@ export default function LeadIntegrationsPage() {
     }
   }
 
+  async function repairMetaLeadContactData() {
+    setRepairing(true);
+    setError("");
+    setRepairReport(null);
+
+    try {
+      const response = await authorizedFetch("/api/admin/meta-leads/repair-contact-data", {
+        method: "POST",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Nie udało się naprawić leadów Meta.");
+      }
+
+      setRepairReport(payload as RepairReport);
+    } catch (repairError) {
+      setError(
+        repairError instanceof Error
+          ? repairError.message
+          : "Nie udało się naprawić leadów Meta."
+      );
+    } finally {
+      setRepairing(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -280,6 +315,40 @@ export default function LeadIntegrationsPage() {
             {status}
           </div>
         )}
+
+        <section className="rounded-3xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-black text-sky-950">Napraw dane leadów Meta</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-sky-800">
+                Uzupełnia imię i nazwisko oraz brakujący e-mail na podstawie oryginalnych danych
+                zapisanych z formularza. Ręcznie poprawione dane pozostają bez zmian.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={repairMetaLeadContactData}
+              disabled={repairing}
+              className="shrink-0 rounded-xl bg-sky-700 px-4 py-3 text-sm font-black text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {repairing ? "Naprawiam…" : "Napraw błędne leady"}
+            </button>
+          </div>
+          {repairReport && (
+            <div className="mt-4 rounded-2xl border border-sky-200 bg-white p-4 text-sm text-sky-950">
+              Naprawiono nazwy: <strong>{repairReport.repairedNames}</strong>. Uzupełniono e-maile:{" "}
+              <strong>{repairReport.repairedEmails}</strong>.
+              {repairReport.unresolved.length > 0 && (
+                <div className="mt-3 text-amber-800">
+                  Bez danych imienia i nazwiska w samym formularzu pozostały:{" "}
+                  {repairReport.unresolved
+                    .map((item) => `${item.campaignName} (formularz ${item.formId})`)
+                    .join(", ")}.
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500">
