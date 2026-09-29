@@ -9,9 +9,47 @@ type EquipmentWithManufacturer = {
 
 const UNKNOWN_MANUFACTURER = "Pozostali producenci";
 
-function normalizeManufacturer(value: string | null | undefined) {
-  const manufacturer = String(value || "").trim();
-  return manufacturer || UNKNOWN_MANUFACTURER;
+const MANUFACTURER_LABELS = new Map([
+  ["deye", "Deye"],
+  ["dyness", "Dyness"],
+  ["ecobss", "EcoBSS"],
+  ["foxess", "FoxESS"],
+  ["fronius", "Fronius"],
+  ["goodwe", "GoodWe"],
+  ["growatt", "Growatt"],
+  ["huawei", "Huawei"],
+  ["sigenergy", "Sigenergy"],
+  ["sofar", "Sofar"],
+  ["solaredge", "SolarEdge"],
+  ["sungrow", "Sungrow"],
+  ["victron", "Victron"],
+]);
+
+function getKnownManufacturer(value: string | null | undefined) {
+  const normalizedValue = String(value || "").trim().toLocaleLowerCase("pl");
+
+  if (!normalizedValue) return null;
+
+  for (const [key, label] of MANUFACTURER_LABELS) {
+    if (normalizedValue === key || normalizedValue.includes(key)) {
+      return label;
+    }
+  }
+
+  return null;
+}
+
+function normalizeManufacturer(
+  value: string | null | undefined,
+  equipmentName: string
+) {
+  const explicitManufacturer = String(value || "").trim();
+
+  if (explicitManufacturer) {
+    return getKnownManufacturer(explicitManufacturer) || explicitManufacturer;
+  }
+
+  return getKnownManufacturer(equipmentName) || UNKNOWN_MANUFACTURER;
 }
 
 export function groupEquipmentByManufacturer<T extends EquipmentWithManufacturer>(
@@ -22,7 +60,10 @@ export function groupEquipmentByManufacturer<T extends EquipmentWithManufacturer
   const groups = new Map<string, T[]>();
 
   for (const item of items) {
-    const manufacturer = normalizeManufacturer(item.manufacturer);
+    const manufacturer = normalizeManufacturer(
+      item.manufacturer,
+      getDisplayName(item)
+    );
     const group = groups.get(manufacturer) || [];
     group.push(item);
     groups.set(manufacturer, group);

@@ -246,7 +246,7 @@ const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
 const OFFLINE_CRM_OFFER_QUEUE_KEY = "ideasol:calculator:offlineCrmOfferQueue:v1";
 const OFFLINE_SYNC_STATUS_KEY = "ideasol:offlineSyncStatus:v1";
-const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v3";
+const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v4";
 const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
 const CALCULATOR_PROFILE_CACHE_KEY = "ideasol:calculator:profile:v1";
 
