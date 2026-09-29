@@ -10,6 +10,10 @@ import {
   normalizeCustomPaymentSchedule,
 } from "@/lib/customPaymentSchedule";
 import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
+import {
+  normalizeOfferComparisonVariants,
+  type OfferComparisonVariant,
+} from "@/lib/offerComparison";
 
 export const runtime = "nodejs";
 
@@ -68,6 +72,14 @@ type OfferPdfData = {
   pdfQuantity?: number;
   customPaymentSchedule?: unknown;
   customPaymentTerms?: string;
+};
+
+type OfferComparisonPdfData = {
+  clientName?: string;
+  advisorName?: string;
+  advisorPhone?: string;
+  advisorEmail?: string;
+  comparisonVariants: OfferComparisonVariant[];
 };
 
 function formatMoney(value: unknown) {
@@ -1003,9 +1015,285 @@ async function createOfferPdf(data: OfferPdfData) {
   return Buffer.from(pdfBytes);
 }
 
+async function createOfferComparisonPdf(data: OfferComparisonPdfData) {
+  const variants = normalizeOfferComparisonVariants(data.comparisonVariants);
+
+  if (variants.length < 2) {
+    throw new Error("Porównanie wymaga co najmniej dwóch wariantów");
+  }
+
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+
+  const page = pdfDoc.addPage([842, 595]);
+  const { width, height } = page.getSize();
+  const fontPath = findFirstExistingFile([
+    path.join(process.cwd(), "public", "fonts", "DejaVuSans.ttf"),
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+  ]);
+
+  if (!fontPath) {
+    throw new Error("Brak poprawnego fontu TTF/OTF do wygenerowania PDF");
+  }
+
+  const font = await pdfDoc.embedFont(readFileSync(fontPath), { subset: true });
+  const headingFont = font;
+  const navy = hexToRgb("#0C2349");
+  const blue = hexToRgb("#1F6DD6");
+  const cyan = hexToRgb("#27B7D5");
+  const green = hexToRgb("#059669");
+  const slate = hexToRgb("#475569");
+  const border = hexToRgb("#DCE5EF");
+  const pale = hexToRgb("#F5F8FC");
+  const paleGreen = hexToRgb("#ECFDF5");
+  const marginX = 28;
+  const contentWidth = width - marginX * 2;
+
+  page.drawRectangle({ x: 0, y: 0, width, height, color: hexToRgb("#FFFFFF") });
+  page.drawRectangle({ x: 0, y: height - 6, width, height: 6, color: cyan });
+
+  const logoPath = findFirstExistingFile([
+    path.join(process.cwd(), "public", "logo.png"),
+    path.join(process.cwd(), "public", "logo-transparent.png"),
+    path.join(process.cwd(), "public", "Logo.png"),
+    path.join(process.cwd(), "public", "ideasol-logo.png"),
+    path.join(process.cwd(), "public", "IdeaSol.png"),
+    path.join(process.cwd(), "public", "logo-ideasol.png"),
+  ]);
+
+  if (logoPath) {
+    const logoImage = await pdfDoc.embedPng(readFileSync(logoPath));
+    const logoDims = logoImage.scaleToFit(150, 58);
+    page.drawImage(logoImage, {
+      x: marginX,
+      y: height - 79,
+      width: logoDims.width,
+      height: logoDims.height,
+    });
+  } else {
+    page.drawText("IdeaSol", {
+      x: marginX,
+      y: height - 55,
+      size: 24,
+      font: headingFont,
+      color: navy,
+    });
+  }
+
+  page.drawText("PORÓWNANIE WARIANTÓW OFERTY", {
+    x: 205,
+    y: height - 43,
+    size: 18,
+    font: headingFont,
+    color: navy,
+  });
+  page.drawText("Wybierz rozwiązanie najlepiej dopasowane do Twoich potrzeb", {
+    x: 205,
+    y: height - 61,
+    size: 8.5,
+    font,
+    color: slate,
+  });
+  page.drawText(`Data: ${new Date().toLocaleDateString("pl-PL")}`, {
+    x: width - 112,
+    y: height - 43,
+    size: 8,
+    font,
+    color: slate,
+  });
+
+  const infoY = height - 98;
+  page.drawRectangle({
+    x: marginX,
+    y: infoY - 44,
+    width: contentWidth,
+    height: 44,
+    color: pale,
+    borderColor: border,
+    borderWidth: 0.7,
+  });
+  page.drawRectangle({ x: marginX, y: infoY - 44, width: 5, height: 44, color: cyan });
+  page.drawText("Klient", { x: marginX + 16, y: infoY - 16, size: 6.7, font, color: slate });
+  page.drawText(String(data.clientName || variants[0]?.clientName || "Klient"), {
+    x: marginX + 16,
+    y: infoY - 32,
+    size: 10.5,
+    font: headingFont,
+    color: navy,
+    maxWidth: 310,
+  });
+  page.drawText("Ofertę przygotował", { x: marginX + 405, y: infoY - 16, size: 6.7, font, color: slate });
+  page.drawText(
+    [data.advisorName || "IdeaSol", data.advisorPhone, data.advisorEmail].filter(Boolean).join(" · "),
+    {
+      x: marginX + 405,
+      y: infoY - 32,
+      size: 8.2,
+      font: headingFont,
+      color: navy,
+      maxWidth: contentWidth - 421,
+    }
+  );
+
+  const tableTop = infoY - 62;
+  const labelWidth = 132;
+  const variantWidth = (contentWidth - labelWidth) / variants.length;
+  const headerHeight = 40;
+  const rows: Array<{
+    label: string;
+    height: number;
+    highlight?: boolean;
+    value: (variant: OfferComparisonVariant) => string;
+  }> = [
+    { label: "Instalacja PV", height: 30, value: (variant) => variant.pvPowerKw > 0 ? `${variant.pvPowerKw.toLocaleString("pl-PL")} kWp` : "—" },
+    { label: "Panele", height: 38, value: (variant) => variant.panelDescription && variant.panelDescription !== "Brak" ? variant.panelDescription : "—" },
+    { label: "Magazyn energii", height: 38, value: (variant) => variant.energyStorage && variant.energyStorage !== "Brak" ? variant.energyStorage : "—" },
+    { label: "Falownik", height: 38, value: (variant) => variant.inverter === "Brak" ? "Własny klienta / bez falownika" : variant.inverter },
+    { label: "Cena netto", height: 30, value: (variant) => formatMoney(variant.finalNet) },
+    { label: "VAT", height: 28, value: (variant) => `${variant.vatRate}%` },
+    { label: "Cena brutto", height: 32, value: (variant) => formatMoney(variant.finalGross) },
+    { label: "Szacowana dotacja", height: 30, value: (variant) => variant.subsidyTotal > 0 ? formatMoney(variant.subsidyTotal) : "—" },
+    { label: "Cena po dotacji", height: 34, highlight: true, value: (variant) => variant.subsidyTotal > 0 ? formatMoney(variant.finalAfterSubsidy) : "—" },
+  ];
+
+  page.drawRectangle({
+    x: marginX,
+    y: tableTop - headerHeight,
+    width: labelWidth,
+    height: headerHeight,
+    color: navy,
+  });
+  page.drawText("PARAMETR", {
+    x: marginX + 12,
+    y: tableTop - 25,
+    size: 7.4,
+    font: headingFont,
+    color: hexToRgb("#FFFFFF"),
+  });
+
+  variants.forEach((variant, index) => {
+    const x = marginX + labelWidth + index * variantWidth;
+    page.drawRectangle({
+      x,
+      y: tableTop - headerHeight,
+      width: variantWidth,
+      height: headerHeight,
+      color: index % 2 === 0 ? blue : navy,
+      borderColor: hexToRgb("#FFFFFF"),
+      borderWidth: 0.4,
+    });
+    const lines = wrapText(variant.name, headingFont, 8.2, variantWidth - 16).slice(0, 2);
+    lines.forEach((line, lineIndex) => {
+      page.drawText(line, {
+        x: x + 8,
+        y: tableTop - 18 - lineIndex * 10,
+        size: 8.2,
+        font: headingFont,
+        color: hexToRgb("#FFFFFF"),
+      });
+    });
+  });
+
+  let rowTop = tableTop - headerHeight;
+  rows.forEach((row, rowIndex) => {
+    const rowY = rowTop - row.height;
+    const background = row.highlight
+      ? paleGreen
+      : rowIndex % 2 === 0
+        ? hexToRgb("#FFFFFF")
+        : pale;
+
+    page.drawRectangle({
+      x: marginX,
+      y: rowY,
+      width: labelWidth,
+      height: row.height,
+      color: background,
+      borderColor: border,
+      borderWidth: 0.45,
+    });
+    page.drawText(row.label, {
+      x: marginX + 10,
+      y: rowY + row.height / 2 - 3,
+      size: 7.2,
+      font: headingFont,
+      color: row.highlight ? green : navy,
+      maxWidth: labelWidth - 18,
+    });
+
+    variants.forEach((variant, index) => {
+      const x = marginX + labelWidth + index * variantWidth;
+      page.drawRectangle({
+        x,
+        y: rowY,
+        width: variantWidth,
+        height: row.height,
+        color: background,
+        borderColor: border,
+        borderWidth: 0.45,
+      });
+      const cellText = row.value(variant);
+      const fontSize = row.height >= 38 ? 6.5 : 7.1;
+      const lines = wrapText(cellText, font, fontSize, variantWidth - 14).slice(0, row.height >= 38 ? 3 : 2);
+      const lineHeight = fontSize + 1.5;
+      const blockHeight = lines.length * lineHeight;
+      let textY = rowY + (row.height + blockHeight) / 2 - lineHeight + 1;
+
+      lines.forEach((line) => {
+        page.drawText(line, {
+          x: x + 7,
+          y: textY,
+          size: fontSize,
+          font: row.highlight ? headingFont : font,
+          color: row.highlight ? green : row.label === "Cena brutto" ? blue : slate,
+        });
+        textY -= lineHeight;
+      });
+    });
+
+    rowTop = rowY;
+  });
+
+  page.drawRectangle({ x: marginX, y: 37, width: contentWidth, height: 2, color: cyan });
+  page.drawText(
+    "Każdy wariant ma charakter informacyjny i wymaga potwierdzenia po analizie warunków montażowych. Dotacja jest wartością szacunkową.",
+    { x: marginX, y: 22, size: 6.7, font, color: slate, maxWidth: contentWidth - 180 }
+  );
+  page.drawText("IdeaSol CRM · porównanie ofert", {
+    x: width - 170,
+    y: 22,
+    size: 6.7,
+    font: headingFont,
+    color: navy,
+  });
+
+  return Buffer.from(await pdfDoc.save());
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    const comparisonVariants = normalizeOfferComparisonVariants(body.comparisonVariants);
+    if (comparisonVariants.length >= 2) {
+      const comparisonPdf = await createOfferComparisonPdf({
+        clientName: body.clientName,
+        advisorName: body.advisorName,
+        advisorPhone: body.advisorPhone,
+        advisorEmail: body.advisorEmail,
+        comparisonVariants,
+      });
+
+      return new NextResponse(new Uint8Array(comparisonPdf), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="porownanie-ofert-ideasol.pdf"`,
+        },
+      });
+    }
 
     const pdfBuffer = await createOfferPdf({
       clientName: body.clientName,

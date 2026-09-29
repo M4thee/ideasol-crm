@@ -5,6 +5,7 @@ import { normalizeCustomOfferTitle } from "@/lib/calculator/customOffer";
 export const runtime = "nodejs";
 
 type CatalogCardRequest = {
+  deviceType?: "panel" | "inverter" | "storage";
   title?: string;
   fileName?: string;
   url?: string;
@@ -15,6 +16,19 @@ type MailAttachment = {
   filename: string;
   content: Buffer;
   contentType: string;
+};
+
+type ComparisonVariant = {
+  name: string;
+  pvPowerKw: number;
+  panelDescription: string;
+  energyStorage: string;
+  inverter: string;
+  finalNet: number;
+  finalGross: number;
+  vatRate: number;
+  subsidyTotal: number;
+  finalAfterSubsidy: number;
 };
 
 function formatMoney(value: number) {
@@ -32,6 +46,28 @@ function escapeHtml(value: string) {
 
 function normalizeSellerNote(value: unknown) {
   return String(value || "").trim().slice(0, 2000);
+}
+
+function normalizeComparisonVariants(value: unknown): ComparisonVariant[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.slice(0, 5).map((entry, index) => {
+    const item = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+    const finalGross = Number(item.finalGross || 0);
+    const subsidyTotal = Number(item.subsidyTotal || 0);
+    return {
+      name: String(item.name || `Wariant ${index + 1}`).trim().slice(0, 80) || `Wariant ${index + 1}`,
+      pvPowerKw: Number(item.pvPowerKw || 0),
+      panelDescription: String(item.panelDescription || "").trim().slice(0, 240),
+      energyStorage: String(item.energyStorage || "Brak").trim().slice(0, 240),
+      inverter: String(item.inverter || "Brak").trim().slice(0, 240),
+      finalNet: Number(item.finalNet || 0),
+      finalGross,
+      vatRate: Number(item.vatRate || 0),
+      subsidyTotal,
+      finalAfterSubsidy: Math.max(0, finalGross - subsidyTotal),
+    };
+  }).filter((item) => item.finalGross > 0);
 }
 
 function getOfferPdfAttachment(base64Value: unknown): MailAttachment | null {
@@ -104,6 +140,7 @@ function normalizeCatalogCardRequests(rawValue: unknown): CatalogCardRequest[] {
   }
 
   const uniqueUrls = new Set<string>();
+  const uniqueDevices = new Set<string>();
   const result: CatalogCardRequest[] = [];
 
   for (const item of rawValue) {
@@ -114,6 +151,7 @@ function normalizeCatalogCardRequests(rawValue: unknown): CatalogCardRequest[] {
     } else if (item && typeof item === "object") {
       const typedItem = item as CatalogCardRequest;
       card = {
+        deviceType: typedItem.deviceType,
         title: typedItem.title,
         fileName: typedItem.fileName,
         url: typedItem.url || typedItem.catalogCardUrl,
@@ -122,13 +160,25 @@ function normalizeCatalogCardRequests(rawValue: unknown): CatalogCardRequest[] {
 
     const url = String(card?.url || "").trim();
 
-    if (!url || uniqueUrls.has(url)) {
+    const normalizedUrl = url.toLocaleLowerCase("pl-PL");
+    const title = String(card?.title || "").trim();
+    const deviceKey = card?.deviceType && title
+      ? `${card.deviceType}:${title.toLocaleLowerCase("pl-PL").replace(/\s+/g, " ")}`
+      : "";
+
+    if (
+      !url ||
+      uniqueUrls.has(normalizedUrl) ||
+      (deviceKey && uniqueDevices.has(deviceKey))
+    ) {
       continue;
     }
 
-    uniqueUrls.add(url);
+    uniqueUrls.add(normalizedUrl);
+    if (deviceKey) uniqueDevices.add(deviceKey);
     result.push({
-      title: card?.title,
+      deviceType: card?.deviceType,
+      title,
       fileName: card?.fileName,
       url,
     });
@@ -277,10 +327,12 @@ export async function POST(request: Request) {
       },
     });
 
+    const comparisonVariants = normalizeComparisonVariants(body.comparisonVariants);
+    const isComparisonOffer = comparisonVariants.length >= 2;
     const offerType = String(body.offerType || "pv_storage");
     const isCustomOffer = offerType === "custom";
     const isStorageOnly = offerType === "storage";
-    const hasEnergyStorage = String(body.energyStorage || "").toLowerCase() !== "brak";
+    const hasEnergyStorage = !isComparisonOffer && String(body.energyStorage || "").toLowerCase() !== "brak";
     const sendMode = body.sendMode === "public" ? "public" : "anonymous";
     const advisorName = String(body.advisor?.name || body.advisorName || "").trim();
     const advisorPhone = String(body.advisor?.phone || body.advisorPhone || "").trim();
@@ -295,6 +347,10 @@ export async function POST(request: Request) {
     const offerPdfAttachment = includeOfferPdf
       ? getOfferPdfAttachment(body.offerPdfBase64)
       : null;
+
+    if (offerPdfAttachment && isComparisonOffer) {
+      offerPdfAttachment.filename = "porownanie-ofert-ideasol.pdf";
+    }
 
     if (includeOfferPdf && !offerPdfAttachment) {
       return NextResponse.json(
@@ -333,7 +389,9 @@ export async function POST(request: Request) {
     const customOfferTitle = isCustomOffer
       ? normalizeCustomOfferTitle(body.customOfferTitle)
       : "";
-    const subject = isCustomOffer
+    const subject = isComparisonOffer
+      ? "Porównanie wariantów oferty IdeaSol"
+      : isCustomOffer
       ? customOfferTitle
       : isStorageOnly
       ? "Oferta magazynu energii"
@@ -341,7 +399,7 @@ export async function POST(request: Request) {
         ? "Oferta instalacji fotowoltaicznej z magazynem energii"
         : "Oferta instalacji fotowoltaicznej";
 
-    const hasInverter = !isCustomOffer && String(body.inverter || "").toLowerCase() !== "brak";
+    const hasInverter = !isComparisonOffer && !isCustomOffer && String(body.inverter || "").toLowerCase() !== "brak";
 
     const panelName = String(
       body.panelName ||
@@ -355,7 +413,7 @@ export async function POST(request: Request) {
       body.panelPowerWp || body.panelPower || body.selectedPanelPowerWp || body.modulePowerWp || 0
     );
     const panelCount = Number(body.panelCount || body.panelsCount || body.modulesCount || 0);
-    const hasPanelDetails = !isCustomOffer && !isStorageOnly && Boolean(panelName || panelPowerWp || panelCount);
+    const hasPanelDetails = !isComparisonOffer && !isCustomOffer && !isStorageOnly && Boolean(panelName || panelPowerWp || panelCount);
     const inverterTypeLabel = getInverterTypeLabel(body.inverterType);
     const includeSubsidy = Boolean(
       body.includeSubsidy || body.subsidyAllocation?.requested
@@ -375,7 +433,9 @@ export async function POST(request: Request) {
 
     const hasSubsidy = includeSubsidy && subsidyTotal > 0;
 
-    const offerProductName = isCustomOffer
+    const offerProductName = isComparisonOffer
+      ? "porównania wariantów instalacji"
+      : isCustomOffer
       ? "wybranych produktów i usług"
       : isStorageOnly
       ? "magazynu energii"
@@ -383,11 +443,13 @@ export async function POST(request: Request) {
         ? "instalacji fotowoltaicznej z magazynem energii"
         : "instalacji fotowoltaicznej";
 
-    const offerIntro = isCustomOffer
+    const offerIntro = isComparisonOffer
+      ? "W nawiązaniu do rozmowy przesyłam porównanie przygotowanych wariantów oferty. Szczegółowa tabela znajduje się poniżej oraz w załączonym pliku PDF."
+      : isCustomOffer
       ? `W nawiązaniu do rozmowy przesyłam ofertę „${customOfferTitle}” dotyczącą ${offerProductName}.`
       : `W nawiązaniu do rozmowy telefonicznej przesyłam wstępną wycenę ${offerProductName} wraz z montażem.`;
 
-    const pvTextLine = isCustomOffer || isStorageOnly
+    const pvTextLine = isComparisonOffer || isCustomOffer || isStorageOnly
       ? ""
       : `- instalacja PV: ${body.pvPowerKw} kWp\n`;
 
@@ -415,6 +477,16 @@ export async function POST(request: Request) {
             `- ${item.name}${item.quantity !== 1 ? ` × ${item.quantity} szt.` : ""}`
           )
           .join("\n") + "\n"
+      : "";
+    const comparisonTextLines = isComparisonOffer
+      ? comparisonVariants.map((variant) => [
+          `${variant.name}:`,
+          `- PV: ${variant.pvPowerKw > 0 ? `${variant.pvPowerKw.toLocaleString("pl-PL")} kWp` : "brak"}`,
+          `- magazyn: ${variant.energyStorage && variant.energyStorage !== "Brak" ? variant.energyStorage : "brak"}`,
+          `- falownik: ${variant.inverter === "Brak" ? "własny klienta" : variant.inverter}`,
+          `- cena brutto: ${formatMoney(variant.finalGross)} zł`,
+          variant.subsidyTotal > 0 ? `- po dotacji: ${formatMoney(variant.finalAfterSubsidy)} zł` : "",
+        ].filter(Boolean).join("\n")).join("\n\n") + "\n"
       : "";
     const customPaymentTerms = isCustomOffer
       ? String(body.customPaymentTerms || "").trim()
@@ -490,6 +562,80 @@ export async function POST(request: Request) {
                 </tr>`)
           .join("")
       : "";
+    const comparisonRows = [
+      {
+        label: "Instalacja PV",
+        value: (variant: ComparisonVariant) =>
+          variant.pvPowerKw > 0
+            ? `${variant.pvPowerKw.toLocaleString("pl-PL")} kWp`
+            : "—",
+      },
+      {
+        label: "Panele",
+        value: (variant: ComparisonVariant) =>
+          variant.panelDescription && variant.panelDescription !== "Brak"
+            ? variant.panelDescription
+            : "—",
+      },
+      {
+        label: "Magazyn energii",
+        value: (variant: ComparisonVariant) =>
+          variant.energyStorage && variant.energyStorage !== "Brak"
+            ? variant.energyStorage
+            : "—",
+      },
+      {
+        label: "Falownik",
+        value: (variant: ComparisonVariant) =>
+          variant.inverter && variant.inverter !== "Brak"
+            ? variant.inverter
+            : "Bez falownika",
+      },
+      {
+        label: "Cena netto",
+        value: (variant: ComparisonVariant) => `${formatMoney(variant.finalNet)} zł`,
+      },
+      {
+        label: "VAT",
+        value: (variant: ComparisonVariant) => `${variant.vatRate}%`,
+      },
+      {
+        label: "Cena brutto",
+        emphasize: true,
+        value: (variant: ComparisonVariant) => `${formatMoney(variant.finalGross)} zł`,
+      },
+      {
+        label: "Szacowana dotacja",
+        value: (variant: ComparisonVariant) =>
+          variant.subsidyTotal > 0 ? `${formatMoney(variant.subsidyTotal)} zł` : "—",
+      },
+      {
+        label: "Cena po dotacji",
+        highlight: true,
+        value: (variant: ComparisonVariant) =>
+          variant.subsidyTotal > 0
+            ? `${formatMoney(variant.finalAfterSubsidy)} zł`
+            : "—",
+      },
+    ];
+    const comparisonTable = isComparisonOffer
+      ? `<div style="overflow-x:auto; margin:20px 0 26px; border:1px solid #dbe4ee; border-radius:16px;">
+          <table role="presentation" style="border-collapse:collapse; width:100%; min-width:720px; font-size:13px;">
+            <thead>
+              <tr style="background:#0c2349; color:#ffffff;">
+                <th style="width:150px; padding:14px 12px; text-align:left; border-right:1px solid #31476b;">Parametr</th>
+                ${comparisonVariants.map((variant) => `<th style="min-width:145px; padding:14px 12px; text-align:left; border-right:1px solid #31476b;">${escapeHtml(variant.name)}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${comparisonRows.map((row, rowIndex) => `<tr style="background:${row.highlight ? "#ecfdf5" : rowIndex % 2 === 0 ? "#f4f8fd" : "#ffffff"};">
+                <th style="padding:12px; text-align:left; color:#0c2349; border-top:1px solid #dbe4ee; border-right:1px solid #dbe4ee;">${row.label}</th>
+                ${comparisonVariants.map((variant) => `<td style="padding:12px; vertical-align:top; color:${row.highlight ? "#047857" : row.emphasize ? "#1f6dd6" : "#334155"}; font-weight:${row.highlight || row.emphasize ? "800" : "500"}; border-top:1px solid #dbe4ee; border-right:1px solid #dbe4ee;${row.label.includes("Cena") || row.label === "VAT" ? " white-space:nowrap;" : ""}">${escapeHtml(row.value(variant))}</td>`).join("")}
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`
+      : "";
 
     const publicSignatureText = [
       "Pozdrawiam,",
@@ -529,12 +675,11 @@ ${offerIntro}
 ${sellerNoteText}
 
 Zakres wyceny:
-${customItemsTextLine}${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${offerPdfTextLine}${catalogCardsTextLine}
-Cena netto: ${formatMoney(body.finalNet)} zł
-Cena brutto ${vatRate}%: ${formatMoney(finalGross)} zł
+${comparisonTextLines}${customItemsTextLine}${pvTextLine}${hasPanelDetails ? `- panele fotowoltaiczne: ${panelDetailsText}\n` : ""}${inverterTextLine}${storageTextLine}${offerPdfTextLine}${catalogCardsTextLine}
+${isComparisonOffer ? "" : `Cena netto: ${formatMoney(body.finalNet)} zł\nCena brutto ${vatRate}%: ${formatMoney(finalGross)} zł`}
 ${customPaymentTextLine}
 ${hasSubsidy ? `Kwota dotacji z programu Przydomowe Magazyny Energii: ${formatMoney(subsidyTotal)} zł (dotacja ME: ${formatMoney(storageSubsidy)} zł${euBonus > 0 ? ` + bonus UE: ${formatMoney(euBonus)} zł` : ""})\n` : ""}
-${isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
+${isComparisonOffer ? "Każdy wariant ma charakter wstępny. Wybrany wariant wymaga potwierdzenia po analizie warunków montażowych." : isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
 
 Oferta ma charakter wstępny i wymaga potwierdzenia po analizie warunków montażowych.
 
@@ -566,15 +711,16 @@ ${emailSignatureText}`;
 
               ${sellerNoteHtml}
 
-              <table style="border-collapse:separate; border-spacing:0; width:100%; margin:20px 0 26px; font-size:15px; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden;">
+              ${comparisonTable}
+              ${isComparisonOffer ? "" : `<table style="border-collapse:separate; border-spacing:0; width:100%; margin:20px 0 26px; font-size:15px; border:1px solid #e5e7eb; border-radius:14px; overflow:hidden;">
                 ${pvTableRows}
                 ${customOfferTableRows}
                 ${panelTableRow}
                 ${inverterTableRow}
                 ${storageTableRow}
-              </table>
+              </table>`}
 
-              <table role="presentation" style="border-collapse:separate; border-spacing:12px 0; width:calc(100% + 24px); margin:0 -12px 38px;">
+              ${isComparisonOffer ? "" : `<table role="presentation" style="border-collapse:separate; border-spacing:12px 0; width:calc(100% + 24px); margin:0 -12px 38px;">
                 <tr>
                   <td style="width:${hasSubsidy ? "33.333%" : "50%"}; vertical-align:top;">
                     <div style="border:1px solid #bbf7d0; background:#f0fdf4; border-radius:16px; padding:18px; min-height:92px;">
@@ -598,14 +744,14 @@ ${emailSignatureText}`;
                     </div>
                   </td>` : ""}
                 </tr>
-              </table>
+              </table>`}
 
               ${catalogCardsHtmlBox}
               ${customPaymentHtmlBox}
 
               <div style="border-left:5px solid #16a34a; background:#f8faf9; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin:0 0 22px;">
                 <p style="margin:0; font-size:15px; color:#111827; line-height:1.65;">
-                  ${isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
+                  ${isComparisonOffer ? "Każdy wariant ma charakter wstępny. Wybrany wariant wymaga potwierdzenia po analizie warunków montażowych." : isCustomOffer ? "Szczegółowy zakres i warunki realizacji wymagają potwierdzenia przed zawarciem umowy." : "Oferta obejmuje projekt, sprzęt, wszelkie materiały składające się na instalację, dokumentację zgłoszeniową do Operatora Sieci Dystrybucyjnej oraz Państwowej Straży Pożarnej (jeżeli będzie to wymagane przepisami)."}
                 </p>
               </div>
 

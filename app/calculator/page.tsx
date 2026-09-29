@@ -7,6 +7,7 @@ import OfferResult, {
   type OfferEmailOptions,
 } from "@/components/calculator/OfferResult";
 import OfferForm from "@/components/calculator/OfferForm";
+import OfferComparisonModal from "@/components/calculator/OfferComparisonModal";
 import Arimr2026GrantSummary from "@/components/calculator/Arimr2026GrantSummary";
 import CreditCalculator from "@/components/calculator/CreditCalculator";
 import ResultOverviewBar from "@/components/calculator/ResultOverviewBar";
@@ -57,6 +58,13 @@ import {
   type ArimrPvSizingFormState,
 } from "@/lib/calculator/pvDemandSizing";
 import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
+import {
+  OFFER_COMPARISON_LIMIT,
+  collectUniqueComparisonCatalogCards,
+  normalizeOfferComparisonVariants,
+  type OfferComparisonCatalogCard,
+  type OfferComparisonVariant,
+} from "@/lib/offerComparison";
 
 
 type Result = {
@@ -225,11 +233,7 @@ function getCatalogStorageVoltageType(storageItem?: CatalogStorage) {
   return getExplicitStorageVoltageType(storageItem);
 }
 
-type CatalogCardEmailAttachment = {
-  title: string;
-  fileName: string;
-  url: string;
-};
+type CatalogCardEmailAttachment = OfferComparisonCatalogCard;
 
 type SelectedAdditionalService = {
   id: number;
@@ -644,6 +648,12 @@ export default function Home() {
   const [clientName, setClientName] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailStatus, setEmailStatus] = useState("");
+  const [comparisonVariants, setComparisonVariants] = useState<OfferComparisonVariant[]>([]);
+  const [comparisonLoadedKey, setComparisonLoadedKey] = useState("");
+  const [showComparison, setShowComparison] = useState(false);
+  const [comparisonStatus, setComparisonStatus] = useState("");
+  const [sendingComparison, setSendingComparison] = useState(false);
+  const [generatingComparisonPdf, setGeneratingComparisonPdf] = useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
   const [arimr2026Settings, setArimr2026Settings] = useState(
@@ -666,6 +676,9 @@ export default function Home() {
   const customModeAvailable = userProfile?.custom_mode_access === true;
   const arimrCalculatorAvailable = userProfile?.arimr_calculator_access === true;
   const customModeActive = customMode && customModeAvailable;
+  const comparisonStorageKey = userProfile?.id
+    ? `ideasol.offerComparison.v1.${userProfile.id}`
+    : "";
 
   useEffect(() => {
     function updateOnlineStatus() {
@@ -682,6 +695,45 @@ export default function Home() {
       window.removeEventListener("offline", updateOnlineStatus);
     };
   }, []);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      if (!comparisonStorageKey) {
+        setComparisonVariants([]);
+        setComparisonLoadedKey("");
+        return;
+      }
+
+      try {
+        const storedValue = window.localStorage.getItem(comparisonStorageKey);
+        setComparisonVariants(
+          storedValue
+            ? normalizeOfferComparisonVariants(JSON.parse(storedValue))
+            : []
+        );
+      } catch (error) {
+        console.warn("Nie udało się odczytać porównania ofert", error);
+        setComparisonVariants([]);
+      } finally {
+        setComparisonLoadedKey(comparisonStorageKey);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [comparisonStorageKey]);
+
+  useEffect(() => {
+    if (!comparisonStorageKey || comparisonLoadedKey !== comparisonStorageKey) return;
+
+    try {
+      window.localStorage.setItem(
+        comparisonStorageKey,
+        JSON.stringify(comparisonVariants)
+      );
+    } catch (error) {
+      console.warn("Nie udało się zapisać porównania ofert", error);
+    }
+  }, [comparisonLoadedKey, comparisonStorageKey, comparisonVariants]);
 
   function getPanelPowerWp(model: string) {
     if (customModeActive && model === CUSTOM_PANEL_CODE) {
@@ -793,7 +845,7 @@ export default function Home() {
       const title = customEquipment.panel.displayName.trim();
 
       return url && title
-        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-panelu.pdf"), url }
+        ? { deviceType: "panel", title, fileName: sanitizeCatalogCardFileName(title, "karta-panelu.pdf"), url }
         : null;
     }
 
@@ -807,6 +859,7 @@ export default function Home() {
     const title = selectedPanel.display_name || selectedPanel.name || selectedPanel.code;
 
     return {
+      deviceType: "panel",
       title,
       fileName: sanitizeCatalogCardFileName(title, "karta-panelu.pdf"),
       url,
@@ -823,7 +876,7 @@ export default function Home() {
       const title = customEquipment.storage.displayName.trim();
 
       return url && title
-        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-magazynu-energii.pdf"), url }
+        ? { deviceType: "storage", title, fileName: sanitizeCatalogCardFileName(title, "karta-magazynu-energii.pdf"), url }
         : null;
     }
 
@@ -837,6 +890,7 @@ export default function Home() {
     const title = selectedStorage.display_name || selectedStorage.name || selectedStorage.code;
 
     return {
+      deviceType: "storage",
       title,
       fileName: sanitizeCatalogCardFileName(title, "karta-magazynu-energii.pdf"),
       url,
@@ -853,7 +907,7 @@ export default function Home() {
       const title = customEquipment.inverter.displayName.trim();
 
       return url && title
-        ? { title, fileName: sanitizeCatalogCardFileName(title, "karta-falownika.pdf"), url }
+        ? { deviceType: "inverter", title, fileName: sanitizeCatalogCardFileName(title, "karta-falownika.pdf"), url }
         : null;
     }
 
@@ -875,6 +929,7 @@ export default function Home() {
     const title = selectedInverter.display_name || selectedInverter.name;
 
     return {
+      deviceType: "inverter",
       title,
       fileName: sanitizeCatalogCardFileName(title, "karta-falownika.pdf"),
       url,
@@ -2096,6 +2151,303 @@ IdeaSol`;
     setCopied(true);
   }
 
+  function getComparisonPdfPayload(
+    variants: OfferComparisonVariant[] = comparisonVariants
+  ): Record<string, unknown> {
+    return {
+      clientName: variants[0]?.clientName || clientName || "Klient",
+      advisorName,
+      advisorPhone,
+      advisorEmail,
+      comparisonVariants: variants,
+    };
+  }
+
+  function addCurrentOfferToComparison() {
+    if (!result || resultIsDirty) {
+      setEmailStatus("Najpierw przelicz aktualną konfigurację oferty.");
+      return;
+    }
+
+    const selectedClient = crmClients.find(
+      (client) => client.id === selectedClientId
+    );
+
+    if (!selectedClientId || !selectedClient) {
+      setEmailStatus("Wybierz klienta z CRM przed dodaniem wariantu do porównania.");
+      return;
+    }
+
+    if (
+      comparisonVariants.length > 0 &&
+      comparisonVariants[0].clientId !== selectedClientId
+    ) {
+      setEmailStatus(
+        "Porównanie jest przypisane do innego klienta. Otwórz je i wyczyść przed rozpoczęciem nowego."
+      );
+      setComparisonStatus(
+        "W koszyku są warianty innego klienta. Wyczyść porównanie, aby rozpocząć nowe."
+      );
+      setShowComparison(true);
+      return;
+    }
+
+    if (comparisonVariants.length >= OFFER_COMPARISON_LIMIT) {
+      setEmailStatus(`Porównanie może zawierać maksymalnie ${OFFER_COMPARISON_LIMIT} wariantów.`);
+      setShowComparison(true);
+      return;
+    }
+
+    const installationCount = customProductMode
+      ? 1
+      : normalizeInstallationCount(identicalSetCount);
+    const pvPowerKw = Number(result.pvPowerKw || 0) * installationCount;
+    const panelDescription = pvPowerKw > 0
+      ? `${panelCount * installationCount} × ${getPanelPowerWp(panelModel)} Wp · ${getPanelDisplayName(panelModel)}`
+      : "Brak";
+    const subsidyTotal = getArimrSubsidyTotal(result) * installationCount;
+    const finalGross = Number(result.finalGross || 0) * installationCount;
+    const finalNet = Number(result.finalNet || 0) * installationCount;
+    const variantNumber = comparisonVariants.length + 1;
+    const variant: OfferComparisonVariant = {
+      id: createCrmAuditId(),
+      name: `Wariant ${variantNumber}`,
+      clientId: selectedClientId,
+      clientName: clientName || getClientDisplayName(selectedClient),
+      createdAt: new Date().toISOString(),
+      offerType: result.offerType,
+      pvPowerKw,
+      panelDescription,
+      energyStorage: getResultStorageDisplayName(result),
+      storageCapacityKwh: Number(result.storageCapacityKwh || 0) * installationCount || undefined,
+      inverter: clientHasOwnHybridInverter
+        ? "Własny falownik klienta"
+        : result.inverter || "Brak",
+      finalNet,
+      finalGross,
+      vatRate: result.vatRate,
+      subsidyTotal,
+      finalAfterSubsidy: Math.max(0, finalGross - subsidyTotal),
+      catalogCards: buildCatalogCardRequests(result),
+    };
+
+    setComparisonVariants((current) => [...current, variant]);
+    setComparisonStatus(
+      `Dodano ${variant.name}. W porównaniu: ${variantNumber}/${OFFER_COMPARISON_LIMIT}.`
+    );
+    setEmailStatus(
+      `Dodano ${variant.name} do porównania (${variantNumber}/${OFFER_COMPARISON_LIMIT}).`
+    );
+  }
+
+  async function downloadOfferComparisonPdf() {
+    if (comparisonVariants.length < 2) {
+      setComparisonStatus("Dodaj co najmniej dwa warianty, aby wygenerować porównanie PDF.");
+      return;
+    }
+
+    setGeneratingComparisonPdf(true);
+    setComparisonStatus("Generowanie porównania PDF…");
+
+    try {
+      const response = await fetch("/api/generate-offer-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(getComparisonPdfPayload()),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error || "Nie udało się wygenerować porównania PDF");
+      }
+
+      const pdfBlob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(pdfBlob);
+      const downloadLink = document.createElement("a");
+      downloadLink.href = downloadUrl;
+      downloadLink.download = "porownanie-ofert-ideasol.pdf";
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      setComparisonStatus("Porównanie PDF zostało pobrane.");
+    } catch (error) {
+      setComparisonStatus(
+        error instanceof Error ? error.message : "Nie udało się pobrać porównania PDF."
+      );
+    } finally {
+      setGeneratingComparisonPdf(false);
+    }
+  }
+
+  async function sendOfferComparison(options: {
+    email: string;
+    note: string;
+    mode: "anonymous" | "public";
+  }) {
+    if (comparisonVariants.length < 2) {
+      setComparisonStatus("Dodaj co najmniej dwa warianty przed wysyłką.");
+      return;
+    }
+
+    if (!isCalculatorOnline()) {
+      setComparisonStatus("Połącz się z internetem, aby wysłać porównanie i załącznik PDF.");
+      return;
+    }
+
+    const comparisonClientId = comparisonVariants[0]?.clientId;
+    const selectedClient = crmClients.find(
+      (client) => client.id === comparisonClientId
+    );
+    const emailForSend = options.email.trim();
+
+    if (!comparisonClientId || !selectedClient) {
+      setComparisonStatus("Nie znaleziono klienta CRM przypisanego do porównania.");
+      return;
+    }
+
+    if (!emailForSend || !emailForSend.includes("@")) {
+      setComparisonStatus("Podaj poprawny adres e-mail klienta.");
+      return;
+    }
+
+    setSendingComparison(true);
+    const comparisonCatalogCards = collectUniqueComparisonCatalogCards(comparisonVariants);
+    setComparisonStatus(
+      comparisonCatalogCards.length > 0
+        ? `Generowanie PDF i pobieranie ${comparisonCatalogCards.length} unikalnych kart katalogowych…`
+        : "Generowanie PDF i wysyłanie porównania…"
+    );
+
+    try {
+      const storedClientEmail = String(selectedClient.email || "").trim();
+
+      if (!storedClientEmail) {
+        const { error: updateClientEmailError } = await supabase
+          .from("clients")
+          .update({ email: emailForSend })
+          .eq("id", comparisonClientId);
+
+        if (updateClientEmailError) {
+          throw new Error(
+            `Nie udało się zapisać e-maila na karcie klienta: ${updateClientEmailError.message}`
+          );
+        }
+
+        setCrmClients((currentClients) =>
+          currentClients.map((client) =>
+            client.id === comparisonClientId
+              ? { ...client, email: emailForSend }
+              : client
+          )
+        );
+      }
+
+      const offerPdfBase64 = await generateOfferPdfBase64(
+        getComparisonPdfPayload()
+      );
+      const response = await fetch("/api/send-offer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientEmail: emailForSend,
+          sendMode: options.mode,
+          advisor: {
+            id: userProfile?.id || null,
+            name: advisorName,
+            phone: advisorPhone,
+            email: advisorEmail,
+            role: userProfile?.role || currentUserRole,
+          },
+          advisorName,
+          advisorPhone,
+          advisorEmail,
+          offerType: "comparison",
+          comparisonVariants,
+          finalNet: 0,
+          finalGross: 0,
+          vatRate: 0,
+          includeCatalogCards: comparisonCatalogCards.length > 0,
+          catalogCards: comparisonCatalogCards,
+          sellerNote: options.note,
+          includeOfferPdf: true,
+          offerPdfBase64,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error || "Nie udało się wysłać porównania ofert");
+      }
+
+      const variantSummary = comparisonVariants
+        .map(
+          (variant, index) =>
+            `${index + 1}. ${variant.name}: ${variant.finalGross.toLocaleString("pl-PL")} zł brutto`
+        )
+        .join("\n");
+      const { error: activityError } = await supabase
+        .from("client_activities")
+        .insert({
+          client_id: comparisonClientId,
+          created_by: userProfile?.id || null,
+          activity_type: "email",
+          status: "wyslano",
+          description: [
+            "Wysłano porównanie ofert mailowo z kalkulatora.",
+            `Odbiorca: ${emailForSend}`,
+            `Liczba wariantów: ${comparisonVariants.length}`,
+            "Załączono porównanie w PDF.",
+            comparisonCatalogCards.length > 0
+              ? `Załączono ${comparisonCatalogCards.length} unikalnych kart katalogowych urządzeń.`
+              : "Brak dostępnych kart katalogowych urządzeń.",
+            options.note ? `Notatka handlowca: ${options.note}` : null,
+            "",
+            variantSummary,
+          ].filter(Boolean).join("\n"),
+        });
+
+      if (activityError) {
+        setComparisonStatus(
+          `Mail został wysłany, ale nie udało się zapisać aktywności CRM: ${activityError.message}`
+        );
+        return;
+      }
+
+      void recordCrmAuditEvent({
+        eventType: "offer_comparison_sent",
+        action: "send",
+        module: "offers",
+        summary: `Wysłano porównanie ${comparisonVariants.length} wariantów do ${emailForSend}`,
+        entityType: "offer_comparison",
+        clientId: comparisonClientId,
+        correlationId: calculationAuditIdRef.current,
+        path: "/calculator",
+        metadata: {
+          recipient: emailForSend,
+          send_mode: options.mode,
+          variants_count: comparisonVariants.length,
+          pdf_attached: true,
+          catalog_cards_attached: comparisonCatalogCards.length,
+        },
+      });
+
+      setClientEmail(emailForSend);
+      setComparisonStatus(
+        comparisonCatalogCards.length > 0
+          ? `Porównanie zostało wysłane z PDF i ${comparisonCatalogCards.length} unikalnymi kartami katalogowymi.`
+          : "Porównanie zostało wysłane z PDF. Dla wybranych urządzeń nie znaleziono kart katalogowych."
+      );
+    } catch (error) {
+      console.error("Błąd wysyłki porównania ofert", error);
+      setComparisonStatus(
+        error instanceof Error ? error.message : "Nie udało się wysłać porównania ofert."
+      );
+    } finally {
+      setSendingComparison(false);
+    }
+  }
+
   async function sendOfferEmail(
     mode: "anonymous" | "public" = "anonymous",
     emailOptions?: OfferEmailOptions
@@ -2973,6 +3325,9 @@ IdeaSol`;
                   selectedClientId={selectedClientId}
                   crmClients={crmClients}
                   setSelectedClientId={setSelectedClientId}
+                  comparisonCount={comparisonVariants.length}
+                  addToComparison={addCurrentOfferToComparison}
+                  openComparison={() => setShowComparison(true)}
                   canSeeTechnicalView={canSeeTechnicalView}
                   currentUserRole={currentUserRole}
                   advisorName={advisorName}
@@ -3056,6 +3411,38 @@ IdeaSol`;
           </div>
         </section>
       </div>
+      <OfferComparisonModal
+        open={showComparison}
+        variants={comparisonVariants}
+        clientEmail={String(
+          crmClients.find(
+            (client) => client.id === comparisonVariants[0]?.clientId
+          )?.email || clientEmail || ""
+        )}
+        status={comparisonStatus}
+        sending={sendingComparison}
+        generatingPdf={generatingComparisonPdf}
+        onClose={() => setShowComparison(false)}
+        onRename={(variantId, name) =>
+          setComparisonVariants((current) =>
+            current.map((variant) =>
+              variant.id === variantId ? { ...variant, name } : variant
+            )
+          )
+        }
+        onRemove={(variantId) => {
+          setComparisonVariants((current) =>
+            current.filter((variant) => variant.id !== variantId)
+          );
+          setComparisonStatus("Wariant został usunięty z porównania.");
+        }}
+        onClear={() => {
+          setComparisonVariants([]);
+          setComparisonStatus("Porównanie zostało wyczyszczone.");
+        }}
+        onDownloadPdf={downloadOfferComparisonPdf}
+        onSend={sendOfferComparison}
+      />
     </main>
   );
 }

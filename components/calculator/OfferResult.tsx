@@ -188,6 +188,9 @@ type OfferResultProps = {
   hideSubsidy?: boolean;
   hideTechnicalDetails?: boolean;
   equipmentQuickEdit?: EquipmentQuickEdit;
+  comparisonCount?: number;
+  addToComparison?: () => void;
+  openComparison?: () => void;
 };
 
 
@@ -447,6 +450,9 @@ export default function OfferResult({
   hideSubsidy = false,
   hideTechnicalDetails = false,
   equipmentQuickEdit,
+  comparisonCount = 0,
+  addToComparison,
+  openComparison,
 }: OfferResultProps) {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
@@ -907,6 +913,27 @@ export default function OfferResult({
             </button>
           </div>
 
+          {addToComparison && openComparison && (
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <button
+                type="button"
+                onClick={addToComparison}
+                disabled={!selectedClientId || comparisonCount >= 5}
+                className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-600"
+              >
+                Dodaj do porównania
+              </button>
+              <button
+                type="button"
+                onClick={openComparison}
+                className="min-w-16 rounded-xl bg-[#0c2349] px-3 py-3 text-sm font-black text-white transition hover:bg-[#16396e]"
+                title="Otwórz porównanie ofert"
+              >
+                {comparisonCount}/5
+              </button>
+            </div>
+          )}
+
           {saveOfferToCrm && (
             savedOfferId ? (
               <Link href={`/offers/${savedOfferId}?createSale=1`} className="flex w-full items-center justify-center rounded-xl bg-orange-500 px-4 py-3 text-sm font-black text-white transition hover:bg-orange-400">Wygeneruj sprzedaż</Link>
@@ -1183,6 +1210,26 @@ export default function OfferResult({
             <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Generowanie PDF...</span>
           )}
         </div>
+
+        {addToComparison && openComparison && (
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <button
+              type="button"
+              onClick={addToComparison}
+              disabled={!selectedClientId || comparisonCount >= 5}
+              className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm font-black text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200 dark:disabled:border-slate-800 dark:disabled:bg-slate-900 dark:disabled:text-slate-600"
+            >
+              Dodaj ten wariant do porównania
+            </button>
+            <button
+              type="button"
+              onClick={openComparison}
+              className="rounded-2xl bg-[#0c2349] px-5 py-4 text-sm font-black text-white transition hover:bg-[#16396e]"
+            >
+              Porównanie {comparisonCount}/5
+            </button>
+          </div>
+        )}
 
         {copied && (
           <p className="text-sm text-slate-600 dark:text-slate-300">Skopiowano treść maila do schowka.</p>
