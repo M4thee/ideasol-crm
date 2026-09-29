@@ -24,6 +24,7 @@ import {
   rankInvertersForStorage,
 } from "@/lib/calculator/equipmentCompatibility";
 import { isPmeApplicationServiceName } from "@/lib/calculator/additionalServiceRules";
+import { groupEquipmentByManufacturer } from "@/lib/calculator/equipmentDropdowns";
 import {
   ARIMR_PV_DIRECTIONS,
   ARIMR_PV_MOUNTINGS,
@@ -55,6 +56,7 @@ type CatalogStorage = {
   code: string;
   name: string;
   display_name: string | null;
+  manufacturer?: string | null;
   capacity_kwh: number;
   voltage_type?: "low_voltage" | "high_voltage" | null;
   voltageType?: "low_voltage" | "high_voltage" | null;
@@ -65,6 +67,7 @@ type CatalogStorage = {
 type CatalogInverter = {
   name: string;
   display_name: string | null;
+  manufacturer?: string | null;
   type: string;
   battery_voltage_type?: "low_voltage" | "high_voltage" | null;
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
@@ -641,6 +644,16 @@ export default function OfferForm({
     );
   }, [storages, storageVoltageFilter]);
 
+  const storageGroups = useMemo(
+    () =>
+      groupEquipmentByManufacturer(
+        storagesToShow,
+        (storageItem) => Number(storageItem.capacity_kwh || 0),
+        (storageItem) => storageItem.display_name || storageItem.name
+      ),
+    [storagesToShow]
+  );
+
   const selectedStorageItem = useMemo(
     () => storages.find((storageItem) => storageItem.code === storage) || null,
     [storage, storages]
@@ -658,6 +671,35 @@ export default function OfferForm({
     if (!hasStorageSelected || !selectedStorageItem) return inverters;
     return rankInvertersForStorage(inverters, selectedStorageItem);
   }, [hasStorageSelected, inverters, selectedStorageItem]);
+
+  const compatibleInvertersToShow = useMemo(
+    () =>
+      invertersToShow.filter((inverterItem) => {
+        if (hasStorageSelected) {
+          const inverterVoltageType =
+            inverterItem.battery_voltage_type || inverterItem.batteryVoltageType;
+
+          return (
+            inverterItem.type === "hybrid" &&
+            Boolean(inverterVoltageType) &&
+            inverterVoltageType === selectedStorageVoltageType
+          );
+        }
+
+        return inverterItem.type !== "hybrid";
+      }),
+    [hasStorageSelected, invertersToShow, selectedStorageVoltageType]
+  );
+
+  const inverterGroups = useMemo(
+    () =>
+      groupEquipmentByManufacturer(
+        compatibleInvertersToShow,
+        (inverterItem) => Number(inverterItem.max_pv_kw || 0),
+        (inverterItem) => inverterItem.display_name || inverterItem.name
+      ),
+    [compatibleInvertersToShow]
+  );
 
   const existingPvPowerNumber = Number(String(existingPvPowerKw || "0").replace(",", "."));
   const canConfigureOffer =
@@ -1744,10 +1786,18 @@ export default function OfferForm({
                           setResult(null);
                         }}
                       >
-                        {storagesToShow.map((storageItem) => (
-                          <option key={storageItem.code} value={storageItem.code}>
-                            {storageItem.name} ({getStorageVoltageLabel(getStorageVoltageType(storageItem))})
-                          </option>
+                        {storageGroups.map((group) => (
+                          <optgroup key={group.manufacturer} label={group.manufacturer}>
+                            {group.items.map((storageItem) => (
+                              <option key={storageItem.code} value={storageItem.code}>
+                                {storageItem.display_name || storageItem.name} ({Number(
+                                  storageItem.capacity_kwh
+                                ).toLocaleString("pl-PL")} kWh, {getStorageVoltageLabel(
+                                  getStorageVoltageType(storageItem)
+                                )})
+                              </option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                     </label>
@@ -1810,22 +1860,17 @@ export default function OfferForm({
                       ? "Automatycznie dobierz zgodny zestaw"
                       : "Automatycznie dobierz falownik sieciowy pod moc instalacji"}
                   </option>
-                  {invertersToShow
-                    .filter((inverterItem) => {
-                      if (hasStorageSelected) {
-                        const inverterVoltageType =
-                          inverterItem.battery_voltage_type || inverterItem.batteryVoltageType;
-                        return inverterItem.type === "hybrid" &&
-                          Boolean(inverterVoltageType) &&
-                          inverterVoltageType === selectedStorageVoltageType;
-                      }
-                      return inverterItem.type !== "hybrid";
-                    })
-                    .map((inverterItem, index) => (
-                      <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
-                        {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(inverterItem.max_pv_kw).toLocaleString("pl-PL")} kWp
-                      </option>
-                    ))}
+                  {inverterGroups.map((group) => (
+                    <optgroup key={group.manufacturer} label={group.manufacturer}>
+                      {group.items.map((inverterItem, index) => (
+                        <option key={`${inverterItem.name}-${inverterItem.type}-${index}`} value={inverterItem.name}>
+                          {inverterItem.type === "hybrid" ? "Hybrydowy" : "Sieciowy"} — {inverterItem.display_name || inverterItem.name} — do {Number(
+                            inverterItem.max_pv_kw
+                          ).toLocaleString("pl-PL")} kWp
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               </label>
             )

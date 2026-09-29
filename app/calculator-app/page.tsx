@@ -169,6 +169,7 @@ type CatalogStorage = {
   code: string;
   name: string;
   display_name: string | null;
+  manufacturer?: string | null;
   capacity_kwh: number;
   voltage_type?: "low_voltage" | "high_voltage" | null;
   voltageType?: "low_voltage" | "high_voltage" | null;
@@ -183,6 +184,7 @@ type CatalogStorage = {
 type CatalogInverter = {
   name: string;
   display_name: string | null;
+  manufacturer?: string | null;
   type: string;
   battery_voltage_type?: "low_voltage" | "high_voltage" | null;
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
@@ -244,7 +246,7 @@ const CRM_CLIENTS_CACHE_KEY = "ideasol:calculator:crmClients:v1";
 const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
 const OFFLINE_CRM_OFFER_QUEUE_KEY = "ideasol:calculator:offlineCrmOfferQueue:v1";
 const OFFLINE_SYNC_STATUS_KEY = "ideasol:offlineSyncStatus:v1";
-const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v2";
+const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v3";
 const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
 const CALCULATOR_PROFILE_CACHE_KEY = "ideasol:calculator:profile:v1";
 
@@ -1498,6 +1500,7 @@ export default function Home() {
             code,
             name: catalogStorage.name,
             display_name: catalogStorage.displayName || catalogStorage.name,
+            manufacturer: catalogStorage.manufacturer || null,
             capacity_kwh: catalogStorage.capacityKwh,
             voltage_type: storageVoltageType,
             voltageType: storageVoltageType,
@@ -1525,6 +1528,7 @@ export default function Home() {
         return {
           name: inverter.name,
           display_name: inverter.displayName || inverter.name,
+          manufacturer: inverter.manufacturer || null,
           type: inverter.type,
           battery_voltage_type: inverterBatteryVoltageType,
           batteryVoltageType: inverterBatteryVoltageType,

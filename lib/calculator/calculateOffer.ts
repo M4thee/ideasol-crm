@@ -65,6 +65,7 @@ export type PanelItem = {
 export type InverterItem = {
   name: string;
   displayName: string;
+  manufacturer?: string | null;
   type: string;
   batteryVoltageType?: "low_voltage" | "high_voltage" | null;
   maxPvKw: number;
@@ -77,6 +78,7 @@ export type InverterItem = {
 export type StorageItem = {
   name: string;
   displayName: string;
+  manufacturer?: string | null;
   capacityKwh: number;
   voltageType?: "low_voltage" | "high_voltage" | null;
   priceNet: number;

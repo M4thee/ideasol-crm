@@ -30,6 +30,7 @@ type PanelItem = {
 type InverterItem = {
   name: string;
   displayName: string;
+  manufacturer: string | null;
   maxPvKw: number;
   priceNet: number;
   type: "ongrid" | "hybrid";
@@ -42,6 +43,7 @@ type InverterItem = {
 type StorageItem = {
   name: string;
   displayName: string;
+  manufacturer: string | null;
   capacityKwh: number;
   voltageType: "low_voltage" | "high_voltage" | null;
   priceNet: number;
@@ -53,6 +55,7 @@ type StorageItem = {
 const NO_STORAGE_ITEM: StorageItem = {
   name: "Brak",
   displayName: "Brak",
+  manufacturer: null,
   capacityKwh: 0,
   voltageType: "low_voltage",
   priceNet: 0,
@@ -102,12 +105,12 @@ async function loadCatalogFromSupabase() {
       .order("power_wp", { ascending: true }),
     catalogSupabase
       .from("inverters")
-      .select("name, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
+      .select("name, manufacturer, display_name, type, battery_voltage_type, max_pv_kw, price_net, catalog_card_url, is_eu, has_ems, active")
       .eq("active", true)
       .order("max_pv_kw", { ascending: true }),
     catalogSupabase
       .from("storages")
-      .select("code, name, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
+      .select("code, name, manufacturer, display_name, capacity_kwh, voltage_type, price_net, installation_net, catalog_card_url, is_eu, active")
       .eq("active", true)
       .order("capacity_kwh", { ascending: true }),
   ]);
@@ -143,6 +146,7 @@ async function loadCatalogFromSupabase() {
   const inverters = invertersFromDb.map((inverter: any) => ({
       name: inverter.name,
       displayName: inverter.display_name || inverter.name,
+      manufacturer: inverter.manufacturer || null,
       type: inverter.type,
       batteryVoltageType: inverter.battery_voltage_type || null,
       catalogCardUrl: inverter.catalog_card_url || null,
@@ -158,6 +162,7 @@ async function loadCatalogFromSupabase() {
         {
           name: storage.name,
           displayName: storage.display_name || storage.name,
+          manufacturer: storage.manufacturer || null,
           capacityKwh: Number(storage.capacity_kwh),
           voltageType: storage.voltage_type || null,
           priceNet: Number(storage.price_net),
