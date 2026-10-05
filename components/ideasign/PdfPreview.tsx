@@ -18,6 +18,7 @@ export default function PdfPreview({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef(false);
+  const loadTimeoutRef = useRef<number | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [pageWidth, setPageWidth] = useState(760);
   const [loadError, setLoadError] = useState("");
@@ -29,9 +30,15 @@ export default function PdfPreview({
   useEffect(() => {
     if (renderedRef.current) return;
     const timeout = window.setTimeout(() => {
+      if (renderedRef.current) return;
+      loadTimeoutRef.current = null;
       setLoadError("Wczytywanie dokumentu trwa zbyt długo. Zamknij podgląd i spróbuj ponownie.");
     }, 20_000);
-    return () => window.clearTimeout(timeout);
+    loadTimeoutRef.current = timeout;
+    return () => {
+      window.clearTimeout(timeout);
+      if (loadTimeoutRef.current === timeout) loadTimeoutRef.current = null;
+    };
   }, [file]);
 
   useEffect(() => {
@@ -47,11 +54,19 @@ export default function PdfPreview({
   function confirmRendered() {
     if (renderedRef.current) return;
     renderedRef.current = true;
+    if (loadTimeoutRef.current !== null) {
+      window.clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
     setLoadError("");
     onRendered();
   }
 
   function showLoadError(error: unknown, stage: "source" | "document" | "page") {
+    if (loadTimeoutRef.current !== null) {
+      window.clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
     const name = error instanceof Error ? error.name : "UnknownError";
     const message = error instanceof Error ? error.message : String(error);
     console.warn(
