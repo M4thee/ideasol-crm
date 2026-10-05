@@ -40,6 +40,15 @@ export type IdeaSignVisualSignatureDocument = {
   fileName: string;
 };
 
+export type IdeaSignAttachmentFivePersonalization = {
+  contractNumber: string;
+  contractDate: string;
+  clientName: string;
+  secondClientName?: string;
+  contractAddress: string;
+  installationAddress: string;
+};
+
 type CertificateAssets = {
   font: PDFFont;
   logo: PDFImage;
@@ -111,6 +120,148 @@ function fitText(font: PDFFont, value: string, maxWidth: number, size: number) {
     result = result.slice(0, -1);
   }
   return `${result.trimEnd()}…`;
+}
+
+function normalizePdfLabel(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isPme2AttachmentFive(document: IdeaSignVisualSignatureDocument) {
+  const label = normalizePdfLabel(`${document.title} ${document.fileName}`);
+  return label.includes("zalacznik nr 5") && label.includes("pme2");
+}
+
+function formatPolishDocumentDate(value: string) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00+02:00`)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("pl-PL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Europe/Warsaw",
+  }).format(date);
+}
+
+function drawPersonalizedValue(
+  page: PDFPage,
+  font: PDFFont,
+  value: string,
+  box: { x: number; y: number; width: number; height?: number; size?: number }
+) {
+  const size = box.size || 8.2;
+  page.drawRectangle({
+    x: box.x,
+    y: box.y - 2,
+    width: box.width,
+    height: box.height || 14,
+    color: WHITE,
+  });
+  page.drawText(fitText(font, value || "—", box.width - 2, size), {
+    x: box.x + 1,
+    y: box.y + 1,
+    size,
+    font,
+    color: NAVY,
+  });
+}
+
+function drawPersonalizedTwoLineValue(
+  page: PDFPage,
+  font: PDFFont,
+  value: string,
+  first: { x: number; y: number; width: number },
+  second: { x: number; y: number; width: number },
+  size: number
+) {
+  const words = value.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+  const firstLine: string[] = [];
+  while (words.length) {
+    const candidate = [...firstLine, words[0]].join(" ");
+    if (firstLine.length && font.widthOfTextAtSize(candidate, size) > first.width - 2) break;
+    firstLine.push(words.shift()!);
+  }
+  const remaining = words.join(" ");
+  drawPersonalizedValue(page, font, firstLine.join(" ") || "—", {
+    ...first,
+    size,
+  });
+  page.drawRectangle({
+    x: second.x,
+    y: second.y - 2,
+    width: second.width,
+    height: 14,
+    color: WHITE,
+  });
+  if (remaining) {
+    page.drawText(fitText(font, remaining, second.width - 2, size), {
+      x: second.x + 1,
+      y: second.y + 1,
+      size,
+      font,
+      color: NAVY,
+    });
+  }
+}
+
+export async function personalizeIdeaSignAttachmentFive(
+  bytes: Buffer,
+  document: IdeaSignVisualSignatureDocument,
+  values: IdeaSignAttachmentFivePersonalization
+) {
+  if (!isPme2AttachmentFive(document)) return bytes;
+  const pdf = await PDFDocument.load(bytes);
+  pdf.registerFontkit(fontkit);
+  const fontBytes = await readFile(
+    path.join(process.cwd(), "public", "fonts", "NotoSans-Regular.ttf")
+  );
+  const font = await pdf.embedFont(fontBytes, { subset: false });
+  const page = pdf.getPages()[0];
+  if (!page) return bytes;
+
+  drawPersonalizedValue(page, font, values.contractNumber, {
+    x: 112,
+    y: 721,
+    width: 146,
+  });
+  drawPersonalizedValue(page, font, formatPolishDocumentDate(values.contractDate), {
+    x: 366,
+    y: 721,
+    width: 80,
+  });
+  drawPersonalizedValue(page, font, values.clientName, {
+    x: 151,
+    y: 700,
+    width: 292,
+  });
+  drawPersonalizedValue(page, font, values.secondClientName || "nie dotyczy", {
+    x: 213,
+    y: 680,
+    width: 231,
+  });
+  drawPersonalizedTwoLineValue(
+    page,
+    font,
+    values.contractAddress,
+    { x: 203, y: 659, width: 241 },
+    { x: 42, y: 646, width: 402 },
+    7.7
+  );
+  drawPersonalizedValue(page, font, values.installationAddress, {
+    x: 112,
+    y: 626,
+    width: 335,
+    size: 7.7,
+  });
+
+  return Buffer.from(await pdf.save());
 }
 
 function drawCheckSeal(page: PDFPage, x: number, y: number, verified: boolean) {
@@ -305,6 +456,22 @@ export function applyIdeaSignVisualSignatures(
     placeAndDate(0, signer2?.signedAt, { x: 64, y: 196, width: 190 });
     stamp(0, signer1 ? clientCard(signer1) : null, { x: 334, y: 347, width: 205, height: 29 });
     stamp(0, signer2 ? clientCard(signer2) : null, { x: 334, y: 160, width: 205, height: 29 });
+    return;
+  }
+
+  if (isPme2AttachmentFive(document)) {
+    const pageIndex = pages.length - 1;
+    pages[pageIndex].drawRectangle({
+      x: 39,
+      y: 136,
+      width: 411,
+      height: 51,
+      color: WHITE,
+    });
+    placeAndDate(pageIndex, params.concludedAt, { x: 132, y: 190, width: 305, size: 6.8 });
+    stamp(pageIndex, offeror, { x: 42, y: 146, width: 127, height: 36 });
+    stamp(pageIndex, signer1 ? clientCard(signer1) : null, { x: 181, y: 146, width: 127, height: 36 });
+    stamp(pageIndex, signer2 ? clientCard(signer2) : null, { x: 319, y: 146, width: 127, height: 36 });
     return;
   }
 

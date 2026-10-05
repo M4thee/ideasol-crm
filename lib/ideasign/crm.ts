@@ -37,6 +37,7 @@ import {
   formatIdeaSignPolishPhone,
   normalizeIdeaSignPolishPhone,
 } from "./phone";
+import { personalizeIdeaSignAttachmentFive } from "./pdf-certificate";
 
 type IdeaSignCrmActor = {
   id: string;
@@ -59,6 +60,40 @@ type FrozenDocument = {
 };
 
 type IdeaSignContractData = Record<string, unknown>;
+
+export const IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE =
+  "IdeaSign — Załącznik nr 5";
+export const IDEA_SIGN_ATTACHMENT_FIVE_MAX_BYTES = 50 * 1024 * 1024;
+
+type IdeaSignAttachmentFiveRow = {
+  id: string;
+  description: string | null;
+  document_type: string | null;
+  file_name: string | null;
+  file_path: string;
+  file_type: string | null;
+  file_size: number | null;
+  created_at?: string | null;
+};
+
+function isIdeaSignAttachmentFive(document: {
+  document_type?: string | null;
+}) {
+  return document.document_type === IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE;
+}
+
+function ideaSignAttachmentFiveDto(document: IdeaSignAttachmentFiveRow) {
+  return {
+    id: document.id,
+    title: cleanText(
+      document.description || document.file_name || "Załącznik nr 5",
+      240
+    ),
+    fileName: document.file_name || "zalacznik-nr-5.pdf",
+    fileSize: Number(document.file_size || 0),
+    createdAt: document.created_at || null,
+  };
+}
 
 function bearerToken(request: Request) {
   const authorization = request.headers.get("authorization") || "";
@@ -331,6 +366,215 @@ export async function actorCanAccessSale(actor: IdeaSignCrmActor, sellerId: stri
   return data?.manager_id === actor.id;
 }
 
+async function getIdeaSignAttachmentFiveSale(
+  saleId: string,
+  actor: IdeaSignCrmActor
+) {
+  const { data: sale, error } = await supabaseAdmin
+    .from("sales")
+    .select("id, client_id, seller_id")
+    .eq("id", saleId)
+    .maybeSingle();
+  if (error) throw new Error(`Nie udało się odczytać sprzedaży: ${error.message}`);
+  if (!sale || !(await actorCanAccessSale(actor, sale.seller_id))) return null;
+  return sale;
+}
+
+async function getActiveIdeaSignSessionForAttachment(saleId: string) {
+  await expireOverdueIdeaSignSessions({ saleId });
+  const { data, error } = await supabaseAdmin
+    .from("contract_signature_sessions")
+    .select("transaction_id, status")
+    .eq("sale_id", saleId)
+    .not("status", "in", "(zawarta,wygasła,anulowana)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Nie udało się sprawdzić procesu IdeaSign: ${error.message}`);
+  return data;
+}
+
+async function loadLatestIdeaSignAttachmentFive(saleId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("sale_documents")
+    .select("id, description, document_type, file_name, file_path, file_type, file_size, created_at")
+    .eq("sale_id", saleId)
+    .eq("document_type", IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Nie udało się odczytać Załącznika nr 5: ${error.message}`);
+  return (data || null) as IdeaSignAttachmentFiveRow | null;
+}
+
+export async function getIdeaSignAttachmentFiveState(
+  saleId: string,
+  actor: IdeaSignCrmActor
+) {
+  const sale = await getIdeaSignAttachmentFiveSale(saleId, actor);
+  if (!sale) return null;
+  const [attachment, active] = await Promise.all([
+    loadLatestIdeaSignAttachmentFive(saleId),
+    getActiveIdeaSignSessionForAttachment(saleId),
+  ]);
+  return {
+    attachment: attachment ? ideaSignAttachmentFiveDto(attachment) : null,
+    locked: Boolean(active),
+    activeTransactionId: active?.transaction_id || null,
+    activeStatus: active?.status || null,
+  };
+}
+
+export async function uploadIdeaSignAttachmentFive(params: {
+  saleId: string;
+  actor: IdeaSignCrmActor;
+  fileName: string;
+  bytes: Buffer;
+}) {
+  if (!params.actor.canSend) {
+    return { ok: false as const, status: 403, error: "Brak uprawnienia do przygotowania umowy IdeaSign." };
+  }
+  const sale = await getIdeaSignAttachmentFiveSale(params.saleId, params.actor);
+  if (!sale) return { ok: false as const, status: 403, error: "Brak dostępu do sprzedaży." };
+  if (await getActiveIdeaSignSessionForAttachment(params.saleId)) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Załącznika nr 5 nie można zmieniać po rozpoczęciu procesu IdeaSign.",
+    };
+  }
+
+  const originalName = cleanText(params.fileName, 220);
+  if (!/\.pdf$/i.test(originalName)) {
+    return { ok: false as const, status: 400, error: "Załącznik nr 5 musi być plikiem PDF." };
+  }
+  if (
+    params.bytes.length === 0 ||
+    params.bytes.length > IDEA_SIGN_ATTACHMENT_FIVE_MAX_BYTES
+  ) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Wybierz plik PDF o rozmiarze do 50 MB.",
+    };
+  }
+  if (!params.bytes.subarray(0, 1024).toString("latin1").includes("%PDF-")) {
+    return { ok: false as const, status: 400, error: "Wybrany plik nie jest prawidłowym dokumentem PDF." };
+  }
+
+  let pdf: PDFDocument;
+  try {
+    pdf = await PDFDocument.load(params.bytes, { ignoreEncryption: false });
+    if (pdf.getPageCount() < 1) throw new Error("empty-pdf");
+  } catch {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Nie udało się odczytać PDF. Plik może być uszkodzony lub zabezpieczony hasłem.",
+    };
+  }
+
+  const metadataTitle = cleanText(pdf.getTitle(), 200);
+  const baseTitle = metadataTitle || originalName.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ");
+  const title = normalizeDocumentText(baseTitle).includes("zalacznik nr 5")
+    ? baseTitle
+    : `Załącznik nr 5 — ${baseTitle}`;
+  const storedName = safeFileName(originalName, "zalacznik-nr-5.pdf");
+  const storagePath = `${params.saleId}/ideasign-inputs/attachment-5/${randomUUID()}-${storedName}`;
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from("sale-documents")
+    .upload(storagePath, params.bytes, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+  if (uploadError) {
+    return {
+      ok: false as const,
+      status: 500,
+      error: `Nie udało się zapisać Załącznika nr 5: ${uploadError.message}`,
+    };
+  }
+
+  const { data: document, error: insertError } = await supabaseAdmin
+    .from("sale_documents")
+    .insert({
+      sale_id: params.saleId,
+      client_id: sale.client_id,
+      uploaded_by: params.actor.id,
+      description: cleanText(title, 240),
+      document_type: IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE,
+      file_name: storedName,
+      file_path: storagePath,
+      file_type: "application/pdf",
+      file_size: params.bytes.length,
+    })
+    .select("id, description, document_type, file_name, file_path, file_type, file_size, created_at")
+    .single();
+  if (insertError || !document) {
+    await supabaseAdmin.storage.from("sale-documents").remove([storagePath]);
+    return {
+      ok: false as const,
+      status: 500,
+      error: `Nie udało się przypisać Załącznika nr 5 do sprzedaży: ${insertError?.message || "brak danych"}`,
+    };
+  }
+
+  return {
+    ok: true as const,
+    attachment: ideaSignAttachmentFiveDto(document as IdeaSignAttachmentFiveRow),
+  };
+}
+
+export async function deleteIdeaSignAttachmentFive(params: {
+  saleId: string;
+  actor: IdeaSignCrmActor;
+}) {
+  if (!params.actor.canSend) {
+    return { ok: false as const, status: 403, error: "Brak uprawnienia do przygotowania umowy IdeaSign." };
+  }
+  const sale = await getIdeaSignAttachmentFiveSale(params.saleId, params.actor);
+  if (!sale) return { ok: false as const, status: 403, error: "Brak dostępu do sprzedaży." };
+  if (await getActiveIdeaSignSessionForAttachment(params.saleId)) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Załącznika nr 5 nie można usunąć po rozpoczęciu procesu IdeaSign.",
+    };
+  }
+
+  const { data: documents, error } = await supabaseAdmin
+    .from("sale_documents")
+    .select("id, file_path")
+    .eq("sale_id", params.saleId)
+    .eq("document_type", IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE);
+  if (error) {
+    return { ok: false as const, status: 500, error: `Nie udało się odczytać załącznika: ${error.message}` };
+  }
+  if (!documents?.length) return { ok: true as const, attachment: null };
+
+  const paths = documents.map((document) => document.file_path).filter(Boolean);
+  if (paths.length) {
+    const { error: storageError } = await supabaseAdmin.storage
+      .from("sale-documents")
+      .remove(paths);
+    if (storageError) {
+      return {
+        ok: false as const,
+        status: 500,
+        error: `Nie udało się usunąć pliku Załącznika nr 5: ${storageError.message}`,
+      };
+    }
+  }
+  const { error: deleteError } = await supabaseAdmin
+    .from("sale_documents")
+    .delete()
+    .in("id", documents.map((document) => document.id));
+  if (deleteError) {
+    return { ok: false as const, status: 500, error: `Nie udało się usunąć Załącznika nr 5: ${deleteError.message}` };
+  }
+  return { ok: true as const, attachment: null };
+}
+
 async function extractPdfPages(source: Buffer, pageIndices: number[]) {
   const sourcePdf = await PDFDocument.load(source);
   const outputPdf = await PDFDocument.create();
@@ -442,6 +686,7 @@ async function freezeExistingAttachments(saleId: string) {
   if (error) throw new Error(`Nie udało się odczytać załączników: ${error.message}`);
 
   const candidates = (documents || []).filter((document) => {
+    if (isIdeaSignAttachmentFive(document)) return false;
     const isPdf = document.file_type === "application/pdf" || /\.pdf$/i.test(document.file_name || "");
     const isPreviousIdeaSignResult = String(document.file_path || "").includes("/ideasign/");
     const normalized = normalizeDocumentText(
@@ -479,11 +724,64 @@ async function freezeExistingAttachments(saleId: string) {
   return result;
 }
 
+async function freezeIdeaSignAttachmentFive(
+  saleId: string,
+  documentId: string,
+  contractData: IdeaSignContractData
+) {
+  const { data: document, error } = await supabaseAdmin
+    .from("sale_documents")
+    .select("id, description, document_type, file_name, file_path, file_type, file_size")
+    .eq("id", documentId)
+    .eq("sale_id", saleId)
+    .maybeSingle();
+  if (error) throw new Error(`Nie udało się odczytać Załącznika nr 5: ${error.message}`);
+  if (!document || !isIdeaSignAttachmentFive(document)) return null;
+  const isPdf = document.file_type === "application/pdf" || /\.pdf$/i.test(document.file_name || "");
+  if (!isPdf) return null;
+
+  const { data, error: downloadError } = await supabaseAdmin.storage
+    .from("sale-documents")
+    .download(document.file_path);
+  if (downloadError || !data) {
+    throw new Error("Nie udało się zamrozić Załącznika nr 5.");
+  }
+  const sourceBytes = Buffer.from(await data.arrayBuffer());
+  if (sourceBytes.length === 0 || sourceBytes.length > IDEA_SIGN_ATTACHMENT_FIVE_MAX_BYTES) {
+    throw new Error("Załącznik nr 5 ma nieprawidłowy rozmiar.");
+  }
+  const title = cleanText(document.description || document.file_name || "Załącznik nr 5", 240);
+  const fileName = safeFileName(document.file_name || "zalacznik-nr-5.pdf", "zalacznik-nr-5.pdf");
+  const bytes = await personalizeIdeaSignAttachmentFive(
+    sourceBytes,
+    { kind: "attachment", title, fileName },
+    {
+      contractNumber: cleanText(contractData.contractNumber, 120),
+      contractDate: cleanText(contractData.contractDate, 20),
+      clientName: cleanText(contractData.clientName, 200),
+      secondClientName: cleanText(contractData.secondClientName, 200),
+      contractAddress: cleanText(contractData.contractAddress, 500),
+      installationAddress: cleanText(contractData.installationAddress, 500),
+    }
+  );
+  return {
+    id: randomUUID(),
+    kind: "attachment",
+    title,
+    fileName,
+    bytes,
+    hash: sha256(bytes),
+    containerKey: "contracts",
+    sourcePath: document.file_path,
+  } satisfies FrozenDocument;
+}
+
 export async function createAndSendIdeaSignSession(params: {
   saleId: string;
   actor: IdeaSignCrmActor;
   request: Request;
   contractData: IdeaSignContractData;
+  attachmentFiveDocumentId?: string | null;
 }) {
   if (!params.actor.canSend) {
     return { ok: false as const, status: 403, error: "Brak uprawnienia do wysyłki umów IdeaSign." };
@@ -626,13 +924,41 @@ export async function createAndSendIdeaSignSession(params: {
       ? [{ order: 2, name: secondClientName, email: secondClientEmail, phone: secondClientPhone, token: createSecretToken() }]
       : []),
   ];
-  const documents: FrozenDocument[] = [
-    ...(await freezeAgreementPackage(
+  const attachmentFiveDocumentId = cleanText(params.attachmentFiveDocumentId, 80);
+  if (
+    attachmentFiveDocumentId &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      attachmentFiveDocumentId
+    )
+  ) {
+    return { ok: false as const, status: 422, error: "Nieprawidłowy Załącznik nr 5." };
+  }
+  const [agreementPackage, existingAttachments, attachmentFive] = await Promise.all([
+    freezeAgreementPackage(
       sale.id,
       String(sale.contract_number || sale.sale_public_id || sale.public_id || sale.id),
       params.request
-    )),
-    ...(await freezeExistingAttachments(sale.id)),
+    ),
+    freezeExistingAttachments(sale.id),
+    attachmentFiveDocumentId
+      ? freezeIdeaSignAttachmentFive(sale.id, attachmentFiveDocumentId, params.contractData)
+      : Promise.resolve(null),
+  ]);
+  if (attachmentFiveDocumentId && !attachmentFive) {
+    return {
+      ok: false as const,
+      status: 422,
+      error: "Wybrany Załącznik nr 5 nie istnieje lub nie należy do tej sprzedaży.",
+    };
+  }
+  const attachmentFivePosition = agreementPackage.findIndex(
+    (document) => document.kind === "consumer_information"
+  ) + 1;
+  const documents: FrozenDocument[] = [
+    ...agreementPackage.slice(0, attachmentFivePosition),
+    ...(attachmentFive ? [attachmentFive] : []),
+    ...agreementPackage.slice(attachmentFivePosition),
+    ...existingAttachments,
   ];
   const manifest = documents.map((document, index) => ({
     id: document.id,

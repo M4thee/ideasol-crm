@@ -58,6 +58,7 @@ export async function POST(request: Request, context: RouteContext) {
       transactionId?: unknown;
       code?: unknown;
       contractData?: unknown;
+      attachmentFiveDocumentId?: unknown;
     } | null;
     const action = String(body?.action || "prepare");
     if (action === "authorize") {
@@ -93,6 +94,10 @@ export async function POST(request: Request, context: RouteContext) {
       actor,
       request,
       contractData: contractData as Record<string, unknown>,
+      attachmentFiveDocumentId:
+        typeof body?.attachmentFiveDocumentId === "string"
+          ? body.attachmentFiveDocumentId
+          : null,
     });
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });

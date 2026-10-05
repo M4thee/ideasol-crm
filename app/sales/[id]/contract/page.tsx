@@ -86,6 +86,21 @@ type IdeaSignSendResponse = {
   signerLinks?: unknown;
 };
 
+type IdeaSignAttachmentFive = {
+  id: string;
+  title: string;
+  fileName: string;
+  fileSize: number;
+  createdAt: string | null;
+};
+
+type IdeaSignAttachmentFiveResponse = {
+  error?: string;
+  attachment?: IdeaSignAttachmentFive | null;
+  locked?: boolean;
+  activeTransactionId?: string | null;
+};
+
 function todayLocalDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -103,6 +118,15 @@ function addDaysLocalDate(dateValue: string, days: number) {
 
 function asText(value: unknown) {
   return String(value ?? "");
+}
+
+function formatFileSize(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "PDF";
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toLocaleString("pl-PL", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} MB`;
 }
 
 function parseMoneyValue(value: unknown) {
@@ -157,6 +181,11 @@ export default function SaleContractPage() {
   const [localIdeaSignLinks, setLocalIdeaSignLinks] = useState<LocalIdeaSignLink[]>([]);
   const [localIdeaSignDeliveryMode, setLocalIdeaSignDeliveryMode] = useState<"live" | "simulated">("simulated");
   const [localIdeaSignDemoOtp, setLocalIdeaSignDemoOtp] = useState("");
+  const [ideaSignAttachmentFive, setIdeaSignAttachmentFive] =
+    useState<IdeaSignAttachmentFive | null>(null);
+  const [ideaSignAttachmentFiveLocked, setIdeaSignAttachmentFiveLocked] = useState(false);
+  const [ideaSignAttachmentFiveBusy, setIdeaSignAttachmentFiveBusy] = useState(false);
+  const [ideaSignAttachmentFiveStatus, setIdeaSignAttachmentFiveStatus] = useState("");
   const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
     createEmptyCustomPaymentSchedule
   );
@@ -401,6 +430,37 @@ export default function SaleContractPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [loadContractData]);
 
+  const loadIdeaSignAttachmentFive = useCallback(async () => {
+    if (!hasIdeaSignSendAccess) return;
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) return;
+      const response = await fetch(`/api/ideasign/sales/${saleId}/attachment-5`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+      });
+      const result = (await response.json().catch(() => ({}))) as IdeaSignAttachmentFiveResponse;
+      if (!response.ok) throw new Error(result.error || "Nie udało się odczytać Załącznika nr 5.");
+      setIdeaSignAttachmentFive(result.attachment || null);
+      setIdeaSignAttachmentFiveLocked(Boolean(result.locked));
+    } catch (attachmentError) {
+      setIdeaSignAttachmentFiveStatus(
+        attachmentError instanceof Error
+          ? attachmentError.message
+          : "Nie udało się odczytać Załącznika nr 5."
+      );
+    }
+  }, [hasIdeaSignSendAccess, saleId]);
+
+  useEffect(() => {
+    if (!hasIdeaSignSendAccess) return;
+    const frame = window.requestAnimationFrame(() => {
+      void loadIdeaSignAttachmentFive();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hasIdeaSignSendAccess, loadIdeaSignAttachmentFive]);
+
   function updateField(field: keyof ContractForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
   }
@@ -600,6 +660,83 @@ export default function SaleContractPage() {
     window.open(`/sales/${saleId}/contract-pdf?${query.toString()}`, "_blank");
   }
 
+  async function uploadIdeaSignAttachmentFive(file: File) {
+    if (ideaSignAttachmentFiveBusy || ideaSignAttachmentFiveLocked) return;
+    setIdeaSignAttachmentFiveStatus("");
+    if (!/\.pdf$/i.test(file.name) || (file.type && file.type !== "application/pdf")) {
+      setIdeaSignAttachmentFiveStatus("Wybierz dokument w formacie PDF.");
+      return;
+    }
+    if (file.size === 0 || file.size > 50 * 1024 * 1024) {
+      setIdeaSignAttachmentFiveStatus("Wybierz plik PDF o rozmiarze do 50 MB.");
+      return;
+    }
+    setIdeaSignAttachmentFiveBusy(true);
+    setIdeaSignAttachmentFiveStatus("Wgrywam i sprawdzam dokument…");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+      const formData = new FormData();
+      formData.set("file", file);
+      const response = await fetch(`/api/ideasign/sales/${saleId}/attachment-5`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const result = (await response.json().catch(() => ({}))) as IdeaSignAttachmentFiveResponse;
+      if (!response.ok || !result.attachment) {
+        throw new Error(result.error || "Nie udało się dodać Załącznika nr 5.");
+      }
+      setIdeaSignAttachmentFive(result.attachment);
+      setIdeaSignAttachmentFiveStatus(
+        "Załącznik jest gotowy. Dane klienta, data i numer umowy zostaną naniesione podczas zamrażania pakietu."
+      );
+    } catch (attachmentError) {
+      setIdeaSignAttachmentFiveStatus(
+        attachmentError instanceof Error
+          ? attachmentError.message
+          : "Nie udało się dodać Załącznika nr 5."
+      );
+    } finally {
+      setIdeaSignAttachmentFiveBusy(false);
+    }
+  }
+
+  async function removeIdeaSignAttachmentFive() {
+    if (
+      ideaSignAttachmentFiveBusy ||
+      ideaSignAttachmentFiveLocked ||
+      !ideaSignAttachmentFive ||
+      !window.confirm("Usunąć opcjonalny Załącznik nr 5 z tej sprzedaży?")
+    ) {
+      return;
+    }
+    setIdeaSignAttachmentFiveBusy(true);
+    setIdeaSignAttachmentFiveStatus("Usuwam dokument…");
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+      const response = await fetch(`/api/ideasign/sales/${saleId}/attachment-5`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const result = (await response.json().catch(() => ({}))) as IdeaSignAttachmentFiveResponse;
+      if (!response.ok) throw new Error(result.error || "Nie udało się usunąć Załącznika nr 5.");
+      setIdeaSignAttachmentFive(null);
+      setIdeaSignAttachmentFiveStatus("Załącznik nr 5 został usunięty.");
+    } catch (attachmentError) {
+      setIdeaSignAttachmentFiveStatus(
+        attachmentError instanceof Error
+          ? attachmentError.message
+          : "Nie udało się usunąć Załącznika nr 5."
+      );
+    } finally {
+      setIdeaSignAttachmentFiveBusy(false);
+    }
+  }
+
   async function sendToIdeaSign() {
     if (sendingIdeaSign || !hasIdeaSignSendAccess) return;
     setIdeaSignStatus("");
@@ -617,7 +754,9 @@ export default function SaleContractPage() {
     if (!query) return;
 
     const confirmed = window.confirm(
-      "Zapisać i zamrozić tę wersję umowy? Otrzymasz kod SMS do jej autoryzacji. Linki do klientów zostaną wysłane dopiero po wpisaniu poprawnego kodu."
+      `Zapisać i zamrozić tę wersję umowy${
+        ideaSignAttachmentFive ? " wraz z opcjonalnym Załącznikiem nr 5" : ""
+      }? Otrzymasz kod SMS do jej autoryzacji. Linki do klientów zostaną wysłane dopiero po wpisaniu poprawnego kodu.`
     );
     if (!confirmed) return;
 
@@ -634,7 +773,10 @@ export default function SaleContractPage() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ contractData: Object.fromEntries(query.entries()) }),
+        body: JSON.stringify({
+          contractData: Object.fromEntries(query.entries()),
+          attachmentFiveDocumentId: ideaSignAttachmentFive?.id || null,
+        }),
       });
       const responseText = await response.text();
       let result: IdeaSignSendResponse = {};
@@ -652,6 +794,7 @@ export default function SaleContractPage() {
       }
       if (!response.ok) throw new Error(result.error || "Nie udało się wysłać umowy do IdeaSign.");
       if (result.authorizationRequired && result.transactionId) {
+        setIdeaSignAttachmentFiveLocked(true);
         setOfferorAuthorization({
           transactionId: result.transactionId,
           phoneMasked: result.phoneMasked || "numer z profilu CRM",
@@ -675,6 +818,7 @@ export default function SaleContractPage() {
           )
         : [];
       setLocalIdeaSignLinks(localLinks);
+      setIdeaSignAttachmentFiveLocked(true);
       setLocalIdeaSignDeliveryMode(result.deliveryMode === "live" ? "live" : "simulated");
       setLocalIdeaSignDemoOtp(typeof result.demoOtp === "string" ? result.demoOtp : "");
       setIdeaSignStatus(
@@ -1394,6 +1538,90 @@ export default function SaleContractPage() {
         </section>
 
         <div className="flex flex-col items-end gap-3">
+          {hasIdeaSignSendAccess && (
+            <section className="w-full overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M7.5 3.75h6.25L18 8v12.25H7.5z" />
+                      <path d="M13.5 3.75V8H18M10 12h5M10 15.5h5" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-black text-slate-950">Opcjonalny Załącznik nr 5</h3>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                        PDF · do 50 MB
+                      </span>
+                    </div>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                      Dodany dokument otrzyma własny SHA-256 i osobną akceptację klienta. W obsługiwanym wzorze
+                      naniesiemy dane klienta, numer oraz datę umowy przed zamrożeniem pakietu.
+                    </p>
+                  </div>
+                </div>
+
+                {!ideaSignAttachmentFiveLocked && (
+                  <label className={`inline-flex shrink-0 cursor-pointer items-center justify-center rounded-xl border px-4 py-3 text-sm font-black transition ${
+                    ideaSignAttachmentFiveBusy
+                      ? "cursor-wait border-slate-200 bg-slate-100 text-slate-400"
+                      : "border-slate-300 bg-white text-slate-800 hover:border-slate-500 hover:bg-slate-50"
+                  }`}>
+                    {ideaSignAttachmentFiveBusy
+                      ? "Przetwarzam…"
+                      : ideaSignAttachmentFive
+                        ? "Zastąp PDF"
+                        : "Dodaj PDF"}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="sr-only"
+                      disabled={ideaSignAttachmentFiveBusy}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) void uploadIdeaSignAttachmentFive(file);
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {ideaSignAttachmentFive && (
+                <div className="border-t border-slate-100 bg-slate-50/80 px-6 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black text-slate-900">{ideaSignAttachmentFive.fileName}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {formatFileSize(ideaSignAttachmentFive.fileSize)} · zostanie dołączony po Załączniku nr 3
+                      </p>
+                    </div>
+                    {ideaSignAttachmentFiveLocked ? (
+                      <span className="rounded-full bg-blue-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-blue-700">
+                        zamrożony w procesie
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void removeIdeaSignAttachmentFive()}
+                        disabled={ideaSignAttachmentFiveBusy}
+                        className="rounded-xl px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-50 disabled:opacity-45"
+                      >
+                        Usuń
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {ideaSignAttachmentFiveStatus && (
+                <div className="border-t border-slate-100 px-6 py-3 text-xs font-semibold text-slate-600" role="status">
+                  {ideaSignAttachmentFiveStatus}
+                </div>
+              )}
+            </section>
+          )}
           {ideaSignStatus && (
             <div
               role="status"
