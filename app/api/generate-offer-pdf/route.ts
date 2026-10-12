@@ -14,6 +14,7 @@ import {
   normalizeOfferComparisonVariants,
   type OfferComparisonVariant,
 } from "@/lib/offerComparison";
+import { calculateStandardPaymentAmounts } from "@/lib/standardPaymentTerms";
 
 export const runtime = "nodejs";
 
@@ -893,9 +894,12 @@ async function createOfferPdf(data: OfferPdfData) {
         });
       }
     } else {
+      const { depositGross, finalPaymentGross } =
+        calculateStandardPaymentAmounts(summaryGross);
+
       drawWrappedText(
         page,
-        `Zaliczka: ${formatMoney(summaryGross * 0.25)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji. Pozostała kwota: ${formatMoney(summaryGross * 0.75)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
+        `Zaliczka: ${formatMoney(depositGross)} płatna w terminie 14 dni od zawarcia umowy sprzedaży i montażu instalacji. Pozostała kwota: ${formatMoney(finalPaymentGross)} płatna w terminie 3 dni roboczych od podpisania protokołu odbioru instalacji.`,
         {
           x: marginX + 18,
           y: y - 34,

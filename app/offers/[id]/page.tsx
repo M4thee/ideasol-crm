@@ -19,6 +19,10 @@ import {
   getCustomPaymentScheduleFromOffer,
   validateCustomPaymentSchedule,
 } from "@/lib/customPaymentSchedule";
+import {
+  calculateStandardPaymentAmounts,
+  STANDARD_DEPOSIT_PERCENT,
+} from "@/lib/standardPaymentTerms";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
@@ -483,16 +487,13 @@ function addDaysLocalDate(dateValue: string, days: number) {
 }
 
 function calculateDefaultDepositAmount(grossValue: number | null | undefined) {
-  const depositPercent = 25;
-  const parsedGrossValue = Number(grossValue || 0);
+  const { depositGross } = calculateStandardPaymentAmounts(grossValue);
 
-  if (!Number.isFinite(parsedGrossValue) || parsedGrossValue <= 0) {
+  if (depositGross <= 0) {
     return "";
   }
 
-  const roundedDeposit = Math.round((parsedGrossValue * (depositPercent / 100)) / 100) * 100;
-
-  return String(roundedDeposit);
+  return String(depositGross);
 }
 
 function parseMoneyValue(value: unknown) {
@@ -2757,7 +2758,7 @@ if (updateClientStatusError) {
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">Wysokość zaliczki</span>
                     <span className="mt-1 block text-xs font-medium text-slate-400">
-                      Przy gotówce domyślnie 25% wartości brutto. Przy kredycie zaliczka jest częścią wkładu własnego.
+                      Przy gotówce domyślnie {STANDARD_DEPOSIT_PERCENT}% wartości brutto. Przy kredycie zaliczka jest częścią wkładu własnego.
                     </span>
                     <input
                       value={saleForm.depositAmount}
