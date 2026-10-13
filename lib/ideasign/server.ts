@@ -12,6 +12,12 @@ import type {
 } from "./types";
 import { expireIdeaSignSession } from "./lifecycle";
 import {
+  canExchangeIdeaSignLink,
+  getIdeaSignAccessExpiresAt,
+  signerStatusAfterOpening,
+  type IdeaSignSignerStatus,
+} from "./link";
+import {
   IDEA_SIGN_ACCESS_COOKIE,
   IDEA_SIGN_ACCESS_TTL_SECONDS,
   IDEA_SIGN_CSRF_COOKIE,
@@ -60,7 +66,7 @@ type SignerRow = {
   name: string;
   email: string;
   phone: string;
-  status: "oczekuje" | "otwarty" | "uwierzytelniony" | "podpisany";
+  status: IdeaSignSignerStatus;
   signed_at: string | null;
 };
 
@@ -183,7 +189,7 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
   const tokenHash = sha256(token);
   const { data: signer, error } = await supabaseAdmin
     .from("contract_signature_signers")
-    .select("id, signature_session_id, link_expires_at, link_consumed_at")
+    .select("id, signature_session_id, status, link_expires_at, link_consumed_at, opened_at")
     .eq("link_token_hash", tokenHash)
     .maybeSingle();
 
@@ -206,17 +212,23 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
   if (
     error ||
     !signature || !signer ||
-    signer.link_consumed_at ||
-    isExpired(signer.link_expires_at) ||
-    isExpired(signature.expires_at) ||
-    ["zawarta", "wygasła", "anulowana"].includes(signature.status)
+    !canExchangeIdeaSignLink({
+      signerStatus: signer.status as IdeaSignSignerStatus,
+      signerLinkExpiresAt: signer.link_expires_at,
+      sessionStatus: signature.status as IdeaSignStatus,
+      sessionExpiresAt: signature.expires_at,
+    })
   ) {
     return null;
   }
 
   const accessToken = createSecretToken();
   const csrfToken = createSecretToken(24);
-  const expiresAt = new Date(Date.now() + IDEA_SIGN_ACCESS_TTL_SECONDS * 1000).toISOString();
+  const expiresAt = getIdeaSignAccessExpiresAt({
+    signerLinkExpiresAt: signer.link_expires_at,
+    sessionExpiresAt: signature.expires_at,
+    accessTtlSeconds: IDEA_SIGN_ACCESS_TTL_SECONDS,
+  });
   const accessSessionId = randomUUID();
 
   const { error: accessError } = await supabaseAdmin
@@ -236,13 +248,13 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
   const { data: exchanged, error: exchangeError } = await supabaseAdmin
     .from("contract_signature_signers")
     .update({
-      link_consumed_at: now,
-      opened_at: now,
-      status: "otwarty",
+      link_consumed_at: signer.link_consumed_at || now,
+      opened_at: signer.opened_at || now,
+      status: signerStatusAfterOpening(signer.status as IdeaSignSignerStatus),
       updated_at: now,
     })
     .eq("id", signer.id)
-    .is("link_consumed_at", null)
+    .neq("status", "podpisany")
     .select("id")
     .maybeSingle();
 
@@ -265,7 +277,10 @@ export async function exchangeIdeaSignLink(token: string, request: Request) {
     signerId: signer.id,
     eventType: "secure_link_exchanged",
     request,
-    eventData: { accessSessionId },
+    eventData: {
+      accessSessionId,
+      reused: Boolean(signer.link_consumed_at),
+    },
   });
 
   return { accessToken, csrfToken, accessSessionId, expiresAt };

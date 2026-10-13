@@ -130,7 +130,7 @@ export function renderIdeaSignInvitationEmail(params: {
     details: [
       { label: "Ważność linku", value: "7 dni od wysłania wiadomości" },
       { label: "Weryfikacja", value: "Dwa niezależne kody SMS" },
-      { label: "Bezpieczeństwo", value: "Jednorazowy link przypisany wyłącznie do Ciebie" },
+      { label: "Dostęp", value: "Link można otwierać wielokrotnie do czasu złożenia podpisu" },
     ],
     noticeHtml: `<strong style="color:#5f3700;font-weight:500;">Ważne:</strong> każda osoba podpisująca otrzymuje własny link i własne kody SMS. Nie przekazuj tej wiadomości ani kodów drugiej osobie.`,
   });
