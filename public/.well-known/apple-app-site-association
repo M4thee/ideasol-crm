@@ -1,0 +1,23 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "2CL47K35FJ.pl.ideasol.crm"
+        ],
+        "components": [
+          { "/": "/clients/*" },
+          { "/": "/client/*" },
+          { "/": "/events/*" },
+          { "/": "/event/*" },
+          { "/": "/calendar/*" },
+          { "/": "/offers/*" },
+          { "/": "/offer/*" },
+          { "/": "/tasks*" },
+          { "/": "/sales*" },
+          { "/": "/calculator*" }
+        ]
+      }
+    ]
+  }
+}
