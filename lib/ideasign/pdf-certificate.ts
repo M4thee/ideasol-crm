@@ -459,6 +459,18 @@ export function applyIdeaSignVisualSignatures(
     return;
   }
 
+  if (
+    title.includes("ankieta techniczna") ||
+    fileName.includes("zalacznik-4-ankieta-techniczna")
+  ) {
+    const pageIndex = pages.length - 1;
+    placeAndDate(pageIndex, params.concludedAt, { x: 42, y: 121, width: 300, size: 6.8 });
+    stamp(pageIndex, offeror, { x: 42, y: 58, width: 160, height: 46 });
+    stamp(pageIndex, signer1 ? clientCard(signer1) : null, { x: 217, y: 58, width: 160, height: 46 });
+    stamp(pageIndex, signer2 ? clientCard(signer2) : null, { x: 392, y: 58, width: 160, height: 46 });
+    return;
+  }
+
   if (isPme2AttachmentFive(document)) {
     const pageIndex = pages.length - 1;
     pages[pageIndex].drawRectangle({

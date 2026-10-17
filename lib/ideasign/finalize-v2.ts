@@ -378,6 +378,42 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
   }
 
   if (job.channel === "crm") {
+    const mergedBytes = await downloadFinalPackage(signature);
+    const mergedFileName = `pakiet-podpisany-${signature.transaction_id}.pdf`;
+    const mergedCrmPath = `${signature.sale_id}/ideasign/${signature.transaction_id}/00-${mergedFileName}`;
+    const { error: mergedUploadError } = await supabaseAdmin.storage
+      .from("sale-documents")
+      .upload(mergedCrmPath, mergedBytes, { contentType: "application/pdf", upsert: true });
+    if (mergedUploadError) {
+      throw new Error(`Nie udało się zapisać pełnego pakietu w CRM: ${mergedUploadError.message}`);
+    }
+    const { data: existingPackage, error: existingPackageError } = await supabaseAdmin
+      .from("sale_documents")
+      .select("id")
+      .eq("file_path", mergedCrmPath)
+      .limit(1)
+      .maybeSingle();
+    if (existingPackageError) {
+      throw new Error(`Nie udało się sprawdzić pełnego pakietu w CRM: ${existingPackageError.message}`);
+    }
+    if (!existingPackage) {
+      const contractsGroup = DOCUMENT_GROUPS.find((candidate) => candidate.key === "contracts");
+      const { error: packageRecordError } = await supabaseAdmin.from("sale_documents").insert({
+        sale_id: signature.sale_id,
+        client_id: signature.client_id,
+        uploaded_by: signature.created_by,
+        description: `Pełny podpisany pakiet IdeaSign ${signature.transaction_id}`,
+        document_type: contractsGroup?.title || "Umowa wraz z załącznikami",
+        file_name: mergedFileName,
+        file_path: mergedCrmPath,
+        file_type: "application/pdf",
+        file_size: mergedBytes.length,
+      });
+      if (packageRecordError) {
+        throw new Error(`Nie udało się dodać pełnego pakietu do CRM: ${packageRecordError.message}`);
+      }
+    }
+
     const rawDocuments = await Promise.all(documents.map(async (document) => ({ document, bytes: await downloadFrozenDocument(document) })));
     const signedDocuments = await Promise.all(rawDocuments.map(async ({ document, bytes }) => {
       const signedBytes = await buildSignedDocument({

@@ -58,6 +58,7 @@ export async function POST(request: Request, context: RouteContext) {
       transactionId?: unknown;
       code?: unknown;
       contractData?: unknown;
+      technicalSurvey?: unknown;
       attachmentFiveDocumentId?: unknown;
     } | null;
     const action = String(body?.action || "prepare");
@@ -89,11 +90,16 @@ export async function POST(request: Request, context: RouteContext) {
     if (!contractData || typeof contractData !== "object" || Array.isArray(contractData)) {
       return NextResponse.json({ error: "Brak danych zatwierdzonej wersji umowy." }, { status: 400 });
     }
+    const technicalSurvey = body?.technicalSurvey;
+    if (!technicalSurvey || typeof technicalSurvey !== "object" || Array.isArray(technicalSurvey)) {
+      return NextResponse.json({ error: "Brak ankiety technicznej technicalSurvey." }, { status: 400 });
+    }
     const result = await crm.createAndSendIdeaSignSession({
       saleId,
       actor,
       request,
       contractData: contractData as Record<string, unknown>,
+      technicalSurvey,
       attachmentFiveDocumentId:
         typeof body?.attachmentFiveDocumentId === "string"
           ? body.attachmentFiveDocumentId

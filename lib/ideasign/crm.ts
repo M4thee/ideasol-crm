@@ -38,6 +38,14 @@ import {
   normalizeIdeaSignPolishPhone,
 } from "./phone";
 import { personalizeIdeaSignAttachmentFive } from "./pdf-certificate";
+import {
+  buildTechnicalSurveySnapshot,
+  generateTechnicalSurveyPdf,
+  normalizeTechnicalSurvey,
+  TechnicalSurveyValidationError,
+  type ResolvedTechnicalSurveyMedia,
+  type TechnicalSurveyMediaInput,
+} from "./technical-survey";
 
 type IdeaSignCrmActor = {
   id: string;
@@ -64,6 +72,8 @@ type IdeaSignContractData = Record<string, unknown>;
 export const IDEA_SIGN_ATTACHMENT_FIVE_DOCUMENT_TYPE =
   "IdeaSign — Załącznik nr 5";
 export const IDEA_SIGN_ATTACHMENT_FIVE_MAX_BYTES = 50 * 1024 * 1024;
+const IDEA_SIGN_TECHNICAL_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+const IDEA_SIGN_TECHNICAL_MEDIA_TOTAL_MAX_BYTES = 30 * 1024 * 1024;
 
 type IdeaSignAttachmentFiveRow = {
   id: string;
@@ -173,6 +183,173 @@ function safeFileName(value: string, fallback: string) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 180);
   return result || fallback;
+}
+
+function technicalImageMime(bytes: Buffer): "image/png" | "image/jpeg" | null {
+  if (
+    bytes.length >= 8 &&
+    bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  return null;
+}
+
+function decodeTechnicalSurveyInlineImage(media: TechnicalSurveyMediaInput) {
+  if (!media.inlineData) return null;
+  const dataUrl = media.inlineData.match(
+    /^data:(image\/(?:png|jpe?g));base64,([a-z0-9+/=\s]+)$/i
+  );
+  const encoded = dataUrl ? dataUrl[2] : media.inlineData;
+  const hintedMime = (dataUrl?.[1] || media.mimeType).toLowerCase();
+  if (!/^image\/(?:png|jpe?g)$/.test(hintedMime)) {
+    throw new TechnicalSurveyValidationError(
+      `Plik „${media.category}” musi być obrazem PNG albo JPEG.`
+    );
+  }
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(encoded.replace(/\s+/g, ""), "base64");
+  } catch {
+    throw new TechnicalSurveyValidationError(`Nie udało się odczytać obrazu „${media.category}”.`);
+  }
+  return bytes;
+}
+
+async function resolveTechnicalSurveyMedia(
+  saleId: string,
+  mediaItems: TechnicalSurveyMediaInput[]
+) {
+  const resolved: ResolvedTechnicalSurveyMedia[] = [];
+  let totalBytes = 0;
+
+  for (const media of mediaItems) {
+    let bytes: Buffer | null = decodeTechnicalSurveyInlineImage(media);
+    let storagePath = media.storagePath;
+    let version = media.version;
+
+    if (!bytes && media.documentId) {
+      const { data: document, error } = await supabaseAdmin
+        .from("sale_documents")
+        .select("id, file_path, file_type, file_size, created_at")
+        .eq("id", media.documentId)
+        .eq("sale_id", saleId)
+        .maybeSingle();
+      if (error) {
+        throw new Error(`Nie udało się odczytać zdjęcia ankiety: ${error.message}`);
+      }
+      if (!document) {
+        throw new TechnicalSurveyValidationError(
+          `Zdjęcie „${media.category}” nie należy do tej sprzedaży albo już nie istnieje.`
+        );
+      }
+      storagePath = document.file_path;
+      version = media.version === "1" && document.created_at
+        ? String(document.created_at)
+        : media.version;
+    }
+
+    if (!bytes && storagePath) {
+      if (!storagePath.startsWith(`${saleId}/`)) {
+        throw new TechnicalSurveyValidationError(
+          `Nieprawidłowe źródło zdjęcia „${media.category}”.`
+        );
+      }
+      const { data, error } = await supabaseAdmin.storage
+        .from("sale-documents")
+        .download(storagePath);
+      if (error || !data) {
+        throw new TechnicalSurveyValidationError(
+          `Nie udało się pobrać zdjęcia „${media.category}”.`
+        );
+      }
+      bytes = Buffer.from(await data.arrayBuffer());
+    }
+
+    if (!bytes) {
+      throw new TechnicalSurveyValidationError(
+        `Brakuje danych obrazu „${media.category}”.`
+      );
+    }
+    if (bytes.length === 0 || bytes.length > IDEA_SIGN_TECHNICAL_MEDIA_MAX_BYTES) {
+      throw new TechnicalSurveyValidationError(
+        `Obraz „${media.category}” musi mieć rozmiar do 10 MB.`
+      );
+    }
+    totalBytes += bytes.length;
+    if (totalBytes > IDEA_SIGN_TECHNICAL_MEDIA_TOTAL_MAX_BYTES) {
+      throw new TechnicalSurveyValidationError(
+        "Łączny rozmiar szkicu i zdjęć ankiety nie może przekraczać 30 MB."
+      );
+    }
+    const mimeType = technicalImageMime(bytes);
+    if (!mimeType) {
+      throw new TechnicalSurveyValidationError(
+        `Plik „${media.category}” nie jest prawidłowym obrazem PNG albo JPEG.`
+      );
+    }
+    resolved.push({
+      key: media.key,
+      role: media.role,
+      id: media.id,
+      version,
+      category: media.category,
+      description: media.description,
+      mimeType,
+      bytes,
+      sha256: sha256(bytes),
+      storagePath,
+    });
+  }
+
+  return resolved;
+}
+
+async function freezeTechnicalSurvey(params: {
+  saleId: string;
+  technicalSurvey: unknown;
+  actor: IdeaSignCrmActor;
+  contractNumber: string;
+  clientName: string;
+  installationAddress: string;
+  declarationAcceptedAt?: string;
+}) {
+  const declarationAcceptedAt = params.declarationAcceptedAt || new Date().toISOString();
+  const survey = normalizeTechnicalSurvey(params.technicalSurvey, {
+    acceptedAt: declarationAcceptedAt,
+    preparedBy: { id: params.actor.id, name: params.actor.displayName },
+  });
+  const media = await resolveTechnicalSurveyMedia(params.saleId, survey.media);
+  const snapshot = buildTechnicalSurveySnapshot(survey, media);
+  const snapshotSha256 = sha256(canonicalJson(snapshot));
+  const bytes = await generateTechnicalSurveyPdf({
+    survey,
+    media,
+    contractNumber: params.contractNumber,
+    clientName: params.clientName,
+    installationAddress: params.installationAddress,
+  });
+  const document = {
+    id: randomUUID(),
+    kind: "attachment",
+    title: "Załącznik nr 4 — Ankieta techniczna",
+    fileName: "zalacznik-4-ankieta-techniczna.pdf",
+    bytes,
+    hash: sha256(bytes),
+    containerKey: "technical_audit",
+  } satisfies FrozenDocument;
+
+  return {
+    document,
+    snapshot,
+    snapshotSha256,
+    declarationAcceptedAt,
+    mediaVersions: snapshot._ideaSign.media,
+    scope: snapshot._ideaSign.scope,
+  };
 }
 
 function transactionId() {
@@ -643,8 +820,8 @@ async function freezeAgreementPackage(
       pageIndices: [11],
       containerKey: "contracts",
     },
-    // Strony 13–17 wzoru stanowią załącznik nr 4 (formularz techniczny).
-    // Celowo nie wchodzą do pakietu IdeaSign do czasu wdrożenia jego e-wypełniania.
+    // Strony 13–17 wzoru stanowią pusty formularz załącznika nr 4.
+    // W IdeaSign zastępuje je PDF wygenerowany z zamrożonego snapshotu ankiety.
     {
       kind: "attachment",
       title: "Pełnomocnictwo ZM",
@@ -781,6 +958,7 @@ export async function createAndSendIdeaSignSession(params: {
   actor: IdeaSignCrmActor;
   request: Request;
   contractData: IdeaSignContractData;
+  technicalSurvey: unknown;
   attachmentFiveDocumentId?: string | null;
 }) {
   if (!params.actor.canSend) {
@@ -847,13 +1025,20 @@ export async function createAndSendIdeaSignSession(params: {
     params.contractData
   );
   await expireOverdueIdeaSignSessions({ saleId: sale.id });
-  const [{ data: active }, clientResponse] = await Promise.all([
+  const [{ data: active }, { data: latestSession }, clientResponse] = await Promise.all([
     supabaseAdmin
       .from("contract_signature_sessions")
-      .select("id, transaction_id, status, created_by, manifest_sha256, offeror_authorized_at")
+      .select("id, transaction_id, status, created_by, manifest_sha256, offeror_authorized_at, technical_survey_snapshot_sha256, technical_survey_declaration_accepted_at, version, last_error")
       .eq("sale_id", sale.id)
       .not("status", "in", "(zawarta,wygasła,anulowana)")
       .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("contract_signature_sessions")
+      .select("version")
+      .eq("sale_id", sale.id)
+      .order("version", { ascending: false })
       .limit(1)
       .maybeSingle(),
     sale.client_id
@@ -864,24 +1049,6 @@ export async function createAndSendIdeaSignSession(params: {
           .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
-  if (active) {
-    if (
-      active.status === "przygotowana" &&
-      active.created_by === params.actor.id &&
-      !active.offeror_authorized_at
-    ) {
-      return requestIdeaSignOfferorOtpChallenge({
-        session: active as OfferorOtpSession,
-        actor: params.actor,
-        request: params.request,
-      });
-    }
-    return {
-      ok: false as const,
-      status: 409,
-      error: `Dla tej sprzedaży istnieje aktywny proces ${active.transaction_id} (${active.status}).`,
-    };
-  }
 
   const client = clientResponse.data;
   const customer: Record<string, unknown> = persistedCustomerData;
@@ -906,6 +1073,52 @@ export async function createAndSendIdeaSignSession(params: {
   if (hasSecondSigner && (secondClientEmail === clientEmail || areIdeaSignPhonesEqual(secondClientPhone, clientPhone))) {
     return { ok: false as const, status: 422, error: "Każdy podpisujący musi mieć własny e-mail i własny numer telefonu." };
   }
+
+  let technicalSurvey: Awaited<ReturnType<typeof freezeTechnicalSurvey>>;
+  try {
+    technicalSurvey = await freezeTechnicalSurvey({
+      saleId: sale.id,
+      technicalSurvey: params.technicalSurvey,
+      actor: params.actor,
+      contractNumber,
+      clientName: [clientName, secondClientName].filter(Boolean).join(" i "),
+      installationAddress: cleanText(params.contractData.installationAddress, 500),
+      declarationAcceptedAt: active?.technical_survey_declaration_accepted_at || undefined,
+    });
+  } catch (error) {
+    if (error instanceof TechnicalSurveyValidationError) {
+      return { ok: false as const, status: 422, error: error.message };
+    }
+    throw error;
+  }
+
+  if (active) {
+    if (
+      active.status === "przygotowana" &&
+      active.created_by === params.actor.id &&
+      !active.offeror_authorized_at &&
+      !active.last_error &&
+      active.technical_survey_snapshot_sha256 === technicalSurvey.snapshotSha256
+    ) {
+      return requestIdeaSignOfferorOtpChallenge({
+        session: active as OfferorOtpSession,
+        actor: params.actor,
+        request: params.request,
+      });
+    }
+    const frozenSurveyChanged =
+      active.status === "przygotowana" &&
+      !active.offeror_authorized_at &&
+      active.technical_survey_snapshot_sha256 !== technicalSurvey.snapshotSha256;
+    return {
+      ok: false as const,
+      status: 409,
+      error: frozenSurveyChanged
+        ? "Ankieta lub zdjęcia zostały już zamrożone. Anuluj bieżący proces IdeaSign i utwórz nową wersję transakcji."
+        : `Dla tej sprzedaży istnieje aktywny proces ${active.transaction_id} (${active.status}).`,
+    };
+  }
+  const packageVersion = Number(latestSession?.version || 0) + 1;
 
   const { error: saveContractError } = await supabaseAdmin
     .from("sales")
@@ -951,13 +1164,14 @@ export async function createAndSendIdeaSignSession(params: {
       error: "Wybrany Załącznik nr 5 nie istnieje lub nie należy do tej sprzedaży.",
     };
   }
-  const attachmentFivePosition = agreementPackage.findIndex(
+  const technicalAnnexPosition = agreementPackage.findIndex(
     (document) => document.kind === "consumer_information"
   ) + 1;
   const documents: FrozenDocument[] = [
-    ...agreementPackage.slice(0, attachmentFivePosition),
+    ...agreementPackage.slice(0, technicalAnnexPosition),
+    technicalSurvey.document,
     ...(attachmentFive ? [attachmentFive] : []),
-    ...agreementPackage.slice(attachmentFivePosition),
+    ...agreementPackage.slice(technicalAnnexPosition),
     ...existingAttachments,
   ];
   const manifest = documents.map((document, index) => ({
@@ -992,27 +1206,36 @@ export async function createAndSendIdeaSignSession(params: {
     client_email: clientEmail,
     client_phone: clientPhone,
     status: "przygotowana",
+    version: packageVersion,
     manifest_sha256: manifestSha256,
+    technical_survey_snapshot: technicalSurvey.snapshot,
+    technical_survey_snapshot_sha256: technicalSurvey.snapshotSha256,
+    technical_survey_photo_versions: technicalSurvey.mediaVersions,
+    technical_survey_declaration_accepted_at: technicalSurvey.declarationAcceptedAt,
     link_token_hash: sha256(signerDrafts[0].token),
     link_expires_at: linkExpiresAt,
     expires_at: linkExpiresAt,
   });
   if (insertError) throw new Error(`Nie udało się utworzyć procesu IdeaSign: ${insertError.message}`);
 
-  const signerRows = signerDrafts.map((signer) => ({
-    id: randomUUID(),
-    signature_session_id: sessionId,
-    signer_order: signer.order,
-    name: signer.name,
-    email: signer.email,
-    phone: signer.phone,
-    link_token_hash: sha256(signer.token),
-    link_expires_at: linkExpiresAt,
-  }));
-  const { error: signersError } = await supabaseAdmin.from("contract_signature_signers").insert(signerRows);
-  if (signersError) throw new Error(`Nie udało się zapisać osób podpisujących: ${signersError.message}`);
-
   try {
+    const signerRows = signerDrafts.map((signer) => ({
+      id: randomUUID(),
+      signature_session_id: sessionId,
+      signer_order: signer.order,
+      name: signer.name,
+      email: signer.email,
+      phone: signer.phone,
+      link_token_hash: sha256(signer.token),
+      link_expires_at: linkExpiresAt,
+    }));
+    const { error: signersError } = await supabaseAdmin
+      .from("contract_signature_signers")
+      .insert(signerRows);
+    if (signersError) {
+      throw new Error(`Nie udało się zapisać osób podpisujących: ${signersError.message}`);
+    }
+
     for (const [index, document] of documents.entries()) {
       const storagePath = `${sessionId}/${String(index + 1).padStart(2, "0")}-${document.fileName}`;
       const { error: uploadError } = await supabaseAdmin.storage
@@ -1045,6 +1268,10 @@ export async function createAndSendIdeaSignSession(params: {
         manifestSha256,
         documentCount: documents.length,
         contractSigningLocation,
+        packageVersion,
+        technicalSurveySnapshotSha256: technicalSurvey.snapshotSha256,
+        technicalSurveyMediaCount: technicalSurvey.mediaVersions.length,
+        technicalSurveyScope: technicalSurvey.scope,
       },
     });
 
@@ -1057,6 +1284,7 @@ export async function createAndSendIdeaSignSession(params: {
     return {
       ...challenge,
       status: "przygotowana" as const,
+      packageVersion,
       localTest,
       deliveryMode: localLiveDelivery ? "live" as const : "simulated" as const,
     };
