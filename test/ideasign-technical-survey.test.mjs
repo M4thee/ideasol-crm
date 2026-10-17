@@ -133,5 +133,5 @@ test("generator tworzy poprawny wielostronicowy PDF ankiety z wymaganym oświadc
   assert.equal(bytes.subarray(0, 4).toString(), "%PDF");
   const pdf = await PDFDocument.load(bytes);
   assert.ok(pdf.getPageCount() >= 1);
-  assert.equal(pdf.getTitle(), "Załącznik nr 4 - Ankieta techniczna");
+  assert.equal(pdf.getTitle(), "Załącznik nr 4 – Ankieta techniczna");
 });

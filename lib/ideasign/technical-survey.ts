@@ -259,7 +259,11 @@ function sectionSource(source: JsonObject, id: "A" | "B" | "C" | "D") {
     }
   }
   const arraySection = sectionFromArray(sections, id);
-  if (arraySection !== undefined) return arraySection;
+  if (arraySection !== undefined) {
+    return isObject(arraySection) && arraySection.answers !== undefined
+      ? arraySection.answers
+      : arraySection;
+  }
   for (const alias of aliases[id]) {
     if (source[alias] !== undefined) return source[alias];
   }
@@ -415,6 +419,9 @@ function collectRoutes(source: JsonObject, sectionB: unknown, sectionD: unknown)
       const groundMeters = segmentValue(item, ["groundMeters", "ground", "underground", "grunt"]);
       const overheadMeters = segmentValue(item, ["overheadMeters", "overhead", "air", "napowietrznie"]);
       if (![insideMeters, facadeMeters, groundMeters, overheadMeters].some((value) => value > 0)) continue;
+      const totalMeters = Math.round(
+        (insideMeters + facadeMeters + groundMeters + overheadMeters) * 100
+      ) / 100;
       routes.push({
         label,
         section: routeSection(item, label),
@@ -422,7 +429,7 @@ function collectRoutes(source: JsonObject, sectionB: unknown, sectionD: unknown)
         facadeMeters,
         groundMeters,
         overheadMeters,
-        totalMeters: insideMeters + facadeMeters + groundMeters + overheadMeters,
+        totalMeters,
       });
     }
   }
@@ -685,7 +692,7 @@ export async function generateTechnicalSurveyPdf(params: {
       font: bold,
       color: navy,
     });
-    page.drawText("Załącznik nr 4 - Ankieta techniczna", {
+    page.drawText("Załącznik nr 4 – Ankieta techniczna", {
       x: PAGE.margin + 31,
       y: PAGE.height - 50,
       size: 7.5,
@@ -949,7 +956,7 @@ export async function generateTechnicalSurveyPdf(params: {
       color: muted,
     });
   });
-  pdf.setTitle("Załącznik nr 4 - Ankieta techniczna");
+  pdf.setTitle("Załącznik nr 4 – Ankieta techniczna");
   pdf.setSubject("Ankieta techniczna stanowiąca integralną część umowy IdeaSol");
   pdf.setAuthor("IdeaSol Sp. z o.o.");
   pdf.setCreator("IdeaSign");
