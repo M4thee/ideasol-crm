@@ -31,6 +31,8 @@ const STRUCTURAL_KEYS = new Set([
   "media",
   "photos",
   "products",
+  "roofSlopes",
+  "roof_slopes",
   "roofSketch",
   "routes",
   "scope",
@@ -446,6 +448,57 @@ function flattenAnswers(
   return entries;
 }
 
+function stringValues(value: unknown) {
+  const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  return values.map((item) => text(item, 120)).filter(Boolean);
+}
+
+function roofSlopeAnswers(source: JsonObject, sectionC: unknown): TechnicalSurveyAnswer[] {
+  const choices = isObject(source.choices) ? source.choices : {};
+  const section = isObject(sectionC) ? sectionC : {};
+  const selected = stringValues(
+    choices.roof_orientations ??
+      choices.roofOrientations ??
+      section.roof_orientations ??
+      section.roofOrientations ??
+      source.roofOrientations
+  );
+  const rawSlopes = source.roofSlopes ?? source.roof_slopes ??
+    section.roofSlopes ?? section.roof_slopes;
+  const slopes = Array.isArray(rawSlopes) ? rawSlopes.filter(isObject) : [];
+  const orientations = selected.length
+    ? selected
+    : slopes
+        .filter((slope) => [
+          slope.angle,
+          slope.width,
+          slope.length,
+          slope.panelCount,
+          slope.panel_count,
+        ].some((value) => text(value, 40)))
+        .map((slope) => text(slope.orientation, 120))
+        .filter(Boolean);
+
+  return [...new Set(orientations)].map((orientation) => {
+    const orientationToken = normalizedToken(orientation);
+    const slope = slopes.find((item) => normalizedToken(item.orientation) === orientationToken) ?? {};
+    const angle = text(slope.angle, 40).replace(/\s*°$/, "");
+    const width = text(slope.width, 40).replace(/\s*m$/, "");
+    const length = text(slope.length, 40).replace(/\s*m$/, "");
+    const panelCount = text(slope.panelCount ?? slope.panel_count, 40);
+    const details = [
+      angle ? `Kąt: ${angle}°` : "",
+      width ? `Szerokość: ${width} m` : "",
+      length ? `Długość: ${length} m` : "",
+      panelCount ? `Liczba paneli: ${panelCount}` : "",
+    ].filter(Boolean);
+    return {
+      label: `Połać dachowa - ${orientation}`,
+      value: details.join(" | ") || "Brak uzupełnionych parametrów",
+    };
+  });
+}
+
 function numberValue(value: unknown) {
   if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
   const parsed = Number(text(value, 40).replace(",", ".").replace(/[^0-9.-]/g, ""));
@@ -663,7 +716,9 @@ export function normalizeTechnicalSurvey(
     sections: {
       A: flattenAnswers(sourceA),
       B: hasPv ? flattenAnswers(sourceB) : [],
-      C: hasPv && pvInstallationPlace === "roof" ? flattenAnswers(sourceC) : [],
+      C: hasPv && pvInstallationPlace === "roof"
+        ? [...flattenAnswers(sourceC), ...roofSlopeAnswers(input, sourceC)]
+        : [],
       D: hasMe ? flattenAnswers(sourceD) : [],
     },
     routes: collectRoutes(input, sourceB, sourceD),

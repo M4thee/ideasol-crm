@@ -97,6 +97,7 @@ test("IdeaSign obsługuje zwarty format ankiety zapisywany przez CRM", () => {
       pv_location: ["Dach"],
       phase_count: ["3 fazy"],
       inverter_type: ["Hybrydowy"],
+      roof_orientations: ["Południe"],
       roof_covering: ["Dachówka ceramiczna"],
       storage_mount: ["Wewnątrz budynku"],
     },
@@ -108,13 +109,13 @@ test("IdeaSign obsługuje zwarty format ankiety zapisywany przez CRM", () => {
       building_height: "7,5",
       storage_length: "1,2",
     },
-    roofSlopes: [{
-      orientation: "Południe",
-      angle: "35",
-      width: "8",
-      length: "6",
-      panelCount: "12",
-    }],
+    roofSlopes: [
+      { id: "roof-slope-1", orientation: "Wschód", angle: "", width: "", length: "", panelCount: "" },
+      { id: "roof-slope-2", orientation: "Południowy-wschód", angle: "", width: "", length: "", panelCount: "" },
+      { id: "roof-slope-3", orientation: "Południe", angle: "35", width: "8", length: "6", panelCount: "12" },
+      { id: "roof-slope-4", orientation: "Południowy-zachód", angle: "", width: "", length: "", panelCount: "" },
+      { id: "roof-slope-5", orientation: "Zachód", angle: "", width: "", length: "", panelCount: "" },
+    ],
     photos: [{
       id: "photo-1",
       documentId: "00000000-0000-4000-8000-000000000001",
@@ -132,6 +133,15 @@ test("IdeaSign obsługuje zwarty format ankiety zapisywany przez CRM", () => {
   assert.ok(survey.sections.A.some((answer) => answer.value === "PGE"));
   assert.ok(survey.sections.B.some((answer) => answer.value === "Hybrydowy"));
   assert.ok(survey.sections.C.some((answer) => answer.value === "7,5"));
+  assert.deepEqual(
+    survey.sections.C.filter((answer) => answer.label.startsWith("Połać dachowa")),
+    [{
+      label: "Połać dachowa - Południe",
+      value: "Kąt: 35° | Szerokość: 8 m | Długość: 6 m | Liczba paneli: 12",
+    }]
+  );
+  assert.equal(survey.sections.C.some((answer) => answer.label.includes("Roof Slopes")), false);
+  assert.equal(survey.sections.C.some((answer) => answer.value.startsWith("roof-slope-")), false);
   assert.ok(survey.sections.D.some((answer) => answer.value === "Wewnątrz budynku"));
   assert.equal(survey.routes.find((route) => route.label.includes("Trasa DC"))?.totalMeters, 10);
   assert.equal(survey.media.length, 2);
