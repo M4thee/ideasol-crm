@@ -19,6 +19,8 @@ const MEDIA_DATA_KEYS = new Set([
   "dataUrl",
   "imageData",
   "imageBase64",
+  "sketchData",
+  "sketch_data",
 ]);
 const STRUCTURAL_KEYS = new Set([
   "answers",
@@ -196,9 +198,10 @@ function productsContain(value: unknown, tokens: string[]) {
 function resolveProductScope(source: JsonObject) {
   const products = isObject(source.products) ? source.products : {};
   const scope = isObject(source.scope) ? source.scope : {};
+  const choices = isObject(source.choices) ? source.choices : {};
   const productList = Array.isArray(source.products)
     ? source.products
-    : source.selectedProducts ?? source.productTypes;
+    : source.selectedProducts ?? source.productTypes ?? choices.products ?? source.scopes;
 
   const hasPv =
     productObjectSelected(products.pv, ["pv", "fotowolta"]) ||
@@ -226,6 +229,7 @@ function resolveInstallationPlace(source: JsonObject): TechnicalSurveyInstallati
     ["products", "pv", "location"],
     ["pv", "installationPlace"],
     ["pv", "location"],
+    ["choices", "pv_location"],
   ]);
   if (isObject(raw)) {
     if (readBoolean(raw.roof ?? raw.dach)) return "roof";
@@ -267,21 +271,87 @@ function sectionSource(source: JsonObject, id: "A" | "B" | "C" | "D") {
   for (const alias of aliases[id]) {
     if (source[alias] !== undefined) return source[alias];
   }
-  return undefined;
+  const compactText = isObject(source.text) ? source.text : {};
+  const compactChoices = isObject(source.choices) ? source.choices : {};
+  const compactKeys: Record<typeof id, string[]> = {
+    A: [
+      "osd_operator", "existing_pv", "existing_pv_power", "existing_panel_count",
+      "existing_inverter_model", "existing_inverter_power", "property_access", "gate_width",
+      "phase_count", "connection_power", "pre_meter_protection", "meter_location",
+      "meter_location_other", "connection_point", "connection_point_other",
+    ],
+    B: [
+      "roof_type_from_offer", "inverter_type", "inverter_phase", "inverter_location",
+      "wall_substrate", "wall_substrate_other", "underground_infrastructure",
+      "underground_obstacles", "soil_structure", "soil_other", "shading",
+      "shaded_panel_count", "wifi",
+    ],
+    C: [
+      "building_height", "lift_access", "lift_wall_distance", "roof_orientations",
+      "roof_covering", "roof_covering_other",
+    ],
+    D: [
+      "storage_mount", "storage_inverter", "storage_length", "storage_width",
+      "storage_height", "storage_conditions", "backup_system",
+    ],
+  };
+  const compactSection: JsonObject = {};
+  for (const key of compactKeys[id]) {
+    if (compactText[key] !== undefined && compactText[key] !== "") {
+      compactSection[key] = compactText[key];
+    } else if (compactChoices[key] !== undefined) {
+      compactSection[key] = compactChoices[key];
+    }
+  }
+  if (id === "C" && Array.isArray(source.roofSlopes)) {
+    compactSection.roofSlopes = source.roofSlopes;
+  }
+  return Object.keys(compactSection).length ? compactSection : undefined;
 }
 
 const LABELS: Record<string, string> = {
+  osdoperator: "OSD",
   osd: "OSD / sprzedawca",
   seller: "Sprzedawca energii",
   comprehensiveagreement: "Umowa kompleksowa",
   existinginstallation: "Istniejąca mikroinstalacja",
   existingpv: "Istniejąca instalacja PV",
+  existingpvpower: "Moc istniejącej instalacji PV [kWp]",
+  existingpanelcount: "Liczba istniejących paneli",
+  existinginvertermodel: "Falownik klienta - model",
+  existinginverterpower: "Falownik klienta - moc [kW]",
+  propertyaccess: "Wjazd na posesję",
+  gatewidth: "Szerokość bramy wjazdowej [m]",
+  phasecount: "Liczba faz",
+  connectionpower: "Moc przyłączeniowa [kW]",
+  premeterprotection: "Zabezpieczenie przedlicznikowe [A]",
+  meterlocationother: "Inna lokalizacja licznika",
+  connectionpointother: "Inne miejsce przyłączenia",
+  rooftypefromoffer: "Miejsce montażu / pokrycie z kalkulacji",
+  inverterphase: "Wykonanie inwertera",
+  wallsubstrate: "Podłoże ściany / elewacji",
+  wallsubstrateother: "Inne podłoże ściany / elewacji",
+  undergroundinfrastructure: "Infrastruktura w gruncie",
+  undergroundobstacles: "Przeszkody w gruncie",
+  soilstructure: "Struktura gruntu",
+  soilother: "Inna struktura gruntu",
+  shadedpanelcount: "Liczba zacienionych paneli",
+  wifi: "Zasięg Wi-Fi w miejscu montażu",
+  liftwalldistance: "Odstęp dla zwyżki od ściany [m]",
+  rooforientations: "Połacie planowane do montażu",
+  roofcoveringother: "Inne poszycie dachu",
+  storagemount: "Miejsce montażu magazynu",
+  storageinverter: "Konfiguracja falownika dla magazynu",
+  storagelength: "Dostępne miejsce - długość [m]",
+  storagewidth: "Dostępne miejsce - szerokość [m]",
+  storageheight: "Dostępne miejsce - wysokość [m]",
+  storageconditions: "Warunki temperatury i suchości",
+  backupsystem: "Układ rezerwy lub agregat",
   existingpowerkw: "Moc istniejącej instalacji [kW]",
   panelcount: "Liczba paneli",
   panels: "Panele - producent i model",
   inverter: "Falownik - producent i model",
   energystorage: "Magazyn energii",
-  propertyaccess: "Wjazd do posesji",
   phases: "Liczba faz",
   connectionpowerkw: "Moc przyłączeniowa [kW]",
   premetersafetyamps: "Zabezpieczenie przedlicznikowe [A]",
@@ -398,9 +468,24 @@ function routeSection(route: JsonObject, label: string): "B" | "D" {
 }
 
 function collectRoutes(source: JsonObject, sectionB: unknown, sectionD: unknown) {
+  const compactText = isObject(source.text) ? source.text : {};
+  const compactRoutes = [
+    { name: "Trasa DC - panele → inwerter / zabezpieczenia", section: "B", prefix: "pv_dc" },
+    { name: "Trasa AC - inwerter → miejsce wpięcia", section: "B", prefix: "pv_ac" },
+    { name: "Trasa - falownik → miejsce wpięcia", section: "D", prefix: "storage_grid" },
+    { name: "Trasa - falownik → magazyn energii", section: "D", prefix: "storage_battery" },
+  ].map((route) => ({
+    name: route.name,
+    section: route.section,
+    insideMeters: compactText[`${route.prefix}_a`],
+    facadeMeters: compactText[`${route.prefix}_b`],
+    groundMeters: compactText[`${route.prefix}_c`],
+    overheadMeters: compactText[`${route.prefix}_d`],
+  }));
   const candidates: unknown[] = [
     source.routes,
     source.cableRoutes,
+    compactRoutes,
     isObject(sectionB) ? sectionB.routes ?? sectionB.cableRoutes : undefined,
     isObject(sectionD) ? sectionD.routes ?? sectionD.cableRoutes : undefined,
   ];
@@ -510,6 +595,7 @@ function collectMedia(source: JsonObject, sectionC: unknown) {
     .map((item, index) => mediaInput(item, "photo", index))
     .filter((item): item is TechnicalSurveyMediaInput => Boolean(item));
   const rawSketch = source.roofSketch ?? mediaRoot.roofSketch ??
+    source.sketchData ?? source.sketch_data ??
     (isObject(sectionC) ? sectionC.roofSketch ?? sectionC.sketch : undefined) ?? looseSketch;
   const sketch = rawSketch ? mediaInput(rawSketch, "roofSketch", 0) : null;
   const result = [...(sketch ? [sketch] : []), ...photos];

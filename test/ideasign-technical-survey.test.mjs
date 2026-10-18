@@ -88,6 +88,56 @@ test("IdeaSign dla magazynu energii pomija sekcje PV i nie wymaga miejsca monta�
   assert.ok(survey.sections.D.length > 0);
 });
 
+test("IdeaSign obsługuje zwarty format ankiety zapisywany przez CRM", () => {
+  const survey = normalizeTechnicalSurvey({
+    declarationAccepted: true,
+    scopes: ["PV", "ME"],
+    choices: {
+      products: ["PV", "ME"],
+      pv_location: ["Dach"],
+      phase_count: ["3 fazy"],
+      inverter_type: ["Hybrydowy"],
+      roof_covering: ["Dachówka ceramiczna"],
+      storage_mount: ["Wewnątrz budynku"],
+    },
+    text: {
+      osd_operator: "PGE",
+      connection_power: "12",
+      pv_dc_a: "4",
+      pv_dc_c: "6",
+      building_height: "7,5",
+      storage_length: "1,2",
+    },
+    roofSlopes: [{
+      orientation: "Południe",
+      angle: "35",
+      width: "8",
+      length: "6",
+      panelCount: "12",
+    }],
+    photos: [{
+      id: "photo-1",
+      documentId: "00000000-0000-4000-8000-000000000001",
+      version: "2026-10-18T12:00:00.000Z",
+      category: "Lokalizacja licznika",
+      mimeType: "image/jpeg",
+      storagePath: "sale-id/survey-photo.jpg",
+    }],
+    sketchData: "data:image/png;base64,AAAA",
+  }, context);
+
+  assert.equal(survey.hasPv, true);
+  assert.equal(survey.hasMe, true);
+  assert.equal(survey.pvInstallationPlace, "roof");
+  assert.ok(survey.sections.A.some((answer) => answer.value === "PGE"));
+  assert.ok(survey.sections.B.some((answer) => answer.value === "Hybrydowy"));
+  assert.ok(survey.sections.C.some((answer) => answer.value === "7,5"));
+  assert.ok(survey.sections.D.some((answer) => answer.value === "Wewnątrz budynku"));
+  assert.equal(survey.routes.find((route) => route.label.includes("Trasa DC"))?.totalMeters, 10);
+  assert.equal(survey.media.length, 2);
+  assert.equal(JSON.stringify(survey.sanitizedInput).includes("AAAA"), false);
+});
+
 test("snapshot nie przechowuje obrazu base64, ale utrwala identyfikator, wersję i hash", () => {
   const survey = normalizeTechnicalSurvey(pvSurvey({
     roofSketch: {

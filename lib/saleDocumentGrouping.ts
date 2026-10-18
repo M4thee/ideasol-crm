@@ -31,7 +31,7 @@ export const DOCUMENT_GROUPS = [
     key: "photos",
     title: "Zdjęcia",
     description:
-      "Zdjęcia z audytu, montażu, miejsca instalacji i dokumentacji fotograficznej.",
+      "Zdjęcia z ankiety technicznej, audytu, miejsca instalacji i montażu. Można je uzupełniać również po podpisaniu umowy.",
     acceptedTypes: ["Zdjęcia", "Zdjęcie", "Galeria zdjęć"],
     accept: "image/*",
     maxSizeMb: 30,

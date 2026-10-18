@@ -17,6 +17,14 @@ import {
   formatCustomPaymentInstallment,
   getCustomPaymentScheduleFromSale,
 } from "@/lib/customPaymentSchedule";
+import TechnicalSurveyForm from "@/components/TechnicalSurveyForm";
+import {
+  createEmptyTechnicalSurvey,
+  createTechnicalSurveyForSale,
+  normalizeTechnicalSurvey,
+  validateTechnicalSurveyForSigning,
+  type TechnicalSurvey,
+} from "@/lib/technicalSurvey";
 
 type ContractForm = {
   clientName: string;
@@ -186,6 +194,14 @@ export default function SaleContractPage() {
   const [ideaSignAttachmentFiveLocked, setIdeaSignAttachmentFiveLocked] = useState(false);
   const [ideaSignAttachmentFiveBusy, setIdeaSignAttachmentFiveBusy] = useState(false);
   const [ideaSignAttachmentFiveStatus, setIdeaSignAttachmentFiveStatus] = useState("");
+  const [technicalSurvey, setTechnicalSurvey] = useState<TechnicalSurvey>(
+    createEmptyTechnicalSurvey
+  );
+  const [technicalSurveySaving, setTechnicalSurveySaving] = useState(false);
+  const [technicalSurveyStatus, setTechnicalSurveyStatus] = useState("");
+  const [technicalSurveyUploadingCategory, setTechnicalSurveyUploadingCategory] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [saleClientId, setSaleClientId] = useState<string | null>(null);
   const [customPaymentSchedule, setCustomPaymentSchedule] = useState(
     createEmptyCustomPaymentSchedule
   );
@@ -249,6 +265,8 @@ export default function SaleContractPage() {
     ]);
     const { data: sale, error: saleError } = saleResponse;
     const user = userResponse.data.user;
+    setCurrentUserId(user?.id || "");
+    setSaleClientId(typeof sale.client_id === "string" ? sale.client_id : null);
 
     if (saleError || !sale) {
       console.error("Błąd ładowania sprzedaży do umowy:", saleError);
@@ -327,6 +345,14 @@ export default function SaleContractPage() {
     const contractNumber = String(
       sale.contract_number || customerData.contract_number || sale.public_id || sale.sale_id || sale.id
     );
+    const clientName =
+      customerData.full_name ||
+      customerData.name ||
+      sale.customer_name ||
+      sale.client_name ||
+      client?.full_name ||
+      client?.company_name ||
+      "";
 
     setSaleNumber(contractNumber);
     setInstallationCount(getSaleInstallationCount(sale));
@@ -340,14 +366,7 @@ export default function SaleContractPage() {
       )
     );
     setForm({
-      clientName:
-        customerData.full_name ||
-        customerData.name ||
-        sale.customer_name ||
-        sale.client_name ||
-        client?.full_name ||
-        client?.company_name ||
-        "",
+      clientName,
       pesel: customerData.pesel || sale.customer_pesel || client?.pesel || "",
       phone:
         formatIdeaSignPolishPhone(customerData.phone || sale.customer_phone || client?.phone) ||
@@ -419,6 +438,15 @@ export default function SaleContractPage() {
       client2MarketingPhone: customerData.client2_marketing_phone === true,
       client2PhotoConsent: customerData.client2_photo_consent === true,
     });
+    setTechnicalSurvey(
+      createTechnicalSurveyForSale(sale, customerData.technical_survey, {
+        clientName,
+        installationAddress,
+        contractNumber,
+        auditor: user?.email || "",
+        osdOperator: customerData.osd_operator || "",
+      })
+    );
 
     setLoading(false);
   }, [saleId]);
@@ -497,6 +525,166 @@ export default function SaleContractPage() {
       const formatted = formatIdeaSignPolishPhone(current[field]);
       return formatted ? { ...current, [field]: formatted } : current;
     });
+  }
+
+  function currentTechnicalSurvey(source = technicalSurvey) {
+    return normalizeTechnicalSurvey({
+      ...source,
+      clientName: form.clientName,
+      installationAddress: form.installationAddress,
+      contractNumber: form.contractNumber || saleNumber,
+      scopes: source.choices.products || [],
+      text: {
+        ...source.text,
+        client_name: form.clientName,
+        installation_address: form.installationAddress,
+        contract_number: form.contractNumber || saleNumber,
+        osd_operator: form.osdOperator,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async function persistTechnicalSurveyValue(
+    source: TechnicalSurvey,
+    announce = true
+  ) {
+    const nextSurvey = currentTechnicalSurvey(source);
+    if (announce) {
+      setTechnicalSurveySaving(true);
+      setTechnicalSurveyStatus("Zapisuję ankietę…");
+    }
+    try {
+      const { data: latestSale, error: latestSaleError } = await supabase
+        .from("sales")
+        .select("customer_data")
+        .eq("id", saleId)
+        .maybeSingle();
+      if (latestSaleError) throw latestSaleError;
+
+      const latestCustomerData =
+        latestSale?.customer_data && typeof latestSale.customer_data === "object"
+          ? (latestSale.customer_data as Record<string, unknown>)
+          : {};
+      const { error: saveError } = await supabase
+        .from("sales")
+        .update({
+          customer_data: {
+            ...latestCustomerData,
+            technical_survey: nextSurvey,
+          },
+        })
+        .eq("id", saleId);
+      if (saveError) throw saveError;
+      setTechnicalSurvey(nextSurvey);
+      if (announce) {
+        setTechnicalSurveyStatus(
+          "Ankieta została zapisana. Możesz ją jeszcze edytować przed wysłaniem do IdeaSign."
+        );
+      }
+      return nextSurvey;
+    } catch (saveError) {
+      const message =
+        saveError instanceof Error
+          ? saveError.message
+          : "Nie udało się zapisać ankiety technicznej.";
+      setTechnicalSurveyStatus(message);
+      throw saveError;
+    } finally {
+      if (announce) setTechnicalSurveySaving(false);
+    }
+  }
+
+  async function saveTechnicalSurvey() {
+    try {
+      await persistTechnicalSurveyValue(technicalSurvey);
+    } catch {
+      // Status błędu jest prezentowany bezpośrednio pod ankietą.
+    }
+  }
+
+  async function uploadTechnicalSurveyPhotos(
+    category: string,
+    label: string,
+    files: File[]
+  ) {
+    if (!currentUserId) {
+      setTechnicalSurveyStatus("Sesja CRM wygasła. Zaloguj się ponownie.");
+      return;
+    }
+    const invalid = files.find(
+      (file) => !file.type.startsWith("image/") || file.size <= 0 || file.size > 10 * 1024 * 1024
+    );
+    if (invalid) {
+      setTechnicalSurveyStatus(
+        `Plik „${invalid.name}” nie jest obsługiwanym zdjęciem albo przekracza 10 MB.`
+      );
+      return;
+    }
+
+    setTechnicalSurveyUploadingCategory(category);
+    setTechnicalSurveyStatus(`Wysyłam zdjęcia: ${label}…`);
+    try {
+      const uploadedPhotos = [...technicalSurvey.photos];
+      for (const file of files) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const filePath = `${saleId}/survey-${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage
+          .from("sale-documents")
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+
+        const { data: insertedDocument, error: insertError } = await supabase
+          .from("sale_documents")
+          .insert({
+            sale_id: saleId,
+            client_id: saleClientId,
+            uploaded_by: currentUserId,
+            description: `[Ankieta techniczna] ${label}`,
+            document_type: "Zdjęcia",
+            file_name: file.name,
+            file_path: filePath,
+            file_type: file.type || null,
+            file_size: file.size,
+          })
+          .select("id, file_path, file_type, created_at")
+          .single();
+        if (insertError || !insertedDocument) {
+          await supabase.storage.from("sale-documents").remove([filePath]);
+          throw insertError || new Error("Nie udało się przypisać zdjęcia do sprzedaży.");
+        }
+        uploadedPhotos.push({
+          id: insertedDocument.id,
+          documentId: insertedDocument.id,
+          version: insertedDocument.created_at || new Date().toISOString(),
+          category: label,
+          description: `[Ankieta techniczna] ${label}`,
+          mimeType: insertedDocument.file_type || file.type || "",
+          storagePath: insertedDocument.file_path || filePath,
+        });
+      }
+
+      const nextSurvey = {
+        ...technicalSurvey,
+        photos: uploadedPhotos,
+        photoChecklist: [...new Set([...technicalSurvey.photoChecklist, category])],
+      };
+      await persistTechnicalSurveyValue(nextSurvey, false);
+      setTechnicalSurveyStatus(
+        `Dodano ${files.length} ${files.length === 1 ? "zdjęcie" : "zdjęcia"}. Zdjęcia są dostępne również na karcie sprzedaży.`
+      );
+    } catch (uploadError) {
+      setTechnicalSurveyStatus(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Nie udało się przesłać zdjęć."
+      );
+    } finally {
+      setTechnicalSurveyUploadingCategory("");
+    }
   }
 
   async function buildValidatedContractQuery(options?: {
@@ -753,10 +941,26 @@ export default function SaleContractPage() {
     const query = await buildValidatedContractQuery({ requireIdeaSignContacts: true });
     if (!query) return;
 
+    const surveyForSigning = currentTechnicalSurvey();
+    const surveyErrors = validateTechnicalSurveyForSigning(surveyForSigning);
+    if (surveyErrors.length) {
+      setTechnicalSurveyStatus(surveyErrors[0]);
+      setIdeaSignStatus("Uzupełnij ankietę techniczną przed wysłaniem umowy.");
+      return;
+    }
+
+    let savedSurvey: TechnicalSurvey;
+    try {
+      savedSurvey = await persistTechnicalSurveyValue(surveyForSigning, false);
+    } catch {
+      setIdeaSignStatus("Nie udało się zapisać ankiety technicznej przed wysłaniem.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Zapisać i zamrozić tę wersję umowy${
+      `Zapisać i zamrozić tę wersję umowy wraz z Załącznikiem nr 4 — ankietą techniczną${
         ideaSignAttachmentFive ? " wraz z opcjonalnym Załącznikiem nr 5" : ""
-      }? Otrzymasz kod SMS do jej autoryzacji. Linki do klientów zostaną wysłane dopiero po wpisaniu poprawnego kodu.`
+      }? Zdjęcia pozostają opcjonalne i można je uzupełnić później. Otrzymasz kod SMS do autoryzacji. Linki do klientów zostaną wysłane dopiero po wpisaniu poprawnego kodu.`
     );
     if (!confirmed) return;
 
@@ -775,6 +979,7 @@ export default function SaleContractPage() {
         },
         body: JSON.stringify({
           contractData: Object.fromEntries(query.entries()),
+          technicalSurvey: savedSurvey,
           attachmentFiveDocumentId: ideaSignAttachmentFive?.id || null,
         }),
       });
@@ -1535,6 +1740,21 @@ export default function SaleContractPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section aria-labelledby="technical-survey-title">
+          <h2 id="technical-survey-title" className="sr-only">
+            Ankieta techniczna i zdjęcia
+          </h2>
+          <TechnicalSurveyForm
+            value={technicalSurvey}
+            onChange={setTechnicalSurvey}
+            onSave={saveTechnicalSurvey}
+            onPhotoUpload={uploadTechnicalSurveyPhotos}
+            saving={technicalSurveySaving}
+            uploadingCategory={technicalSurveyUploadingCategory}
+            status={technicalSurveyStatus}
+          />
         </section>
 
         <div className="flex flex-col items-end gap-3">
