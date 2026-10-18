@@ -13,7 +13,7 @@
   "crons": [
     {
       "path": "/api/cron/ideasign-expiry",
-      "schedule": "5 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/reports/daily-teams",
