@@ -23,6 +23,7 @@ import {
   calculateStandardPaymentAmounts,
   STANDARD_DEPOSIT_PERCENT,
 } from "@/lib/standardPaymentTerms";
+import { buildSalePricingPreview } from "@/lib/incognitoSales";
 
 
 type UserRole = "owner" | "admin" | "manager" | "seller" | "cc" | null;
@@ -103,6 +104,12 @@ type ClientOffer = {
   offer_data: Record<string, any> | null;
   created_at: string;
   updated_at: string | null;
+};
+
+type IncognitoCalculationPreview = {
+  finalNet: number;
+  finalGross: number;
+  pricingMode?: "incognito" | "standard";
 };
 
 type ClientData = {
@@ -945,6 +952,12 @@ export default function OfferDetailsPage() {
   const [canChooseSaleSeller, setCanChooseSaleSeller] = useState(false);
   const [canUseIncognitoSales, setCanUseIncognitoSales] = useState(false);
   const [isIncognitoSale, setIsIncognitoSale] = useState(false);
+  const [incognitoCalculation, setIncognitoCalculation] =
+    useState<IncognitoCalculationPreview | null>(null);
+  const [incognitoCalculationStatus, setIncognitoCalculationStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [incognitoCalculationError, setIncognitoCalculationError] = useState("");
   const [sellerOptions, setSellerOptions] = useState<UserProfile[]>([]);
   const [selectedSaleSellerId, setSelectedSaleSellerId] = useState("");
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
@@ -1056,6 +1069,120 @@ export default function OfferDetailsPage() {
 
     openSaleFormFromOffer(client);
   }, [offer, client, autoCreateSale, showSaleForm]);
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!showSaleForm || !offer || !isIncognitoSale) {
+      setIncognitoCalculation(null);
+      setIncognitoCalculationStatus("idle");
+      setIncognitoCalculationError("");
+
+      if (showSaleForm && offer && !isIncognitoSale && !hasCustomPaymentSchedule) {
+        const standardTotalGross =
+          Number(offer.sale_price_gross || 0) * getOfferInstallationCount(offer);
+        setSaleForm((current) =>
+          current.paymentMethod === "gotówka"
+            ? {
+                ...current,
+                depositAmount: calculateDefaultDepositAmount(standardTotalGross),
+              }
+            : current
+        );
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const activeOffer = offer;
+    const sellerId = canChooseSaleSeller ? selectedSaleSellerId : activeOffer.created_by;
+    if (!sellerId) {
+      setIncognitoCalculation(null);
+      setIncognitoCalculationStatus("error");
+      setIncognitoCalculationError("Najpierw wybierz sprzedawcę prowadzącego sprzedaż.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function loadIncognitoCalculation() {
+      setIncognitoCalculation(null);
+      setIncognitoCalculationStatus("loading");
+      setIncognitoCalculationError("");
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (!accessToken) {
+          throw new Error("Sesja wygasła. Zaloguj się ponownie.");
+        }
+
+        const offerData = activeOffer.offer_data || {};
+        const response = await fetch("/api/calculate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            ...(offerData.form || {}),
+            customEquipment: offerData.customEquipment || offerData.form?.customEquipment,
+            customMode: offerData.customMode === true || offerData.form?.customMode === true,
+            advisor: { ...(offerData.advisor || {}), id: sellerId },
+            createdBy: sellerId,
+            incognito: true,
+          }),
+        });
+        const result = await response.json().catch(() => null);
+
+        if (!response.ok || !result || result.pricingMode !== "incognito") {
+          throw new Error(
+            result?.error || "Nie udało się przeliczyć ceny sprzedaży incognito."
+          );
+        }
+        if (cancelled) return;
+
+        const preview = result as IncognitoCalculationPreview;
+        setIncognitoCalculation(preview);
+        setIncognitoCalculationStatus("ready");
+
+        if (!hasCustomPaymentSchedule) {
+          const incognitoTotalGross =
+            Number(preview.finalGross || 0) * getOfferInstallationCount(activeOffer);
+          setSaleForm((current) =>
+            current.paymentMethod === "gotówka"
+              ? {
+                  ...current,
+                  depositAmount: calculateDefaultDepositAmount(incognitoTotalGross),
+                }
+              : current
+          );
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIncognitoCalculation(null);
+        setIncognitoCalculationStatus("error");
+        setIncognitoCalculationError(
+          error instanceof Error
+            ? error.message
+            : "Nie udało się przeliczyć ceny sprzedaży incognito."
+        );
+      }
+    }
+
+    void loadIncognitoCalculation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canChooseSaleSeller,
+    hasCustomPaymentSchedule,
+    isIncognitoSale,
+    offer,
+    selectedSaleSellerId,
+    showSaleForm,
+  ]);
   async function loadOffer() {
     setLoading(true);
     setAccessDenied(false);
@@ -1288,6 +1415,9 @@ export default function OfferDetailsPage() {
 
     setSelectedSaleSellerId(canChooseSaleSeller ? "" : offer.created_by);
     setIsIncognitoSale(false);
+    setIncognitoCalculation(null);
+    setIncognitoCalculationStatus("idle");
+    setIncognitoCalculationError("");
 
     setSaleForm({
       ...emptySaleForm(),
@@ -1901,13 +2031,20 @@ export default function OfferDetailsPage() {
           ...(offer.offer_data?.form || {}),
           customEquipment: offer.offer_data?.customEquipment || offer.offer_data?.form?.customEquipment,
           customMode: offer.offer_data?.customMode === true || offer.offer_data?.form?.customMode === true,
-          advisor: offer.offer_data?.advisor || { id: effectiveSellerId },
+          advisor: {
+            ...(offer.offer_data?.advisor || {}),
+            id: effectiveSellerId,
+          },
           createdBy: effectiveSellerId,
           incognito: true,
         }),
       });
       const incognitoResult = await incognitoResponse.json().catch(() => null);
-      if (!incognitoResponse.ok || !incognitoResult) {
+      if (
+        !incognitoResponse.ok ||
+        !incognitoResult ||
+        incognitoResult.pricingMode !== "incognito"
+      ) {
         setCreateSaleStatus(
           incognitoResult?.error || "Nie udało się obliczyć ceny sprzedaży incognito."
         );
@@ -2326,6 +2463,14 @@ export default function OfferDetailsPage() {
   const isMultiInstallation = installationCount > 1;
   const totalOfferGross = Number(offer.sale_price_gross || 0) * installationCount;
   const totalOfferNet = Number(offer.sale_price_net || 0) * installationCount;
+  const salePricingPreview = buildSalePricingPreview({
+    isIncognito: showSaleForm && isIncognitoSale,
+    installationCount,
+    standardUnitNet: offer.sale_price_net,
+    standardUnitGross: offer.sale_price_gross,
+    incognitoUnitNet: incognitoCalculation?.finalNet,
+    incognitoUnitGross: incognitoCalculation?.finalGross,
+  });
   const totalCompanyMargin = Number(offer.company_margin || 0) * installationCount;
   const totalSellerMargin = Number(offer.seller_margin || 0) * installationCount;
   const totalPvPower = Number(offer.pv_power_kw || 0) * installationCount;
@@ -2450,20 +2595,53 @@ export default function OfferDetailsPage() {
               )}
 
               {canUseIncognitoSales && (
-                <label className="md:col-span-2 flex cursor-pointer items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-                  <input
-                    type="checkbox"
-                    checked={isIncognitoSale}
-                    onChange={(event) => setIsIncognitoSale(event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-violet-300 accent-violet-700"
-                  />
-                  <span>
-                    <span className="block text-sm font-black text-violet-950">Sprzedaż incognito</span>
-                    <span className="mt-1 block text-xs font-medium text-violet-800">
-                      Sprzedaż będzie widoczna tylko dla administratora i osób z tym uprawnieniem. Powiadomienia Teams o podpisaniu i zawarciu umowy nie zostaną wysłane.
+                <div className="md:col-span-2 space-y-3">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                    <input
+                      type="checkbox"
+                      checked={isIncognitoSale}
+                      onChange={(event) => {
+                        setIsIncognitoSale(event.target.checked);
+                        setCreateSaleStatus("");
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-violet-300 accent-violet-700"
+                    />
+                    <span>
+                      <span className="block text-sm font-black text-violet-950">Sprzedaż incognito</span>
+                      <span className="mt-1 block text-xs font-medium text-violet-800">
+                        Sprzedaż będzie widoczna tylko dla administratora i osób z tym uprawnieniem. Powiadomienia Teams o podpisaniu i zawarciu umowy nie zostaną wysłane.
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+
+                  {isIncognitoSale && (
+                    <div className="rounded-2xl border border-violet-300 bg-white px-4 py-3">
+                      {incognitoCalculationStatus === "loading" && (
+                        <p className="text-sm font-bold text-violet-800">
+                          Przeliczanie ceny incognito…
+                        </p>
+                      )}
+                      {incognitoCalculationStatus === "error" && (
+                        <p className="text-sm font-bold text-red-700">
+                          {incognitoCalculationError}
+                        </p>
+                      )}
+                      {incognitoCalculationStatus === "ready" && (
+                        <div>
+                          <p className="text-xs font-bold uppercase text-violet-600">
+                            Cena incognito brutto
+                          </p>
+                          <p className="mt-1 text-2xl font-black text-violet-950">
+                            {money(salePricingPreview.totalGross)}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-slate-600">
+                            Cena standardowa: {money(salePricingPreview.standardTotalGross)} · obniżka: {money(salePricingPreview.savingsGross)}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
 
               <label className="block">
@@ -2816,7 +2994,10 @@ export default function OfferDetailsPage() {
 
                         if (paymentMethod === "gotówka") {
                           updateSaleForm("ownContributionAmount", "");
-                          updateSaleForm("depositAmount", calculateDefaultDepositAmount(totalOfferGross));
+                          updateSaleForm(
+                            "depositAmount",
+                            calculateDefaultDepositAmount(salePricingPreview.totalGross)
+                          );
                           updateSaleForm(
                             "depositDueDate",
                             addDaysLocalDate(
@@ -3300,7 +3481,10 @@ export default function OfferDetailsPage() {
               <button
                 type="button"
                 onClick={() => createSaleFromOffer()}
-                disabled={creatingSale}
+                disabled={
+                  creatingSale ||
+                  (isIncognitoSale && incognitoCalculationStatus !== "ready")
+                }
                 className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-300 disabled:text-slate-500"
               >
                 {creatingSale ? "Tworzenie sprzedaży..." : "Zapisz sprzedaż"}
@@ -3384,24 +3568,60 @@ export default function OfferDetailsPage() {
             <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">
-                  {isMultiInstallation ? "Cena brutto łącznie" : "Cena brutto"}
+                  {showSaleForm && isIncognitoSale
+                    ? isMultiInstallation
+                      ? "Cena incognito brutto łącznie"
+                      : "Cena incognito brutto"
+                    : isMultiInstallation
+                      ? "Cena brutto łącznie"
+                      : "Cena brutto"}
                 </p>
                 <p className="mt-1 text-2xl font-black text-slate-950">
-                  {money(isMultiInstallation ? totalOfferGross : offer.sale_price_gross)}
+                  {showSaleForm && isIncognitoSale && incognitoCalculationStatus === "error"
+                    ? "Błąd przeliczenia"
+                    : showSaleForm && isIncognitoSale && incognitoCalculationStatus !== "ready"
+                      ? "Przeliczanie…"
+                    : money(
+                        showSaleForm
+                          ? salePricingPreview.totalGross
+                          : isMultiInstallation
+                            ? totalOfferGross
+                            : offer.sale_price_gross
+                      )}
                 </p>
                 {isMultiInstallation && (
                   <p className="mt-1 text-xs font-semibold text-slate-500">
-                    {money(offer.sale_price_gross)} × {installationCount}
+                    {money(
+                      showSaleForm
+                        ? salePricingPreview.unitGross
+                        : offer.sale_price_gross
+                    )} × {installationCount}
                   </p>
                 )}
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">
-                  {isMultiInstallation ? "Cena netto łącznie" : "Cena netto"}
+                  {showSaleForm && isIncognitoSale
+                    ? isMultiInstallation
+                      ? "Cena incognito netto łącznie"
+                      : "Cena incognito netto"
+                    : isMultiInstallation
+                      ? "Cena netto łącznie"
+                      : "Cena netto"}
                 </p>
                 <p className="mt-1 text-xl font-black text-slate-950">
-                  {money(isMultiInstallation ? totalOfferNet : offer.sale_price_net)}
+                  {showSaleForm && isIncognitoSale && incognitoCalculationStatus === "error"
+                    ? "Błąd przeliczenia"
+                    : showSaleForm && isIncognitoSale && incognitoCalculationStatus !== "ready"
+                      ? "Przeliczanie…"
+                    : money(
+                        showSaleForm
+                          ? salePricingPreview.totalNet
+                          : isMultiInstallation
+                            ? totalOfferNet
+                            : offer.sale_price_net
+                      )}
                 </p>
               </div>
 

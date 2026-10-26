@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildIncognitoContractBankParagraph,
   buildIncognitoCustomPaymentBankClause,
+  buildSalePricingPreview,
   deriveIncognitoOwnersCount,
   IDEASOL_INCOGNITO_BANK_ACCOUNT,
   IDEASOL_INCOGNITO_BANK_NAME,
@@ -17,6 +18,22 @@ test("kalkulator incognito odejmuje dokładnie jedną marżę ownera", () => {
   assert.equal(deriveIncognitoOwnersCount(3), 2);
   assert.equal(deriveIncognitoOwnersCount(1), 0);
   assert.equal(deriveIncognitoOwnersCount(0), 0);
+});
+
+test("podgląd sprzedaży pokazuje cenę incognito zamiast ceny zwykłej", () => {
+  const preview = buildSalePricingPreview({
+    isIncognito: true,
+    installationCount: 2,
+    standardUnitNet: 50_000,
+    standardUnitGross: 54_000,
+    incognitoUnitNet: 48_000,
+    incognitoUnitGross: 51_840,
+  });
+
+  assert.equal(preview.totalGross, 103_680);
+  assert.equal(preview.standardTotalGross, 108_000);
+  assert.equal(preview.savingsGross, 4_320);
+  assert.equal(preview.usesIncognitoPricing, true);
 });
 
 test("powiadomienia Teams pozostają włączone tylko dla zwykłej sprzedaży", () => {

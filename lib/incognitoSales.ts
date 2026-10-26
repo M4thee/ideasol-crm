@@ -15,6 +15,45 @@ export function deriveIncognitoOwnersCount(standardOwnersCount: number) {
   return Math.max(0, normalized - 1);
 }
 
+function finitePrice(value: number | null | undefined) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : 0;
+}
+
+export function buildSalePricingPreview(input: {
+  isIncognito: boolean;
+  installationCount: number;
+  standardUnitNet: number | null | undefined;
+  standardUnitGross: number | null | undefined;
+  incognitoUnitNet?: number | null;
+  incognitoUnitGross?: number | null;
+}) {
+  const installationCount = Math.max(1, Math.round(finitePrice(input.installationCount)));
+  const standardUnitNet = finitePrice(input.standardUnitNet);
+  const standardUnitGross = finitePrice(input.standardUnitGross);
+  const hasIncognitoResult =
+    input.isIncognito &&
+    Number.isFinite(Number(input.incognitoUnitNet)) &&
+    Number.isFinite(Number(input.incognitoUnitGross));
+  const unitNet = hasIncognitoResult
+    ? finitePrice(input.incognitoUnitNet)
+    : standardUnitNet;
+  const unitGross = hasIncognitoResult
+    ? finitePrice(input.incognitoUnitGross)
+    : standardUnitGross;
+
+  return {
+    unitNet,
+    unitGross,
+    totalNet: unitNet * installationCount,
+    totalGross: unitGross * installationCount,
+    standardTotalNet: standardUnitNet * installationCount,
+    standardTotalGross: standardUnitGross * installationCount,
+    savingsGross: Math.max(0, (standardUnitGross - unitGross) * installationCount),
+    usesIncognitoPricing: hasIncognitoResult,
+  };
+}
+
 export function shouldSendTeamsForSale(isIncognito: boolean) {
   return !isIncognito;
 }

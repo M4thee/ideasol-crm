@@ -134,13 +134,13 @@ export async function PATCH(request: Request, context: RouteContext) {
         ...asRecord(offerData.form),
         customEquipment: offerData.customEquipment || asRecord(offerData.form).customEquipment,
         customMode: offerData.customMode === true || asRecord(offerData.form).customMode === true,
-        advisor: offerData.advisor || { id: sale.seller_id },
+        advisor: { ...asRecord(offerData.advisor), id: sale.seller_id },
         createdBy: sale.seller_id,
         incognito: true,
       }),
     });
     const result = await calculationResponse.json().catch(() => null);
-    if (!calculationResponse.ok || !result) {
+    if (!calculationResponse.ok || !result || result.pricingMode !== "incognito") {
       return NextResponse.json(
         { error: result?.error || "Nie udało się przeliczyć ceny incognito." },
         { status: 422 }

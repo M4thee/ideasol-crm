@@ -409,6 +409,8 @@ export async function POST(request: Request) {
   const customModeRequested = body?.customMode === true;
   const incognitoRequested = body?.incognito === true;
   let authenticatedUserId: string | null = null;
+  let authenticatedUserRole: string | null = null;
+  let authenticatedUserCanChooseSeller = false;
 
   if (customModeRequested || incognitoRequested) {
     if (!supabase) {
@@ -464,13 +466,38 @@ export async function POST(request: Request) {
     }
 
     authenticatedUserId = user.id;
+    authenticatedUserRole = actorProfile?.role || null;
+    authenticatedUserCanChooseSeller = hasCustomMode || actorProfile?.role === "admin";
   }
 
-  const sellerProfileId =
-    authenticatedUserId ||
-    body?.advisor?.id ||
-    body?.createdBy ||
-    null;
+  const requestedSellerProfileId = body?.advisor?.id || body?.createdBy || null;
+  if (
+    incognitoRequested &&
+    requestedSellerProfileId &&
+    requestedSellerProfileId !== authenticatedUserId &&
+    !authenticatedUserCanChooseSeller &&
+    authenticatedUserRole === "manager" &&
+    supabase
+  ) {
+    const { data: requestedSeller } = await supabase
+      .from("profiles")
+      .select("manager_id")
+      .eq("id", requestedSellerProfileId)
+      .maybeSingle();
+    authenticatedUserCanChooseSeller = requestedSeller?.manager_id === authenticatedUserId;
+  }
+  if (
+    incognitoRequested &&
+    requestedSellerProfileId &&
+    requestedSellerProfileId !== authenticatedUserId &&
+    !authenticatedUserCanChooseSeller
+  ) {
+    return NextResponse.json(
+      { error: "Brak uprawnienia do zmiany sprzedawcy." },
+      { status: 403 }
+    );
+  }
+  const sellerProfileId = requestedSellerProfileId || authenticatedUserId || null;
   const sellerEmail = body?.advisor?.email || null;
   let currentUser: any = null;
   if (sellerProfileId && supabase) {
@@ -493,7 +520,7 @@ export async function POST(request: Request) {
       currentUser = resolvedByEmail;
     }
   }
-  const [{ data: settingsRow }, catalog] = await Promise.all([
+  const [{ data: settingsRow, error: settingsError }, catalog] = await Promise.all([
     supabase
       ? supabase
           .from(incognitoRequested ? "incognito_pricing_settings" : "pricing_settings")
@@ -506,6 +533,17 @@ export async function POST(request: Request) {
     loadCatalogFromSupabase(),
   ]);
 
+  if (settingsError || !settingsRow) {
+    console.error("Nie udało się pobrać ustawień kalkulatora", {
+      mode: incognitoRequested ? "incognito" : "standard",
+      message: settingsError?.message || "brak rekordu ustawień",
+    });
+    return NextResponse.json(
+      { error: "Nie udało się pobrać ustawień wybranego kalkulatora." },
+      { status: 503 }
+    );
+  }
+
   try {
     const result = calculateOffer({
       body,
@@ -515,7 +553,10 @@ export async function POST(request: Request) {
       nodeEnv: process.env.NODE_ENV,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      pricingMode: incognitoRequested ? "incognito" : "standard",
+    });
   } catch (error) {
     console.error("Błąd kalkulacji oferty", error);
 

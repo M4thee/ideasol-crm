@@ -87,13 +87,13 @@ export async function POST(request: Request) {
       ...record(offerData.form),
       customEquipment: offerData.customEquipment || record(offerData.form).customEquipment,
       customMode: offerData.customMode === true || record(offerData.form).customMode === true,
-      advisor: offerData.advisor || { id: sellerId },
+      advisor: { ...record(offerData.advisor), id: sellerId },
       createdBy: sellerId,
       incognito: true,
     }),
   });
   const calculation = await calculationResponse.json().catch(() => null);
-  if (!calculationResponse.ok || !calculation) {
+  if (!calculationResponse.ok || !calculation || calculation.pricingMode !== "incognito") {
     return NextResponse.json(
       { error: calculation?.error || "Nie udało się obliczyć ceny incognito." },
       { status: 422 }
