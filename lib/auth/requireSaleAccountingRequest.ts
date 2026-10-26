@@ -6,6 +6,7 @@ export type SaleAccountingRequestProfile = {
   id: string;
   role: string;
   hasRealizationAccess: boolean;
+  canAccessIncognito: boolean;
 };
 
 function getBearerToken(request: Request) {
@@ -34,7 +35,7 @@ export async function requireSaleAccountingRequest(
       supabaseAdmin.from("profiles").select("id, role").eq("id", user.id).maybeSingle(),
       supabaseAdmin
         .from("user_permissions")
-        .select("realization")
+        .select("realization, incognito_sales")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
@@ -48,6 +49,8 @@ export async function requireSaleAccountingRequest(
     id: profile.id,
     role: String(profile.role || "seller"),
     hasRealizationAccess,
+    canAccessIncognito:
+      profile.role === "admin" || permission?.incognito_sales === true,
   };
 }
 
@@ -55,7 +58,10 @@ export async function canAccessSaleForAccounting(params: {
   userId: string;
   role: string;
   sellerId: string | null;
+  isIncognito?: boolean;
+  canAccessIncognito?: boolean;
 }) {
+  if (params.isIncognito && !params.canAccessIncognito) return false;
   const normalizedRole = params.role.toLowerCase();
 
   if (["admin", "owner", "cc"].includes(normalizedRole)) return true;

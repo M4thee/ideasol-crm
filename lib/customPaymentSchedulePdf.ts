@@ -30,6 +30,7 @@ type DrawCustomPaymentScheduleOptions = {
   realizationPage: PDFPage;
   layoutFont: PDFFont;
   schedule: CustomPaymentSchedule;
+  bankPaymentClause?: string;
 };
 
 const HELVETICA_TYPE0_CIDS = new Map<number, number>([
@@ -295,6 +296,7 @@ export function drawCustomPaymentScheduleContractPages({
   realizationPage,
   layoutFont,
   schedule,
+  bankPaymentClause,
 }: DrawCustomPaymentScheduleOptions) {
   if (!schedule.enabled) return;
 
@@ -322,7 +324,7 @@ export function drawCustomPaymentScheduleContractPages({
   const clauses = [
     {
       number: "5.",
-      text: "Klient dokonuje płatności wszystkich transz wskazanych w harmonogramie bezpośrednio na rachunek bankowy Wykonawcy prowadzony przez mBank S.A. nr 33 1140 2004 0000 3302 8689 3030, każdorazowo podając w tytule numer Umowy lub faktury.",
+      text: bankPaymentClause || "Klient dokonuje płatności wszystkich transz wskazanych w harmonogramie bezpośrednio na rachunek bankowy Wykonawcy prowadzony przez mBank S.A. nr 33 1140 2004 0000 3302 8689 3030, każdorazowo podając w tytule numer Umowy lub faktury.",
     },
     {
       number: "6.",

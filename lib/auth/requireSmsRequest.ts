@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export type SmsRequestProfile = {
   id: string;
   role: string;
+  canAccessIncognito: boolean;
 };
 
 export async function requireSmsRequest(
@@ -27,7 +28,7 @@ export async function requireSmsRequest(
       supabaseAdmin.from("profiles").select("id, role").eq("id", user.id).maybeSingle(),
       supabaseAdmin
         .from("user_permissions")
-        .select("sms")
+        .select("sms, incognito_sales")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
@@ -39,6 +40,8 @@ export async function requireSmsRequest(
   return {
     id: profile.id,
     role: String(profile.role || "seller"),
+    canAccessIncognito:
+      profile.role === "admin" || permission?.incognito_sales === true,
   };
 }
 
@@ -46,7 +49,10 @@ export async function canAccessSaleForSms(params: {
   userId: string;
   role: string;
   sellerId: string | null;
+  isIncognito?: boolean;
+  canAccessIncognito?: boolean;
 }) {
+  if (params.isIncognito && !params.canAccessIncognito) return false;
   const normalizedRole = params.role.toLowerCase();
 
   if (["admin", "owner", "cc"].includes(normalizedRole)) return true;

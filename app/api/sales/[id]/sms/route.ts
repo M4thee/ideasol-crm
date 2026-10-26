@@ -59,7 +59,7 @@ async function loadSaleSmsData(saleId: string) {
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
     .select(
-      "id, client_id, seller_id, contract_number, contract_value, deposit_amount, customer_phone, customer_data, offer_snapshot, installation_date, installation_time, installation_installer_id"
+      "id, client_id, seller_id, contract_number, contract_value, deposit_amount, customer_phone, customer_data, offer_snapshot, installation_date, installation_time, installation_installer_id, is_incognito"
     )
     .eq("id", saleId)
     .maybeSingle();
@@ -211,6 +211,7 @@ async function loadSaleSmsData(saleId: string) {
       installerCompanyName: installer?.company_name || null,
       installerContactName: installer?.contact_name || null,
       installerPhone: installer?.phone || null,
+      isIncognito: sale.is_incognito === true,
     },
     templateDefinitions
   ).map((template) => ({
@@ -264,7 +265,7 @@ async function authorizeSale(request: Request, saleId: string) {
 
   const { data: sale, error } = await supabaseAdmin
     .from("sales")
-    .select("seller_id")
+    .select("seller_id, is_incognito")
     .eq("id", saleId)
     .maybeSingle();
 
@@ -274,6 +275,8 @@ async function authorizeSale(request: Request, saleId: string) {
     userId: profile.id,
     role: profile.role,
     sellerId: sale.seller_id,
+    isIncognito: sale.is_incognito,
+    canAccessIncognito: profile.canAccessIncognito,
   });
 
   if (!canAccess) return { error: "Nie masz dostępu do tej sprzedaży.", status: 403 as const };

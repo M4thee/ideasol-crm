@@ -845,7 +845,23 @@ export default function SaleContractPage() {
   async function generatePdf() {
     const query = await buildValidatedContractQuery();
     if (!query) return;
-    window.open(`/sales/${saleId}/contract-pdf?${query.toString()}`, "_blank");
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) {
+      setIdeaSignStatus("Sesja wygasła. Zaloguj się ponownie.");
+      return;
+    }
+    const response = await fetch(`/sales/${saleId}/contract-pdf?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      setIdeaSignStatus(error?.error || "Nie udało się wygenerować umowy.");
+      return;
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    window.open(blobUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   }
 
   async function uploadIdeaSignAttachmentFive(file: File) {

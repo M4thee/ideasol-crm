@@ -11,7 +11,7 @@ import {
   normalizeDocumentText,
   type DocumentGroupKey,
 } from "@/lib/saleDocumentGrouping";
-import { GET as generateContractPdf } from "@/app/sales/[id]/contract-pdf/route";
+import { generateContractPdf } from "@/app/sales/[id]/contract-pdf/route";
 import { appendIdeaSignAuditEvent } from "./server";
 import {
   ACTIVE_IDEASIGN_SALE_STATUSES,
@@ -54,6 +54,7 @@ type IdeaSignCrmActor = {
   phone: string;
   canPrepare: boolean;
   canSend: boolean;
+  canAccessIncognito: boolean;
 };
 
 type FrozenDocument = {
@@ -513,7 +514,7 @@ export async function requireIdeaSignCrmActor(request: Request) {
       .maybeSingle(),
     supabaseAdmin
       .from("user_permissions")
-      .select("ideasign_prepare, ideasign_send")
+      .select("ideasign_prepare, ideasign_send, incognito_sales")
       .eq("user_id", authData.user.id)
       .maybeSingle(),
   ]);
@@ -528,10 +529,16 @@ export async function requireIdeaSignCrmActor(request: Request) {
     phone: formatIdeaSignPolishPhone(profile.phone) || cleanText(profile.phone, 32),
     canPrepare: permission?.ideasign_prepare === true || isPrivilegedRole,
     canSend: permission?.ideasign_send === true || isPrivilegedRole,
+    canAccessIncognito: role === "admin" || permission?.incognito_sales === true,
   } satisfies IdeaSignCrmActor;
 }
 
-export async function actorCanAccessSale(actor: IdeaSignCrmActor, sellerId: string | null) {
+export async function actorCanAccessSale(
+  actor: IdeaSignCrmActor,
+  sellerId: string | null,
+  isIncognito = false
+) {
+  if (isIncognito && !actor.canAccessIncognito) return false;
   if (["admin", "owner", "cc"].includes(actor.role)) return true;
   if (sellerId === actor.id) return true;
   if (actor.role !== "manager" || !sellerId) return false;
@@ -549,11 +556,11 @@ async function getIdeaSignAttachmentFiveSale(
 ) {
   const { data: sale, error } = await supabaseAdmin
     .from("sales")
-    .select("id, client_id, seller_id")
+    .select("id, client_id, seller_id, is_incognito")
     .eq("id", saleId)
     .maybeSingle();
   if (error) throw new Error(`Nie udało się odczytać sprzedaży: ${error.message}`);
-  if (!sale || !(await actorCanAccessSale(actor, sale.seller_id))) return null;
+  if (!sale || !(await actorCanAccessSale(actor, sale.seller_id, sale.is_incognito))) return null;
   return sale;
 }
 
@@ -768,7 +775,8 @@ async function freezeAgreementPackage(
   const url = new URL(request.url);
   const pdfResponse = await generateContractPdf(
     new NextRequest(`${url.origin}/sales/${saleId}/contract-pdf`),
-    { params: Promise.resolve({ id: saleId }) }
+    { params: Promise.resolve({ id: saleId }) },
+    { trustedInternal: true }
   );
   if (!pdfResponse.ok) {
     const message = await pdfResponse.text();
@@ -974,7 +982,7 @@ export async function createAndSendIdeaSignSession(params: {
 
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
-    .select("id, client_id, seller_id, contract_number, public_id, sale_public_id, customer_email, customer_phone, customer_data")
+    .select("id, client_id, seller_id, contract_number, public_id, sale_public_id, customer_email, customer_phone, customer_data, is_incognito")
     .eq("id", params.saleId)
     .maybeSingle();
   if (saleError) {
@@ -990,7 +998,7 @@ export async function createAndSendIdeaSignSession(params: {
     };
   }
   if (!sale) return { ok: false as const, status: 404, error: "Nie znaleziono sprzedaży." };
-  if (!(await actorCanAccessSale(params.actor, sale.seller_id))) {
+  if (!(await actorCanAccessSale(params.actor, sale.seller_id, sale.is_incognito))) {
     return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
   }
 
@@ -1308,10 +1316,10 @@ export async function resendIdeaSignOfferorOtp(params: {
   }
   const { data: sale } = await supabaseAdmin
     .from("sales")
-    .select("seller_id")
+    .select("seller_id, is_incognito")
     .eq("id", params.saleId)
     .maybeSingle();
-  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id))) {
+  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id, sale.is_incognito))) {
     return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
   }
   const { data: session } = await supabaseAdmin
@@ -1349,10 +1357,10 @@ export async function authorizeAndSendIdeaSignSession(params: {
 
   const { data: sale } = await supabaseAdmin
     .from("sales")
-    .select("seller_id, contract_number")
+    .select("seller_id, contract_number, is_incognito")
     .eq("id", params.saleId)
     .maybeSingle();
-  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id))) {
+  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id, sale.is_incognito))) {
     return { ok: false as const, status: 403, error: "Brak dostępu do tej sprzedaży." };
   }
 
@@ -1590,8 +1598,8 @@ export async function authorizeAndSendIdeaSignSession(params: {
 }
 
 export async function getIdeaSignSaleStatus(saleId: string, actor: IdeaSignCrmActor) {
-  const { data: sale } = await supabaseAdmin.from("sales").select("seller_id").eq("id", saleId).maybeSingle();
-  if (!sale || !(await actorCanAccessSale(actor, sale.seller_id))) return null;
+  const { data: sale } = await supabaseAdmin.from("sales").select("seller_id, is_incognito").eq("id", saleId).maybeSingle();
+  if (!sale || !(await actorCanAccessSale(actor, sale.seller_id, sale.is_incognito))) return null;
   await expireOverdueIdeaSignSessions({ saleId });
   const { data } = await supabaseAdmin
     .from("contract_signature_sessions")
@@ -1611,8 +1619,8 @@ export async function cancelIdeaSignSaleSession(params: {
   if (!params.actor.canSend) {
     return { ok: false as const, status: 403, error: "Brak uprawnienia do anulowania procesu IdeaSign." };
   }
-  const { data: sale } = await supabaseAdmin.from("sales").select("seller_id").eq("id", params.saleId).maybeSingle();
-  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id))) {
+  const { data: sale } = await supabaseAdmin.from("sales").select("seller_id, is_incognito").eq("id", params.saleId).maybeSingle();
+  if (!sale || !(await actorCanAccessSale(params.actor, sale.seller_id, sale.is_incognito))) {
     return { ok: false as const, status: 403, error: "Brak dostępu do sprzedaży." };
   }
   const { data: active } = await supabaseAdmin

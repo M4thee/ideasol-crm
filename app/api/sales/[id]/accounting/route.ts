@@ -32,7 +32,7 @@ async function loadAccessibleSale(request: Request, saleId: string, requireReali
 
   const { data: sale, error: saleError } = await supabaseAdmin
     .from("sales")
-    .select("id, seller_id, contract_value, deposit_amount, contract_number, public_id, sale_public_id")
+    .select("id, seller_id, contract_value, deposit_amount, contract_number, public_id, sale_public_id, is_incognito")
     .eq("id", saleId)
     .maybeSingle();
 
@@ -49,6 +49,8 @@ async function loadAccessibleSale(request: Request, saleId: string, requireReali
     userId: profile.id,
     role: profile.role,
     sellerId: sale.seller_id,
+    isIncognito: sale.is_incognito,
+    canAccessIncognito: profile.canAccessIncognito,
   });
 
   if (!canAccess) {

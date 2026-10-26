@@ -160,6 +160,7 @@ export async function loadCommandCenterLiveEvents(
     supabaseAdmin
       .from("sales")
       .select("id,created_at,contract_value,status,seller_id,offer_snapshot")
+      .eq("is_incognito", false)
       .gt("created_at", lowerBoundIso)
       .lte("created_at", cursor)
       .order("created_at", { ascending: true })

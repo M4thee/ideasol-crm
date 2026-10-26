@@ -26,7 +26,7 @@ export async function POST(request: Request, context: RouteContext) {
     const { id: saleId } = await context.params;
     const { data: sale, error: saleError } = await supabaseAdmin
       .from("sales")
-      .select("id, seller_id")
+      .select("id, seller_id, is_incognito")
       .eq("id", saleId)
       .maybeSingle();
 
@@ -38,6 +38,8 @@ export async function POST(request: Request, context: RouteContext) {
       userId: profile.id,
       role: profile.role,
       sellerId: sale.seller_id,
+      isIncognito: sale.is_incognito,
+      canAccessIncognito: profile.canAccessIncognito,
     });
 
     if (!canAccess) {

@@ -731,6 +731,7 @@ export async function GET(request: NextRequest) {
     const { data: salesRows, error: salesError } = await supabase
       .from("sales")
       .select("*")
+      .eq("is_incognito", false)
       .gte("created_at", startIso)
       .lte("created_at", endIso);
 

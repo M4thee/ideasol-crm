@@ -42,6 +42,7 @@ type Sale = {
   installation_at?: string | null;
   installation_installer_id?: string | null;
   created_at: string;
+  is_incognito: boolean;
 };
 
 type SaleDocument = {
@@ -494,6 +495,8 @@ export default function SalePage() {
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [hasRealizationAccess, setHasRealizationAccess] = useState(false);
   const [hasSmsAccess, setHasSmsAccess] = useState(false);
+  const [hasIncognitoAccess, setHasIncognitoAccess] = useState(false);
+  const [changingIncognitoMode, setChangingIncognitoMode] = useState(false);
 
   const [showInstallationOrderModal, setShowInstallationOrderModal] = useState(false);
   const [installers, setInstallers] = useState<Installer[]>([]);
@@ -568,7 +571,7 @@ export default function SalePage() {
         photoDocuments.map(async (document) => {
           const { data, error } = await supabase.storage
             .from("sale-documents")
-            .createSignedUrl(document.file_path, 60 * 10);
+            .createSignedUrl(document.file_path, sale?.is_incognito ? 60 : 60 * 10);
 
           if (error || !data?.signedUrl) {
             return [document.id, ""] as const;
@@ -582,7 +585,7 @@ export default function SalePage() {
     }
 
     loadPhotoPreviews();
-  }, [documents]);
+  }, [documents, sale?.is_incognito]);
 
   async function loadSale() {
     setLoading(true);
@@ -628,7 +631,7 @@ export default function SalePage() {
 
       const { data: permissionData, error: permissionError } = await supabase
         .from("user_permissions")
-        .select("realization, sms")
+        .select("realization, sms, incognito_sales")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -639,10 +642,14 @@ export default function SalePage() {
       resolvedRealizationAccess = Boolean(permissionData?.realization);
       setHasRealizationAccess(resolvedRealizationAccess);
       setHasSmsAccess(Boolean(permissionData?.sms));
+      setHasIncognitoAccess(
+        resolvedRole === "admin" || Boolean(permissionData?.incognito_sales)
+      );
 
     } else {
       setHasRealizationAccess(false);
       setHasSmsAccess(false);
+      setHasIncognitoAccess(false);
     }
 
     const normalizedRole = String(resolvedRole || "seller").toLowerCase();
@@ -1285,6 +1292,43 @@ export default function SalePage() {
     }
   }
 
+  async function changeIncognitoMode() {
+    if (!sale || !hasIncognitoAccess || changingIncognitoMode) return;
+    const nextValue = !sale.is_incognito;
+    const confirmed = window.confirm(
+      nextValue
+        ? "Włączyć tryb incognito? Cena zostanie przeliczona według oddzielnego kalkulatora."
+        : "Wyłączyć tryb incognito? Cena wróci do wartości oferty standardowej."
+    );
+    if (!confirmed) return;
+
+    setChangingIncognitoMode(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const response = await fetch(`/api/sales/${sale.id}/incognito`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${data.session?.access_token || ""}`,
+        },
+        body: JSON.stringify({ isIncognito: nextValue }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        alert(result?.error || "Nie udało się zmienić trybu sprzedaży.");
+        return;
+      }
+      setSale((current) => current ? {
+        ...current,
+        is_incognito: nextValue,
+        contract_value: Number(result.contractValue ?? current.contract_value),
+      } : current);
+      await loadSale();
+    } finally {
+      setChangingIncognitoMode(false);
+    }
+  }
+
   async function addSaleNote() {
     if (!sale || !currentUserId || !newSaleNote.trim()) {
       setSaleNoteStatus("Wpisz treść notatki.");
@@ -1314,7 +1358,7 @@ export default function SalePage() {
         return;
       }
 
-      if (sale.client_id) {
+      if (sale.client_id && !sale.is_incognito) {
         const clientNoteContent = `${visibleSaleId}: ${cleanContent}`;
 
         const { error: clientNoteError } = await supabase
@@ -1780,8 +1824,27 @@ export default function SalePage() {
             <h1 className="text-3xl font-bold text-slate-900">
               Karta sprzedaży
             </h1>
+            {sale.is_incognito && (
+              <span className="mt-2 inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-violet-800">
+                Incognito
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {hasIncognitoAccess && (
+              <button
+                type="button"
+                onClick={changeIncognitoMode}
+                disabled={changingIncognitoMode}
+                className="rounded-xl border border-violet-200 bg-violet-50 px-5 py-3 text-sm font-bold text-violet-800 transition hover:bg-violet-100 disabled:opacity-50"
+              >
+                {changingIncognitoMode
+                  ? "Zmieniam tryb..."
+                  : sale.is_incognito
+                    ? "Wyłącz incognito"
+                    : "Włącz incognito"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

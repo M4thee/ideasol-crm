@@ -7,6 +7,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendTeamsSaleChannelNotification } from "@/lib/microsoftTeams";
+import { shouldSendTeamsForSale } from "@/lib/incognitoSales";
 import { DOCUMENT_GROUPS, type DocumentGroupKey } from "@/lib/saleDocumentGrouping";
 import { appendIdeaSignAuditEvent, type IdeaSignAccessContext, verifyIdeaSignOtp } from "./server";
 import { sha256 } from "./security";
@@ -192,7 +193,7 @@ export async function finalizeIdeaSignContract(params: {
   if (!agreement) throw new Error("Brak zamrożonego PDF umowy.");
   const { data: sale } = await supabaseAdmin
     .from("sales")
-    .select("contract_number, public_id, sale_public_id, customer_data")
+    .select("contract_number, public_id, sale_public_id, customer_data, is_incognito")
     .eq("id", signature.sale_id)
     .maybeSingle();
   const { data: client } = signature.client_id
@@ -335,12 +336,14 @@ export async function finalizeIdeaSignContract(params: {
     failedChannels.push("email");
   }
 
-  try {
-    await sendTeamsSaleChannelNotification({
-      message: `<strong>IdeaSign: umowa zawarta</strong>\nNumer umowy: ${contractNumber}\nID transakcji: ${signature.transaction_id}\nData: ${formatWarsawDate(concludedAt)}`,
-    });
-  } catch {
-    failedChannels.push("teams");
+  if (shouldSendTeamsForSale(Boolean(sale?.is_incognito))) {
+    try {
+      await sendTeamsSaleChannelNotification({
+        message: `<strong>IdeaSign: umowa zawarta</strong>\nNumer umowy: ${contractNumber}\nID transakcji: ${signature.transaction_id}\nData: ${formatWarsawDate(concludedAt)}`,
+      });
+    } catch {
+      failedChannels.push("teams");
+    }
   }
 
   if (failedChannels.length) {
@@ -359,7 +362,11 @@ export async function finalizeIdeaSignContract(params: {
       signatureSessionId: signature.id,
       eventType: "post_conclusion_delivery_completed",
       request: params.request,
-      eventData: { channels: ["crm", "email", "teams"] },
+      eventData: {
+        channels: shouldSendTeamsForSale(Boolean(sale?.is_incognito))
+          ? ["crm", "email", "teams"]
+          : ["crm", "email"],
+      },
     });
   }
 

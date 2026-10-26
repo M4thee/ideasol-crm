@@ -187,13 +187,14 @@ async function syncLifecycleEvents() {
       let saleId = link.sale_id;
       let sale: JsonRecord | null = null;
       if (saleId) {
-        const result = await supabaseAdmin.from("sales").select("*").eq("id", saleId).maybeSingle();
+        const result = await supabaseAdmin.from("sales").select("*").eq("id", saleId).eq("is_incognito", false).maybeSingle();
         if (result.error) throw result.error;
         sale = result.data as JsonRecord | null;
       } else {
         const result = await supabaseAdmin
           .from("sales")
           .select("*")
+          .eq("is_incognito", false)
           .eq("client_id", link.client_id)
           .order("sale_date", { ascending: false })
           .limit(1)

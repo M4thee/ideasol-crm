@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const currentUserRole = String(body.current_user_role || "");
-
-    if (currentUserRole !== "admin") {
+    const actor = await requireAdminRequest(request);
+    if (!actor) {
       return NextResponse.json(
         {
           error: "Brak uprawnień",
@@ -16,6 +15,8 @@ export async function POST(request: Request) {
         }
       );
     }
+
+    const body = await request.json();
 
     const email = String(body.email || "")
       .trim()

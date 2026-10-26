@@ -77,6 +77,7 @@ async function verifySource(body: Required<RequestBody>) {
     const { data } = await supabaseAdmin
       .from("sales")
       .select("id, client_id, contract_value, sale_date")
+      .eq("is_incognito", false)
       .eq("id", body.sourceId)
       .eq("client_id", body.clientId)
       .maybeSingle();

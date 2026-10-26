@@ -407,12 +407,13 @@ function readBearerToken(request: Request) {
 export async function POST(request: Request) {
   const body = await request.json();
   const customModeRequested = body?.customMode === true;
+  const incognitoRequested = body?.incognito === true;
   let authenticatedUserId: string | null = null;
 
-  if (customModeRequested) {
+  if (customModeRequested || incognitoRequested) {
     if (!supabase) {
       return NextResponse.json(
-        { error: "Tryb niestandardowy wymaga pełnej konfiguracji lokalnego Supabase." },
+        { error: "Ten tryb wymaga pełnej konfiguracji lokalnego Supabase." },
         { status: 503 }
       );
     }
@@ -420,7 +421,7 @@ export async function POST(request: Request) {
 
     if (!accessToken) {
       return NextResponse.json(
-        { error: "Tryb niestandardowy wymaga aktywnej sesji użytkownika." },
+        { error: "Ten tryb wymaga aktywnej sesji użytkownika." },
         { status: 401 }
       );
     }
@@ -439,13 +440,25 @@ export async function POST(request: Request) {
 
     const { data: permission, error: permissionError } = await supabase
       .from("user_permissions")
-      .select("custom_mode")
+      .select("custom_mode, incognito_sales")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (permissionError || permission?.custom_mode !== true) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    const hasCustomMode = permission?.custom_mode === true;
+    const hasIncognito = actorProfile?.role === "admin" || permission?.incognito_sales === true;
+
+    if (
+      permissionError ||
+      (customModeRequested && !hasCustomMode) ||
+      (incognitoRequested && !hasIncognito)
+    ) {
       return NextResponse.json(
-        { error: "Brak uprawnienia Custom Mode." },
+        { error: incognitoRequested ? "Brak uprawnienia do sprzedaży incognito." : "Brak uprawnienia Custom Mode." },
         { status: 403 }
       );
     }
@@ -483,7 +496,7 @@ export async function POST(request: Request) {
   const [{ data: settingsRow }, catalog] = await Promise.all([
     supabase
       ? supabase
-          .from("pricing_settings")
+          .from(incognitoRequested ? "incognito_pricing_settings" : "pricing_settings")
           .select(
             "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
           )

@@ -1,4 +1,5 @@
 export const IDEASOL_BANK_ACCOUNT = "33 1140 2004 0000 3302 8689 3030";
+export const IDEASOL_INCOGNITO_BANK_ACCOUNT = "39 1600 1462 1786 0938 0000 0001";
 export const IDEASOL_HOTLINE = "41 202 02 38";
 
 export const SMS_TEMPLATE_TONES = ["standard", "warning", "danger"] as const;
@@ -97,6 +98,7 @@ export type SaleSmsTemplateContext = {
   installerCompanyName: string | null;
   installerContactName?: string | null;
   installerPhone?: string | null;
+  isIncognito?: boolean;
 };
 
 export type InstallationReminderContext = {
@@ -224,7 +226,9 @@ function getTemplateValues(context: SaleSmsTemplateContext) {
     installer_company_name: String(context.installerCompanyName || "").trim(),
     installer_contact_name: String(context.installerContactName || "").trim(),
     installer_phone: String(context.installerPhone || "").trim(),
-    bank_account: IDEASOL_BANK_ACCOUNT,
+    bank_account: context.isIncognito
+      ? IDEASOL_INCOGNITO_BANK_ACCOUNT
+      : IDEASOL_BANK_ACCOUNT,
     hotline: IDEASOL_HOTLINE,
   } satisfies Record<SmsTemplateVariableKey, string>;
 }

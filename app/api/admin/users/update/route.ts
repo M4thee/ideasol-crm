@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 
 export async function POST(request: Request) {
   try {
+    const actor = await requireAdminRequest(request);
+    if (!actor) {
+      return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
+    }
+
     const body = await request.json();
-    const currentUserRole = String(body.current_user_role || "");
 
     const {
       user_id,
@@ -12,30 +17,16 @@ export async function POST(request: Request) {
       action,
     } = body;
 
-    if (currentUserRole !== "admin") {
-      if (action && !["update", "deactivate", "restore"].includes(action)) {
-        return NextResponse.json(
-          { error: "Nieprawidłowa akcja." },
-          { status: 400 }
-        );
-      }
-      return NextResponse.json(
-        { error: "Brak uprawnień." },
-        { status: 403 }
-      );
+    if (action && !["update", "deactivate", "restore"].includes(action)) {
+      return NextResponse.json({ error: "Nieprawidłowa akcja." }, { status: 400 });
     }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
 
     // Future workflow:
     // action = "deactivate" -> save snapshot to user_deactivation_logs
     // action = "restore" -> restore clients and user settings from snapshot
     // action = "update" (or undefined) -> standard profile update
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("profiles")
       .update(values)
       .eq("id", user_id)

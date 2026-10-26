@@ -248,7 +248,7 @@ export async function loadCommandCenterMetrics(
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status").gte("event_at", queryStartIso).lt("event_at", dayEndIso).order("event_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<CalendarRow>((from, to) => supabase.from("calendar_events").select("id, client_id, event_at, event_type, status, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<OfferRow>((from, to) => supabase.from("client_offers").select("id, client_id, created_by, created_at").gte("created_at", queryStartIso).lt("created_at", dayEndIso).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
-    fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    fetchAllRows<SaleRow>((from, to) => supabase.from("sales").select("id, client_id, seller_id, sale_date, created_at, contract_value, status").eq("is_incognito", false).gte("sale_date", queryStartIso).lt("sale_date", dayEndIso).order("sale_date", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     fetchAllRows<ProfileRow>((from, to) => supabase.from("profiles").select("id, display_name, role").order("id", { ascending: true }).range(from, to)),
   ]);
 

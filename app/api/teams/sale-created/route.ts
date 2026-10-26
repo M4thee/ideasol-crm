@@ -5,6 +5,8 @@ import {
   buildTeamsSaleChannelMessage,
   sendTeamsSaleChannelNotification,
 } from "@/lib/microsoftTeams";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { shouldSendTeamsForSale } from "@/lib/incognitoSales";
 
 export const runtime = "nodejs";
 
@@ -19,6 +21,37 @@ type SaleCreatedNotificationBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SaleCreatedNotificationBody;
+    const authorization = request.headers.get("authorization") || "";
+    const accessToken = authorization.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length).trim()
+      : "";
+    const { data: authData } = await supabaseAdmin.auth.getUser(accessToken);
+    if (!authData.user) {
+      return NextResponse.json({ error: "Brak aktywnej sesji." }, { status: 401 });
+    }
+
+    const saleId = String(body.saleId || "");
+    const { data: sale } = await supabaseAdmin
+      .from("sales")
+      .select("id, seller_id, is_incognito")
+      .eq("id", saleId)
+      .maybeSingle();
+    if (!sale) {
+      return NextResponse.json({ error: "Nie znaleziono sprzedaży." }, { status: 404 });
+    }
+    if (!shouldSendTeamsForSale(Boolean(sale.is_incognito))) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "incognito" });
+    }
+
+    const { data: actorProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+    if (sale.seller_id !== authData.user.id && !["admin", "owner"].includes(actorProfile?.role || "")) {
+      return NextResponse.json({ error: "Brak dostępu." }, { status: 403 });
+    }
+
     const productsSummary = String(body.productsSummary || "").trim();
     const totalSummary = String(body.totalSummary || "").trim();
     const sellerName = String(body.sellerName || "").trim();

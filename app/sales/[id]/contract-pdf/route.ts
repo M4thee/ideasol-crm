@@ -15,6 +15,10 @@ import {
   drawCustomPaymentScheduleContractPages,
   sanitizeCustomPaymentTemplatePages,
 } from "@/lib/customPaymentSchedulePdf";
+import {
+  buildIncognitoContractBankParagraph,
+  buildIncognitoCustomPaymentBankClause,
+} from "@/lib/incognitoSales";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1271,7 +1275,11 @@ function readBooleanLike(value: unknown) {
   return null;
 }
 
-export async function GET(request: NextRequest, context: RouteContext) {
+export async function generateContractPdf(
+  request: NextRequest,
+  context: RouteContext,
+  options: { trustedInternal?: boolean } = {}
+) {
   const { id } = await context.params;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -1303,6 +1311,40 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
 
+  if (!options.trustedInternal) {
+    const authorization = request.headers.get("authorization") || "";
+    const accessToken = authorization.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length).trim()
+      : "";
+    const { data: authData } = await supabase.auth.getUser(accessToken);
+    if (!authData.user) {
+      return NextResponse.json({ error: "Brak aktywnej sesji." }, { status: 401 });
+    }
+
+    const [{ data: actor }, { data: permission }] = await Promise.all([
+      supabase.from("profiles").select("role").eq("id", authData.user.id).maybeSingle(),
+      supabase
+        .from("user_permissions")
+        .select("incognito_sales")
+        .eq("user_id", authData.user.id)
+        .maybeSingle(),
+    ]);
+    let hasBaseAccess = ["admin", "owner", "cc"].includes(actor?.role || "") ||
+      sale.seller_id === authData.user.id;
+    if (!hasBaseAccess && actor?.role === "manager" && sale.seller_id) {
+      const { data: seller } = await supabase
+        .from("profiles")
+        .select("manager_id")
+        .eq("id", sale.seller_id)
+        .maybeSingle();
+      hasBaseAccess = seller?.manager_id === authData.user.id;
+    }
+    const hasIncognitoAccess = actor?.role === "admin" || permission?.incognito_sales === true;
+    if (!hasBaseAccess || (sale.is_incognito && !hasIncognitoAccess)) {
+      return NextResponse.json({ error: "Nie znaleziono sprzedaży." }, { status: 404 });
+    }
+  }
+
   const customPaymentSchedule = getCustomPaymentScheduleFromSale(sale);
 
   let client: Record<string, any> | null = null;
@@ -1331,7 +1373,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     sellerProfile = profileData;
   }
 
-  const templatePath = path.join(process.cwd(), "public", "templates", "contract.pdf");
+  const templatePath = path.join(
+    process.cwd(),
+    "public",
+    "templates",
+    sale.is_incognito ? "contract-incognito.pdf" : "contract.pdf"
+  );
   const templateBytes = await readFile(templatePath);
   const pdfDoc = await PDFDocument.load(templateBytes);
   pdfDoc.registerFontkit(fontkit);
@@ -1383,6 +1430,34 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const regularFont = await pdfDoc.embedFont(regularFontBytes, { subset: false });
   const boldFont = await pdfDoc.embedFont(boldFontBytes, { subset: false });
   const contractBodyLayoutFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  if (sale.is_incognito) {
+    const paymentPage = pdfDoc.getPage(3);
+    const bankParagraph = buildIncognitoContractBankParagraph();
+    const words = bankParagraph.split(/\s+/);
+    const lines: string[] = [];
+    let line = "";
+    const fontSize = 7.2;
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (regularFont.widthOfTextAtSize(candidate, fontSize) <= 475) {
+        line = candidate;
+      } else {
+        if (line) lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    lines.slice(0, 5).forEach((text, index) => {
+      paymentPage.drawText(text, {
+        x: 72,
+        y: 194 - index * 9.5,
+        size: fontSize,
+        font: regularFont,
+        color: rgb(0.08, 0.1, 0.14),
+      });
+    });
+  }
 
   const customerFromDb = getCustomerData(sale, client);
   const customer = {
@@ -2262,6 +2337,9 @@ if (hasOptimizers) {
         realizationPage,
         layoutFont: contractBodyLayoutFont,
         schedule: customPaymentSchedule,
+        bankPaymentClause: sale.is_incognito
+          ? buildIncognitoCustomPaymentBankClause()
+          : undefined,
       });
     }
   } else {
@@ -2573,4 +2651,8 @@ if (hasOptimizers) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+export async function GET(request: NextRequest, context: RouteContext) {
+  return generateContractPdf(request, context);
 }

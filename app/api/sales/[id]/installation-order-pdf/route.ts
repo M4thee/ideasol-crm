@@ -516,7 +516,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       supabaseAdmin.from("profiles").select("role").eq("id", user.id).maybeSingle(),
       supabaseAdmin
         .from("user_permissions")
-        .select("realization")
+        .select("realization, incognito_sales")
         .eq("user_id", user.id)
         .maybeSingle(),
     ]);
@@ -601,6 +601,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const sale = saleResponse.data as SaleRecord;
     const installer = installerResponse.data as Installer;
+
+    if (
+      sale.is_incognito === true &&
+      String(profile?.role || "") !== "admin" &&
+      permission?.incognito_sales !== true
+    ) {
+      return NextResponse.json({ error: "Nie znaleziono sprzedaży." }, { status: 404 });
+    }
 
     const normalizedRole = String(profile?.role || "seller").toLowerCase();
     let canAccessSale = ["admin", "owner", "cc"].includes(normalizedRole);

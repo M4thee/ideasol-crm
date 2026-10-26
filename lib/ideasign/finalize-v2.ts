@@ -5,6 +5,7 @@ import { encryptPDF } from "@pdfsmaller/pdf-encrypt";
 import { PDFDocument } from "pdf-lib";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendTeamsSaleChannelNotification } from "@/lib/microsoftTeams";
+import { shouldSendTeamsForSale } from "@/lib/incognitoSales";
 import { DOCUMENT_GROUPS, type DocumentGroupKey } from "@/lib/saleDocumentGrouping";
 import { appendIdeaSignAuditEvent, type IdeaSignAccessContext, verifyIdeaSignOtp } from "./server";
 import { getIdeaSignDeliveryPassword, getIdeaSignOwnerPassword } from "./password";
@@ -493,6 +494,13 @@ async function deliverIdeaSignJob(job: DeliveryJobRow) {
     });
     return;
   }
+
+  const { data: sale } = await supabaseAdmin
+    .from("sales")
+    .select("is_incognito")
+    .eq("id", signature.sale_id)
+    .maybeSingle();
+  if (!shouldSendTeamsForSale(Boolean(sale?.is_incognito))) return;
 
   await sendTeamsSaleChannelNotification({
     message: `<strong>IdeaSign: umowa zawarta</strong>\nNumer umowy: ${escapeHtml(contractNumber)}\nID transakcji: ${escapeHtml(signature.transaction_id)}\nData: ${escapeHtml(formatWarsawDate(signature.concluded_at!))}`,

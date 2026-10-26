@@ -1,20 +1,13 @@
 
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const adminSupabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { requireAdminRequest } from "@/lib/auth/requireAdminRequest";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-
-    const currentUserRole = String(body.current_user_role || "");
-
-    if (currentUserRole !== "admin") {
+    const actor = await requireAdminRequest(request);
+    if (!actor) {
       return NextResponse.json(
         {
           error: "Brak uprawnień",
@@ -24,6 +17,8 @@ export async function POST(request: Request) {
         }
       );
     }
+
+    const body = await request.json();
 
     const userId = String(body.user_id || "");
     const password = String(body.password || "");
@@ -65,7 +60,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { error } = await adminSupabase.auth.admin.updateUserById(
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(
       userId,
       {
         password,

@@ -13,6 +13,7 @@ import {
   DEFAULT_ARIMR_2026_SETTINGS,
   type Arimr2026Settings,
 } from "@/lib/calculator/arimr2026";
+import { deriveIncognitoOwnersCount } from "@/lib/incognitoSales";
 
 const ROLES = ["owner", "admin", "manager", "seller", "cc"] as const;
 const STICKY_NOTE_COLORS = [
@@ -42,6 +43,7 @@ type Profile = {
   ideasign_send_access: boolean;
   custom_mode_access: boolean;
   arimr_calculator_access: boolean;
+  incognito_sales_access: boolean;
   sticky_note_color: StickyNoteColor;
 };
 
@@ -86,6 +88,16 @@ const DEFAULT_PRICING_OVERRIDES = {
   },
 };
 
+const DEFAULT_INCOGNITO_PRICING_OVERRIDES = {
+  ...DEFAULT_PRICING_OVERRIDES,
+  margins: {
+    ...DEFAULT_PRICING_OVERRIDES.margins,
+    ownersCount: deriveIncognitoOwnersCount(
+      DEFAULT_PRICING_OVERRIDES.margins.ownersCount
+    ),
+  },
+};
+
 export default function AdminUsersPage() {
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -108,8 +120,11 @@ export default function AdminUsersPage() {
   >("users");
   const [adminStatus, setAdminStatus] = useState("");
   const [pricingOverrides, setPricingOverrides] = useState(DEFAULT_PRICING_OVERRIDES);
+  const [incognitoPricingOverrides, setIncognitoPricingOverrides] = useState(
+    DEFAULT_INCOGNITO_PRICING_OVERRIDES
+  );
   const [calculatorAdminMode, setCalculatorAdminMode] = useState<
-    "standard" | "arimr2026"
+    "standard" | "incognito" | "arimr2026"
   >("standard");
   const [arimr2026Settings, setArimr2026Settings] = useState(
     DEFAULT_ARIMR_2026_SETTINGS
@@ -175,7 +190,18 @@ export default function AdminUsersPage() {
     loadCurrentUserRole();
     loadClientTags();
     loadPricingSettings();
+    loadIncognitoPricingSettings();
   }, []);
+
+  async function apiAuthHeaders() {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Sesja wygasła. Zaloguj się ponownie.");
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+  }
 
   async function loadCurrentUserRole() {
     try {
@@ -290,6 +316,54 @@ export default function AdminUsersPage() {
     }));
   }
 
+  async function loadIncognitoPricingSettings() {
+    const { data, error } = await supabase
+      .from("incognito_pricing_settings")
+      .select("*")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) console.warn("Nie udało się załadować ustawień incognito", error);
+      return;
+    }
+
+    setIncognitoPricingOverrides((current) => ({
+      ...current,
+      installation: {
+        ...current.installation,
+        pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+        storageWithPvNet: Number(data.storage_installation_with_pv_net ?? current.installation.storageWithPvNet),
+        storageWithoutPvNet: Number(data.storage_installation_without_pv_net ?? current.installation.storageWithoutPvNet),
+      },
+      placeholders: {
+        ...current.placeholders,
+        protections: Number(data.protections_cost ?? current.placeholders.protections),
+        wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
+        transportElectronics: Number(data.transport_electronics_net ?? current.placeholders.transportElectronics),
+        transportPanels: Number(data.transport_panels_net ?? current.placeholders.transportPanels),
+        documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
+        ems: Number(data.ems_cost ?? current.placeholders.ems),
+      },
+      margins: {
+        ...current.margins,
+        marketing: Number(data.marketing_cost ?? current.margins.marketing),
+        ownersCount: Number(data.owners_count ?? current.margins.ownersCount),
+        pvSmallPerKw: Number(data.pv_small_per_kw ?? current.margins.pvSmallPerKw),
+        pvSmallFixed: Number(data.pv_small_fixed ?? current.margins.pvSmallFixed),
+        pvLargePerKw: Number(data.pv_large_per_kw ?? current.margins.pvLargePerKw),
+        pvLargeFixed: Number(data.pv_large_fixed ?? current.margins.pvLargeFixed),
+        storagePerOwner: Number(data.storage_per_owner ?? current.margins.storagePerOwner),
+        managerFeeNet: Number(data.manager_fee_percent ?? current.margins.managerFeeNet),
+      },
+      operator: {
+        ...current.operator,
+        percent: Number(data.warranty_percent ?? current.operator.percent),
+      },
+      subsidy: { qualifyVat: Boolean(data.pme_qualify_vat ?? current.subsidy.qualifyVat) },
+    }));
+  }
+
   function updatePricingValue(path: string[], value: string | boolean) {
     const numberValue = typeof value === "string" ? Number(value.replace(",", ".")) : 0;
     const safeValue = typeof value === "boolean"
@@ -311,6 +385,53 @@ export default function AdminUsersPage() {
     });
 
     setAdminStatus("Masz niezapisane zmiany w ustawieniach kalkulatora");
+  }
+
+  function updateIncognitoPricingValue(path: string[], value: string | boolean) {
+    const parsed = typeof value === "string" ? Number(value.replace(",", ".")) : value;
+    const safeValue = typeof parsed === "boolean" ? parsed : Number.isFinite(parsed) ? parsed : 0;
+    setIncognitoPricingOverrides((current) => {
+      const next = structuredClone(current);
+      let target = next as unknown as Record<string, unknown>;
+      for (let index = 0; index < path.length - 1; index++) {
+        target[path[index]] ||= {};
+        target = target[path[index]] as Record<string, unknown>;
+      }
+      target[path[path.length - 1]] = safeValue;
+      return next;
+    });
+    setAdminStatus("Masz niezapisane zmiany w kalkulatorze incognito");
+  }
+
+  async function saveIncognitoPricingSettings() {
+    const pricing = incognitoPricingOverrides;
+    setAdminStatus("Zapisywanie ustawień incognito...");
+    const { error } = await supabase
+      .from("incognito_pricing_settings")
+      .update({
+        installation_pv_per_kw: pricing.installation.pvPerKwNet,
+        storage_installation_with_pv_net: pricing.installation.storageWithPvNet,
+        storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
+        protections_cost: pricing.placeholders.protections,
+        wiring_cost: pricing.placeholders.wiring,
+        transport_electronics_net: pricing.placeholders.transportElectronics,
+        transport_panels_net: pricing.placeholders.transportPanels,
+        documentation_cost: pricing.placeholders.documentation,
+        ems_cost: pricing.placeholders.ems,
+        marketing_cost: pricing.margins.marketing,
+        owners_count: pricing.margins.ownersCount,
+        pv_small_per_kw: pricing.margins.pvSmallPerKw,
+        pv_small_fixed: pricing.margins.pvSmallFixed,
+        pv_large_per_kw: pricing.margins.pvLargePerKw,
+        pv_large_fixed: pricing.margins.pvLargeFixed,
+        storage_per_owner: pricing.margins.storagePerOwner,
+        manager_fee_percent: pricing.margins.managerFeeNet,
+        warranty_percent: pricing.operator.percent,
+        pme_qualify_vat: Boolean(pricing.subsidy?.qualifyVat),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+    setAdminStatus(error ? "Błąd zapisu ustawień incognito" : "Zapisano ustawienia incognito");
   }
 
   async function savePricingSettings() {
@@ -558,7 +679,7 @@ export default function AdminUsersPage() {
 
     const { data: permissionsData, error: permissionsError } = await supabase
       .from("user_permissions")
-      .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode, arimr_calculator");
+      .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode, arimr_calculator, incognito_sales");
 
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
@@ -600,6 +721,12 @@ export default function AdminUsersPage() {
         Boolean(permission.ideasign_send),
       ])
     );
+    const incognitoSalesByUserId = new Map(
+      (permissionsData || []).map((permission) => [
+        permission.user_id,
+        Boolean(permission.incognito_sales),
+      ])
+    );
 
     setProfiles(
       (data ?? []).map((profile) => ({
@@ -610,6 +737,7 @@ export default function AdminUsersPage() {
         ideasign_send_access: ideaSignSendByUserId.get(profile.id) || false,
         custom_mode_access: customModeByUserId.get(profile.id) || false,
         arimr_calculator_access: arimrCalculatorByUserId.get(profile.id) || false,
+        incognito_sales_access: incognitoSalesByUserId.get(profile.id) || false,
       })) as Profile[]
     );
     setLoading(false);
@@ -628,6 +756,7 @@ export default function AdminUsersPage() {
       ideasign_send_access: ideaSignSendAccess,
       custom_mode_access: customModeAccess,
       arimr_calculator_access: arimrCalculatorAccess,
+      incognito_sales_access: incognitoSalesAccess,
       ...profileValues
     } = values;
     const payload: Partial<Profile> = profileValues;
@@ -638,9 +767,7 @@ export default function AdminUsersPage() {
     if (Object.keys(payload).length > 0) {
       const response = await fetch("/api/admin/users/update", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await apiAuthHeaders(),
         body: JSON.stringify({
           current_user_role: "admin",
           user_id: userId,
@@ -671,6 +798,7 @@ export default function AdminUsersPage() {
       ideaSignSendAccess !== undefined ||
       customModeAccess !== undefined ||
       arimrCalculatorAccess !== undefined
+      || incognitoSalesAccess !== undefined
     ) {
       const {
         data: { user },
@@ -701,6 +829,8 @@ export default function AdminUsersPage() {
               arimrCalculatorAccess ??
               currentProfile?.arimr_calculator_access ??
               false,
+            incognito_sales:
+              incognitoSalesAccess ?? currentProfile?.incognito_sales_access ?? false,
             updated_by: user.id,
             updated_at: new Date().toISOString(),
           },
@@ -1285,6 +1415,16 @@ export default function AdminUsersPage() {
         }`
       );
     }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "incognito_sales_access") &&
+      changes.incognito_sales_access !== profile.incognito_sales_access
+    ) {
+      changeLines.push(
+        `Sprzedaż incognito: ${profile.incognito_sales_access ? "Tak" : "Nie"} → ${
+          changes.incognito_sales_access ? "Tak" : "Nie"
+        }`
+      );
+    }
     const confirmed = window.confirm(
       `Czy na pewno chcesz zapisać zmiany?\n\n${changeLines.join("\n")}`
     );
@@ -1309,9 +1449,7 @@ export default function AdminUsersPage() {
 
       const response = await fetch("/api/admin/users/create", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await apiAuthHeaders(),
         body: JSON.stringify({
           current_user_role: "admin",
           display_name: newUser.display_name,
@@ -1402,9 +1540,7 @@ export default function AdminUsersPage() {
         "/api/admin/users/reset-password",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: await apiAuthHeaders(),
           body: JSON.stringify({
             current_user_role: "admin",
             user_id: profile.id,
@@ -1447,9 +1583,7 @@ export default function AdminUsersPage() {
 
       const response = await fetch("/api/admin/users/update", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: await apiAuthHeaders(),
         body: JSON.stringify({
           current_user_role: "admin",
           user_id: profile.id,
@@ -1978,6 +2112,16 @@ export default function AdminUsersPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      setCalculatorAdminMode("incognito");
+                      setAdminStatus("");
+                    }}
+                    className={`flex-1 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${calculatorAdminMode === "incognito" ? "bg-violet-700 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}
+                  >
+                    Sprzedaż incognito
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
                       setCalculatorAdminMode("standard");
                       setAdminStatus("");
                     }}
@@ -2005,6 +2149,22 @@ export default function AdminUsersPage() {
                     savePricingSettings={savePricingSettings}
                     resetPricingOverrides={resetPricingOverrides}
                   />
+                ) : calculatorAdminMode === "incognito" ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm text-violet-900">
+                      Te ustawienia są niezależne i dostępne wyłącznie administratorowi. Użytkownik z samym uprawnieniem do sprzedaży incognito ich nie zobaczy.
+                    </div>
+                    <AdminPanel
+                      adminStatus={adminStatus}
+                      pricingOverrides={incognitoPricingOverrides}
+                      updatePricingValue={updateIncognitoPricingValue}
+                      savePricingSettings={saveIncognitoPricingSettings}
+                      resetPricingOverrides={() => {
+                        setIncognitoPricingOverrides(DEFAULT_INCOGNITO_PRICING_OVERRIDES);
+                        setAdminStatus("Przywrócono wartości domyślne incognito — zapisz, aby je utrwalić");
+                      }}
+                    />
+                  </div>
                 ) : (
                   <Arimr2026AdminPanel
                     settings={arimr2026Settings}
@@ -2159,12 +2319,13 @@ export default function AdminUsersPage() {
                       </button>
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
+                    <th className="px-4 py-3 text-center">Kalkulator ARiMR</th>
+                    <th className="px-4 py-3 text-center">Sprzedaż incognito</th>
                     <th className="px-4 py-3">Kolor karteczek</th>
                     <th className="px-4 py-3 text-center">IdeaSign: przygotuj</th>
                     <th className="px-4 py-3 text-center">IdeaSign: wyślij</th>
                     <th className="px-4 py-3 text-center">SMS</th>
                     <th className="px-4 py-3 text-center">Custom Mode</th>
-                    <th className="px-4 py-3 text-center">Kalkulator ARiMR</th>
                     <th className="px-4 py-3">Manager</th>
                     <th className="px-4 py-3">
   Widoczny w przypisaniach
@@ -2306,6 +2467,20 @@ export default function AdminUsersPage() {
                             )
                               ? "Tak"
                               : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.incognito_sales_access ?? profile.incognito_sales_access}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                incognito_sales_access: event.target.checked,
+                              })}
+                              className="h-4 w-4 rounded border-slate-300 accent-violet-700"
+                            />
+                            {(editedProfile.incognito_sales_access ?? profile.incognito_sales_access) ? "Tak" : "Nie"}
                           </label>
                         </td>
 

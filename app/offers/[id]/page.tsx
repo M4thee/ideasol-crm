@@ -943,6 +943,8 @@ export default function OfferDetailsPage() {
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [currentUserId, setCurrentUserId] = useState("");
   const [canChooseSaleSeller, setCanChooseSaleSeller] = useState(false);
+  const [canUseIncognitoSales, setCanUseIncognitoSales] = useState(false);
+  const [isIncognitoSale, setIsIncognitoSale] = useState(false);
   const [sellerOptions, setSellerOptions] = useState<UserProfile[]>([]);
   const [selectedSaleSellerId, setSelectedSaleSellerId] = useState("");
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
@@ -1089,7 +1091,7 @@ export default function OfferDetailsPage() {
 
     const { data: customModePermission, error: customModePermissionError } = await supabase
       .from("user_permissions")
-      .select("custom_mode")
+      .select("custom_mode, incognito_sales")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -1099,6 +1101,9 @@ export default function OfferDetailsPage() {
 
     const customModeAccess = customModePermission?.custom_mode === true;
     setCanChooseSaleSeller(customModeAccess);
+    setCanUseIncognitoSales(
+      role === "admin" || customModePermission?.incognito_sales === true
+    );
 
     if (customModeAccess) {
       const { data: availableSellers, error: availableSellersError } = await supabase
@@ -1282,6 +1287,7 @@ export default function OfferDetailsPage() {
       : "01";
 
     setSelectedSaleSellerId(canChooseSaleSeller ? "" : offer.created_by);
+    setIsIncognitoSale(false);
 
     setSaleForm({
       ...emptySaleForm(),
@@ -1757,11 +1763,13 @@ export default function OfferDetailsPage() {
 
   async function sendTeamsSaleCreatedNotification(saleId: string) {
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
       const saleUrl = `${window.location.origin}/sales/${saleId}`;
       const response = await fetch("/api/teams/sale-created", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
         },
         body: JSON.stringify({
           saleId,
@@ -1873,14 +1881,62 @@ export default function OfferDetailsPage() {
       ? 0
       : Number(String(saleForm.depositAmount || "0").replace(",", "."));
     const installationCount = getOfferInstallationCount(offer);
-    const saleOfferSnapshot = createSaleOfferSnapshot(offer, installationCount);
+    let offerForSale: ClientOffer = offer;
+
+    if (isIncognitoSale) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setCreateSaleStatus("Sesja wygasła. Zaloguj się ponownie.");
+        return;
+      }
+
+      const incognitoResponse = await fetch("/api/calculate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          ...(offer.offer_data?.form || {}),
+          customEquipment: offer.offer_data?.customEquipment || offer.offer_data?.form?.customEquipment,
+          customMode: offer.offer_data?.customMode === true || offer.offer_data?.form?.customMode === true,
+          advisor: offer.offer_data?.advisor || { id: effectiveSellerId },
+          createdBy: effectiveSellerId,
+          incognito: true,
+        }),
+      });
+      const incognitoResult = await incognitoResponse.json().catch(() => null);
+      if (!incognitoResponse.ok || !incognitoResult) {
+        setCreateSaleStatus(
+          incognitoResult?.error || "Nie udało się obliczyć ceny sprzedaży incognito."
+        );
+        return;
+      }
+
+      offerForSale = {
+        ...offer,
+        sale_price_net: Number(incognitoResult.finalNet || 0),
+        sale_price_gross: Number(incognitoResult.finalGross || 0),
+        seller_margin: Number(incognitoResult.sellerMarkupNet || 0),
+        company_margin: Number(incognitoResult.companyMargin || 0),
+        offer_data: {
+          ...(offer.offer_data || {}),
+          result: incognitoResult,
+          contractBreakdown: incognitoResult.contractBreakdown || null,
+          incognitoPricingApplied: true,
+        },
+      };
+    }
+
+    const saleOfferSnapshot = createSaleOfferSnapshot(offerForSale, installationCount);
     const multipliedContractFinancialBreakdown = multiplyFinancialRecord(
-      getOfferFinancialBreakdownForContract(offer),
+      getOfferFinancialBreakdownForContract(offerForSale),
       installationCount
     );
     const contractFinancialBreakdown = reconcileStoredContractFinancialBreakdown(
       multipliedContractFinancialBreakdown,
-      offer.vat_rate,
+      offerForSale.vat_rate,
       Number(offer.pv_power_kw || 0) > 0
     );
     const saleResult = (saleOfferSnapshot.offer_data?.result || {}) as Record<string, any>;
@@ -1965,6 +2021,7 @@ export default function OfferDetailsPage() {
       client_id: effectiveClientId,
       seller_id: effectiveSellerId,
       source_offer_id: offer.id,
+      is_incognito: isIncognitoSale,
       contract_number: contractNumber,
       sale_date: new Date().toISOString(),
       contract_value: saleOfferSnapshot.sale_price_gross || 0,
@@ -2054,38 +2111,69 @@ export default function OfferDetailsPage() {
       // own_contribution_amount: ownContributionAmount, // Removed as requested
     };
 
-    const { data: createdSale, error: saleError } = await supabase
-      .from("sales")
-      .insert(salePayload)
-      .select("id")
-      .single();
+    let createdSale: { id: string } | null = null;
+    let saleError: { message?: string } | null = null;
+
+    if (isIncognitoSale) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const response = await fetch("/api/sales/incognito", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData.session?.access_token || ""}`,
+        },
+        body: JSON.stringify({ sale: salePayload }),
+      });
+      const responseBody = await response.json().catch(() => null);
+      if (response.ok && responseBody?.id) {
+        createdSale = { id: responseBody.id };
+      } else {
+        saleError = { message: responseBody?.error || "Nie udało się utworzyć sprzedaży incognito." };
+      }
+    } else {
+      const insertResult = await supabase
+        .from("sales")
+        .insert(salePayload)
+        .select("id")
+        .single();
+      createdSale = insertResult.data;
+      saleError = insertResult.error;
+    }
     if (saleError || !createdSale) {
       console.error("Błąd tworzenia sprzedaży z oferty:", saleError);
       setCreateSaleStatus(saleError?.message || "Nie udało się utworzyć sprzedaży.");
       setCreatingSale(false);
       return;
     }
-const { error: updateClientStatusError } = await supabase
-  .from("clients")
-  .update({
-    status: "Klient aktywny",
-    street: saleForm.contractStreet,
-    building_number: saleForm.contractBuildingNumber,
-    postal_code: saleForm.contractPostalCode,
-    city: saleForm.contractCity,
-  })
-  .eq("id", effectiveClientId);
+    // Client status is shared outside the sale access policy. Do not change it
+    // for an incognito sale because that would expose the transaction indirectly.
+    if (!isIncognitoSale) {
+      const { error: updateClientStatusError } = await supabase
+        .from("clients")
+        .update({
+          status: "Klient aktywny",
+          street: saleForm.contractStreet,
+          building_number: saleForm.contractBuildingNumber,
+          postal_code: saleForm.contractPostalCode,
+          city: saleForm.contractCity,
+        })
+        .eq("id", effectiveClientId);
 
-if (updateClientStatusError) {
-  console.error("Błąd aktualizacji statusu klienta po sprzedaży:", updateClientStatusError);
-}
-    const { error: updateOfferError } = await supabase
-      .from("client_offers")
-      .update({ status: "sale_created" })
-      .eq("id", offer.id);
+      if (updateClientStatusError) {
+        console.error("Błąd aktualizacji statusu klienta po sprzedaży:", updateClientStatusError);
+      }
+    }
+    // An offer is not access-gated as incognito data. Keeping its generic
+    // status avoids revealing the existence of the confidential sale.
+    if (!isIncognitoSale) {
+      const { error: updateOfferError } = await supabase
+        .from("client_offers")
+        .update({ status: "sale_created" })
+        .eq("id", offer.id);
 
-    if (updateOfferError) {
-      console.error("Błąd aktualizacji statusu oferty:", updateOfferError);
+      if (updateOfferError) {
+        console.error("Błąd aktualizacji statusu oferty:", updateOfferError);
+      }
     }
 
     if (
@@ -2093,15 +2181,13 @@ if (updateClientStatusError) {
       duplicateWorkflow.conflictDetected &&
       duplicateWorkflow.clientId
     ) {
-      await addSystemTagToClient(
-  effectiveClientId,
-  "Możliwy konflikt",
-  "red"
-);
+      if (!isIncognitoSale) {
+        await addSystemTagToClient(effectiveClientId, "Możliwy konflikt", "red");
+      }
       const { data: adminUsers, error: adminUsersError } = await supabase
         .from("profiles")
         .select("id")
-        .in("role", ["owner", "admin"]);
+        .in("role", isIncognitoSale ? ["admin"] : ["owner", "admin"]);
 
       if (adminUsersError) {
         console.error("Błąd pobierania adminów do powiadomienia konfliktowego:", adminUsersError);
@@ -2136,16 +2222,14 @@ if (updateClientStatusError) {
       duplicateWorkflow.decision === "new" &&
       effectiveClientId
     ) {
-      await addSystemTagToClient(
-        effectiveClientId,
-        "Możliwy dubel",
-        "amber"
-      );
+      if (!isIncognitoSale) {
+        await addSystemTagToClient(effectiveClientId, "Możliwy dubel", "amber");
+      }
 
       const { data: adminUsers, error: adminUsersError } = await supabase
         .from("profiles")
         .select("id")
-        .in("role", ["owner", "admin"]);
+        .in("role", isIncognitoSale ? ["admin"] : ["owner", "admin"]);
 
       if (adminUsersError) {
         console.error("Błąd pobierania adminów do powiadomienia o możliwym dublu:", adminUsersError);
@@ -2179,21 +2263,23 @@ if (updateClientStatusError) {
     if (sourceEventId) {
       await supabase
         .from("calendar_events")
-        .update({
-          status: "done",
-          meeting_effect: "Sprzedaż",
-        })
+        .update(
+          isIncognitoSale
+            ? { status: "done" }
+            : { status: "done", meeting_effect: "Sprzedaż" }
+        )
         .eq("id", sourceEventId);
     }
 
-    void trackMetaCrmEvent({
-      eventName: "Purchase",
-      sourceType: "sale",
-      sourceId: createdSale.id,
-      clientId: effectiveClientId,
-    });
-
-    await sendTeamsSaleCreatedNotification(createdSale.id);
+    if (!isIncognitoSale) {
+      void trackMetaCrmEvent({
+        eventName: "Purchase",
+        sourceType: "sale",
+        sourceId: createdSale.id,
+        clientId: effectiveClientId,
+      });
+      await sendTeamsSaleCreatedNotification(createdSale.id);
+    }
     setCreatingSale(false);
     setAllowDuplicateClientCreation(false);
     setSkipDuplicateCheck(false);
@@ -2360,6 +2446,23 @@ if (updateClientStatusError) {
                       </option>
                     ))}
                   </select>
+                </label>
+              )}
+
+              {canUseIncognitoSales && (
+                <label className="md:col-span-2 flex cursor-pointer items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                  <input
+                    type="checkbox"
+                    checked={isIncognitoSale}
+                    onChange={(event) => setIsIncognitoSale(event.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-violet-300 accent-violet-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-black text-violet-950">Sprzedaż incognito</span>
+                    <span className="mt-1 block text-xs font-medium text-violet-800">
+                      Sprzedaż będzie widoczna tylko dla administratora i osób z tym uprawnieniem. Powiadomienia Teams o podpisaniu i zawarciu umowy nie zostaną wysłane.
+                    </span>
+                  </span>
                 </label>
               )}
 
