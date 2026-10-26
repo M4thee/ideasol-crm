@@ -639,6 +639,7 @@ export default function Home() {
     "net_billing" | "net_metering"
   >("net_billing");
   const [sellerMarkup, setSellerMarkup] = useState(3000);
+  const [incognitoModeEnabled, setIncognitoModeEnabled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [vatRate, setVatRate] = useState(8);
   const [result, setResult] = useState<Result | null>(null);
@@ -677,7 +678,12 @@ export default function Home() {
   const canSeePricingPanel = currentUserRole.includes("admin");
   const customModeAvailable = userProfile?.custom_mode_access === true;
   const arimrCalculatorAvailable = userProfile?.arimr_calculator_access === true;
-  const incognitoPricingActive = userProfile?.incognito_sales_access === true;
+  const incognitoModeAvailable =
+    currentUserRole === "admin" || userProfile?.incognito_sales_access === true;
+  const incognitoPricingActive =
+    calculatorMode === "standard" &&
+    incognitoModeAvailable &&
+    incognitoModeEnabled;
   const customModeActive = customMode && customModeAvailable;
   const comparisonStorageKey = userProfile?.id
     ? `ideasol.offerComparison.v1.${userProfile.id}`
@@ -982,6 +988,7 @@ export default function Home() {
       if (!user) {
         setUserProfile(null);
         setCurrentUserEmail("");
+        setIncognitoModeEnabled(false);
         return null;
       }
 
@@ -1013,6 +1020,7 @@ export default function Home() {
             calculatorPermissions?.incognito_sales === true,
         } as UserProfile;
         setUserProfile(profile);
+        setIncognitoModeEnabled(false);
 
         const defaultMargin = profile.default_seller_markup;
 
@@ -1545,6 +1553,7 @@ export default function Home() {
 
     return {
       calculatorProgram: calculatorMode,
+      incognito: incognitoPricingActive,
       customMode: isArimr2026 ? false : customModeActive,
       customProductMode: isArimr2026 ? false : customProductMode,
       customOfferTitle: customProductMode ? normalizeCustomOfferTitle(customOfferTitle) : null,
@@ -3232,6 +3241,11 @@ IdeaSol`;
               setShowSettings={setShowSettings}
               sellerMarkup={calculatorMode === "arimr2026" ? 0 : sellerMarkup}
               setSellerMarkup={setSellerMarkup}
+              incognitoModeAvailable={
+                calculatorMode === "standard" && incognitoModeAvailable
+              }
+              incognitoModeEnabled={incognitoPricingActive}
+              setIncognitoModeEnabled={setIncognitoModeEnabled}
               selectedAdditionalServices={selectedAdditionalServices}
               setSelectedAdditionalServices={setSelectedAdditionalServices}
               customModeAvailable={calculatorMode === "standard" && customModeAvailable}

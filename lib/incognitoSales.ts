@@ -17,11 +17,8 @@ export function deriveIncognitoOwnersCount(standardOwnersCount: number) {
 
 export function resolveIncognitoPricingMode(input: {
   explicitlyRequested: boolean;
-  permissionEnabled: boolean;
 }) {
-  return input.explicitlyRequested || input.permissionEnabled
-    ? "incognito"
-    : "standard";
+  return input.explicitlyRequested ? "incognito" : "standard";
 }
 
 function finitePrice(value: number | null | undefined) {

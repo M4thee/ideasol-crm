@@ -216,6 +216,9 @@ type OfferFormProps = {
   setShowSettings: (value: boolean | ((current: boolean) => boolean)) => void;
   sellerMarkup: number;
   setSellerMarkup: (value: number) => void;
+  incognitoModeAvailable?: boolean;
+  incognitoModeEnabled?: boolean;
+  setIncognitoModeEnabled?: (value: boolean) => void;
   selectedAdditionalServices?: SelectedAdditionalService[];
   setSelectedAdditionalServices?: (value: SelectedAdditionalService[]) => void;
   customModeAvailable?: boolean;
@@ -289,6 +292,9 @@ export default function OfferForm({
   setShowSettings,
   sellerMarkup,
   setSellerMarkup,
+  incognitoModeAvailable = false,
+  incognitoModeEnabled = false,
+  setIncognitoModeEnabled = () => { },
   selectedAdditionalServices = [],
   setSelectedAdditionalServices = () => { },
   customModeAvailable = false,
@@ -1050,6 +1056,38 @@ export default function OfferForm({
                 }}
               />
             </label>
+
+            {incognitoModeAvailable && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  Rabat specjalny za zgodą Mateusza
+                </p>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className={`text-xs font-semibold ${!incognitoModeEnabled ? "text-slate-950 dark:text-white" : "text-slate-400 dark:text-slate-500"}`}>
+                    Standard
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={incognitoModeEnabled}
+                    aria-label="Rabat specjalny za zgodą Mateusza"
+                    onClick={() => {
+                      setIncognitoModeEnabled(!incognitoModeEnabled);
+                      setResult(null);
+                    }}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus:outline-none focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-500/20 ${incognitoModeEnabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"}`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${incognitoModeEnabled ? "translate-x-6" : "translate-x-1"}`}
+                    />
+                  </button>
+                  <span className={`text-xs font-semibold ${incognitoModeEnabled ? "text-emerald-700 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}`}>
+                    Incognito
+                  </span>
+                </div>
+              </div>
+            )}
 
             <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
               To ustawienie jest ukryte z głównego formularza, ale nadal wpływa na cenę oferty.

@@ -413,7 +413,6 @@ export async function POST(request: Request) {
   let authenticatedUserId: string | null = null;
   let authenticatedUserRole: string | null = null;
   let authenticatedUserCanChooseSeller = false;
-  let incognitoPermissionEnabled = false;
 
   if (accessToken || customModeRequested || incognitoExplicitlyRequested) {
     if (!supabase) {
@@ -473,12 +472,10 @@ export async function POST(request: Request) {
     authenticatedUserId = user.id;
     authenticatedUserRole = actorProfile?.role || null;
     authenticatedUserCanChooseSeller = hasCustomMode || actorProfile?.role === "admin";
-    incognitoPermissionEnabled = permission?.incognito_sales === true;
   }
 
   const pricingMode = resolveIncognitoPricingMode({
     explicitlyRequested: incognitoExplicitlyRequested,
-    permissionEnabled: incognitoPermissionEnabled,
   });
   const incognitoPricingActive = pricingMode === "incognito";
 

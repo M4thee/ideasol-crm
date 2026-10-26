@@ -21,25 +21,16 @@ test("kalkulator incognito odejmuje dokładnie jedną marżę ownera", () => {
   assert.equal(deriveIncognitoOwnersCount(0), 0);
 });
 
-test("aktywne uprawnienie automatycznie wybiera cennik incognito", () => {
+test("cennik incognito jest wybierany wyłącznie na wyraźne żądanie", () => {
   assert.equal(
     resolveIncognitoPricingMode({
       explicitlyRequested: false,
-      permissionEnabled: true,
-    }),
-    "incognito"
-  );
-  assert.equal(
-    resolveIncognitoPricingMode({
-      explicitlyRequested: false,
-      permissionEnabled: false,
     }),
     "standard"
   );
   assert.equal(
     resolveIncognitoPricingMode({
       explicitlyRequested: true,
-      permissionEnabled: false,
     }),
     "incognito"
   );
