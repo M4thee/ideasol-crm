@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { calculateOffer } from "@/lib/calculator/calculateOffer";
+import { resolveIncognitoPricingMode } from "@/lib/incognitoSales";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -407,19 +408,20 @@ function readBearerToken(request: Request) {
 export async function POST(request: Request) {
   const body = await request.json();
   const customModeRequested = body?.customMode === true;
-  const incognitoRequested = body?.incognito === true;
+  const incognitoExplicitlyRequested = body?.incognito === true;
+  const accessToken = readBearerToken(request);
   let authenticatedUserId: string | null = null;
   let authenticatedUserRole: string | null = null;
   let authenticatedUserCanChooseSeller = false;
+  let incognitoPermissionEnabled = false;
 
-  if (customModeRequested || incognitoRequested) {
+  if (accessToken || customModeRequested || incognitoExplicitlyRequested) {
     if (!supabase) {
       return NextResponse.json(
         { error: "Ten tryb wymaga pełnej konfiguracji lokalnego Supabase." },
         { status: 503 }
       );
     }
-    const accessToken = readBearerToken(request);
 
     if (!accessToken) {
       return NextResponse.json(
@@ -454,13 +456,16 @@ export async function POST(request: Request) {
     const hasCustomMode = permission?.custom_mode === true;
     const hasIncognito = actorProfile?.role === "admin" || permission?.incognito_sales === true;
 
-    if (
-      permissionError ||
-      (customModeRequested && !hasCustomMode) ||
-      (incognitoRequested && !hasIncognito)
-    ) {
+    if (permissionError) {
       return NextResponse.json(
-        { error: incognitoRequested ? "Brak uprawnienia do sprzedaży incognito." : "Brak uprawnienia Custom Mode." },
+        { error: "Nie udało się sprawdzić uprawnień kalkulatora." },
+        { status: 503 }
+      );
+    }
+
+    if ((customModeRequested && !hasCustomMode) || (incognitoExplicitlyRequested && !hasIncognito)) {
+      return NextResponse.json(
+        { error: incognitoExplicitlyRequested ? "Brak uprawnienia do sprzedaży incognito." : "Brak uprawnienia Custom Mode." },
         { status: 403 }
       );
     }
@@ -468,11 +473,18 @@ export async function POST(request: Request) {
     authenticatedUserId = user.id;
     authenticatedUserRole = actorProfile?.role || null;
     authenticatedUserCanChooseSeller = hasCustomMode || actorProfile?.role === "admin";
+    incognitoPermissionEnabled = permission?.incognito_sales === true;
   }
+
+  const pricingMode = resolveIncognitoPricingMode({
+    explicitlyRequested: incognitoExplicitlyRequested,
+    permissionEnabled: incognitoPermissionEnabled,
+  });
+  const incognitoPricingActive = pricingMode === "incognito";
 
   const requestedSellerProfileId = body?.advisor?.id || body?.createdBy || null;
   if (
-    incognitoRequested &&
+    incognitoPricingActive &&
     requestedSellerProfileId &&
     requestedSellerProfileId !== authenticatedUserId &&
     !authenticatedUserCanChooseSeller &&
@@ -487,7 +499,7 @@ export async function POST(request: Request) {
     authenticatedUserCanChooseSeller = requestedSeller?.manager_id === authenticatedUserId;
   }
   if (
-    incognitoRequested &&
+    incognitoPricingActive &&
     requestedSellerProfileId &&
     requestedSellerProfileId !== authenticatedUserId &&
     !authenticatedUserCanChooseSeller
@@ -523,7 +535,7 @@ export async function POST(request: Request) {
   const [{ data: settingsRow, error: settingsError }, catalog] = await Promise.all([
     supabase
       ? supabase
-          .from(incognitoRequested ? "incognito_pricing_settings" : "pricing_settings")
+          .from(incognitoPricingActive ? "incognito_pricing_settings" : "pricing_settings")
           .select(
             "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat"
           )
@@ -535,7 +547,7 @@ export async function POST(request: Request) {
 
   if (settingsError || !settingsRow) {
     console.error("Nie udało się pobrać ustawień kalkulatora", {
-      mode: incognitoRequested ? "incognito" : "standard",
+      mode: pricingMode,
       message: settingsError?.message || "brak rekordu ustawień",
     });
     return NextResponse.json(
@@ -555,7 +567,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ...result,
-      pricingMode: incognitoRequested ? "incognito" : "standard",
+      pricingMode,
     });
   } catch (error) {
     console.error("Błąd kalkulacji oferty", error);

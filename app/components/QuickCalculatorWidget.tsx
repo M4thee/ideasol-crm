@@ -8,6 +8,7 @@ import {
   type CompatibleStorage,
 } from "@/lib/calculator/equipmentCompatibility";
 import DashboardWidgetIcon from "@/app/components/DashboardWidgetIcon";
+import { supabase } from "@/lib/supabase";
 
 type CatalogPanel = {
   name: string;
@@ -35,6 +36,7 @@ type CalculatorCatalog = {
 };
 
 type QuickCalculationResult = {
+  pricingMode?: "incognito" | "standard";
   finalGross: number;
   finalNet: number;
   pvPowerKw: number;
@@ -179,9 +181,18 @@ export default function QuickCalculatorWidget({
     setError("");
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch("/api/calculate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           customMode: false,
           offerType: storageCode === "none" ? "pv" : "pv_storage",
@@ -408,7 +419,9 @@ export default function QuickCalculatorWidget({
             <div className="mt-5 grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800/60 dark:bg-emerald-950/30 sm:grid-cols-[1.2fr_1fr_1fr] sm:items-center">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                  Cena instalacji brutto
+                  {result.pricingMode === "incognito"
+                    ? "Cena incognito brutto"
+                    : "Cena instalacji brutto"}
                 </p>
                 <p className="mt-1 text-2xl font-black text-emerald-950 dark:text-emerald-100">
                   {formatMoney(result.finalGross)}

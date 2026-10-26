@@ -15,6 +15,15 @@ export function deriveIncognitoOwnersCount(standardOwnersCount: number) {
   return Math.max(0, normalized - 1);
 }
 
+export function resolveIncognitoPricingMode(input: {
+  explicitlyRequested: boolean;
+  permissionEnabled: boolean;
+}) {
+  return input.explicitlyRequested || input.permissionEnabled
+    ? "incognito"
+    : "standard";
+}
+
 function finitePrice(value: number | null | undefined) {
   const normalized = Number(value);
   return Number.isFinite(normalized) ? normalized : 0;

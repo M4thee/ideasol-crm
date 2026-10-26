@@ -8,6 +8,7 @@ import {
   deriveIncognitoOwnersCount,
   IDEASOL_INCOGNITO_BANK_ACCOUNT,
   IDEASOL_INCOGNITO_BANK_NAME,
+  resolveIncognitoPricingMode,
   shouldSendTeamsForSale,
 } from "../lib/incognitoSales.ts";
 import { buildSaleSmsTemplates } from "../lib/saleSms.ts";
@@ -18,6 +19,30 @@ test("kalkulator incognito odejmuje dokładnie jedną marżę ownera", () => {
   assert.equal(deriveIncognitoOwnersCount(3), 2);
   assert.equal(deriveIncognitoOwnersCount(1), 0);
   assert.equal(deriveIncognitoOwnersCount(0), 0);
+});
+
+test("aktywne uprawnienie automatycznie wybiera cennik incognito", () => {
+  assert.equal(
+    resolveIncognitoPricingMode({
+      explicitlyRequested: false,
+      permissionEnabled: true,
+    }),
+    "incognito"
+  );
+  assert.equal(
+    resolveIncognitoPricingMode({
+      explicitlyRequested: false,
+      permissionEnabled: false,
+    }),
+    "standard"
+  );
+  assert.equal(
+    resolveIncognitoPricingMode({
+      explicitlyRequested: true,
+      permissionEnabled: false,
+    }),
+    "incognito"
+  );
 });
 
 test("podgląd sprzedaży pokazuje cenę incognito zamiast ceny zwykłej", () => {

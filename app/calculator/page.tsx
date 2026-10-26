@@ -68,6 +68,7 @@ import {
 
 
 type Result = {
+  pricingMode?: "incognito" | "standard";
   calculatorProgram?: "standard" | "arimr2026";
   arimr2026?: Arimr2026CalculationResult;
   pvPowerKw: number;
@@ -253,6 +254,7 @@ type UserProfile = {
   is_active?: boolean | null;
   custom_mode_access?: boolean;
   arimr_calculator_access?: boolean;
+  incognito_sales_access?: boolean;
 };
 
 type CrmClientOption = {
@@ -675,6 +677,7 @@ export default function Home() {
   const canSeePricingPanel = currentUserRole.includes("admin");
   const customModeAvailable = userProfile?.custom_mode_access === true;
   const arimrCalculatorAvailable = userProfile?.arimr_calculator_access === true;
+  const incognitoPricingActive = userProfile?.incognito_sales_access === true;
   const customModeActive = customMode && customModeAvailable;
   const comparisonStorageKey = userProfile?.id
     ? `ideasol.offerComparison.v1.${userProfile.id}`
@@ -998,7 +1001,7 @@ export default function Home() {
       if (data) {
         const { data: calculatorPermissions } = await supabase
           .from("user_permissions")
-          .select("custom_mode, arimr_calculator")
+          .select("custom_mode, arimr_calculator, incognito_sales")
           .eq("user_id", user.id)
           .maybeSingle();
         const profile = {
@@ -1006,6 +1009,8 @@ export default function Home() {
           custom_mode_access: calculatorPermissions?.custom_mode === true,
           arimr_calculator_access:
             calculatorPermissions?.arimr_calculator === true,
+          incognito_sales_access:
+            calculatorPermissions?.incognito_sales === true,
         } as UserProfile;
         setUserProfile(profile);
 
@@ -1630,6 +1635,12 @@ export default function Home() {
           customPaymentTerms: customPaymentTerms.trim(),
         };
       } else if (!isCalculatorOnline()) {
+        if (incognitoPricingActive) {
+          throw new Error(
+            "Kalkulator incognito wymaga połączenia z CRM, aby bezpiecznie pobrać właściwy cennik."
+          );
+        }
+
         const offlineCatalog = buildCalculatorCatalogFromState();
 
         if (
@@ -1654,15 +1665,19 @@ export default function Home() {
           "Content-Type": "application/json",
         };
 
-        if (calculationPayload.customMode) {
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-          if (!session?.access_token) {
-            throw new Error("Tryb niestandardowy wymaga aktywnej sesji użytkownika.");
-          }
+        if ((calculationPayload.customMode || incognitoPricingActive) && !session?.access_token) {
+          throw new Error(
+            incognitoPricingActive
+              ? "Kalkulator incognito wymaga aktywnej sesji użytkownika."
+              : "Tryb niestandardowy wymaga aktywnej sesji użytkownika."
+          );
+        }
 
+        if (session?.access_token) {
           headers.Authorization = `Bearer ${session.access_token}`;
         }
 
@@ -1680,6 +1695,14 @@ export default function Home() {
         }
 
         data = await res.json();
+
+        if (
+          calculatorMode === "standard" &&
+          incognitoPricingActive &&
+          data.pricingMode !== "incognito"
+        ) {
+          throw new Error("Serwer nie potwierdził użycia cennika incognito.");
+        }
       }
 
       if (calculatorMode === "arimr2026") {
@@ -1805,6 +1828,7 @@ export default function Home() {
         metadata: {
           input: calculationPayload,
           result: {
+            pricing_mode: data.pricingMode || "standard",
             offer_type: data.offerType,
             final_net: data.finalNet,
             final_gross: data.finalGross,
@@ -1971,6 +1995,8 @@ export default function Home() {
       energy_storage: getResultStorageDisplayName(result),
       roof_type: roofType,
       offer_data: {
+        pricingMode: result.pricingMode || "standard",
+        incognitoPricingApplied: result.pricingMode === "incognito",
         calculatorProgram: result.calculatorProgram || "standard",
         installationCount,
         identicalSetCount: installationCount,
@@ -1987,6 +2013,7 @@ export default function Home() {
         additionalServices: selectedAdditionalServices,
         additional_services: selectedAdditionalServices,
         form: {
+          pricingMode: result.pricingMode || "standard",
           calculatorProgram: result.calculatorProgram || "standard",
           installationCount,
           identicalSetCount: installationCount,
@@ -2065,6 +2092,9 @@ export default function Home() {
       offerId: data.id,
       correlationId: calculationAuditIdRef.current,
       path: "/calculator",
+      metadata: {
+        pricing_mode: result.pricingMode || "standard",
+      },
     });
 
     setSaveOfferStatus(
@@ -2837,6 +2867,8 @@ IdeaSol`;
           energy_storage: getResultStorageDisplayName(queuedResult),
           roof_type: snapshot.roofType || null,
           offer_data: {
+            pricingMode: queuedResult.pricingMode || "standard",
+            incognitoPricingApplied: queuedResult.pricingMode === "incognito",
             calculatorProgram: queuedResult.calculatorProgram || "standard",
             installationCount: installationCountSnapshot,
             identicalSetCount: installationCountSnapshot,
@@ -2853,6 +2885,7 @@ IdeaSol`;
             additionalServices: selectedAdditionalServicesSnapshot,
             additional_services: selectedAdditionalServicesSnapshot,
             form: {
+              pricingMode: queuedResult.pricingMode || "standard",
               calculatorProgram: queuedResult.calculatorProgram || "standard",
               installationCount: installationCountSnapshot,
               identicalSetCount: installationCountSnapshot,
@@ -3034,10 +3067,11 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1600px] space-y-6">
 
-        <nav
-          aria-label="Wybór kalkulatora"
-          className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit"
-        >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <nav
+            aria-label="Wybór kalkulatora"
+            className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit"
+          >
           <button
             type="button"
             onClick={() => {
@@ -3098,7 +3132,13 @@ IdeaSol`;
           >
             ARiMR 2026{!arimrCalculatorAvailable ? " · zablokowany" : ""}
           </button>
-        </nav>
+          </nav>
+          {calculatorMode === "standard" && incognitoPricingActive && (
+            <div className="rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+              Tryb incognito · aktywny cennik incognito
+            </div>
+          )}
+        </div>
 
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">

@@ -1414,7 +1414,11 @@ export default function OfferDetailsPage() {
       : "01";
 
     setSelectedSaleSellerId(canChooseSaleSeller ? "" : offer.created_by);
-    setIsIncognitoSale(false);
+    const offerUsesIncognitoPricing =
+      offer.offer_data?.pricingMode === "incognito" ||
+      offer.offer_data?.incognitoPricingApplied === true ||
+      offer.offer_data?.result?.pricingMode === "incognito";
+    setIsIncognitoSale(canUseIncognitoSales && offerUsesIncognitoPricing);
     setIncognitoCalculation(null);
     setIncognitoCalculationStatus("idle");
     setIncognitoCalculationError("");
