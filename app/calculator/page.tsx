@@ -3067,11 +3067,10 @@ IdeaSol`;
     <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1600px] space-y-6">
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <nav
-            aria-label="Wybór kalkulatora"
-            className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit"
-          >
+        <nav
+          aria-label="Wybór kalkulatora"
+          className="flex w-full gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:w-fit"
+        >
           <button
             type="button"
             onClick={() => {
@@ -3132,13 +3131,7 @@ IdeaSol`;
           >
             ARiMR 2026{!arimrCalculatorAvailable ? " · zablokowany" : ""}
           </button>
-          </nav>
-          {calculatorMode === "standard" && incognitoPricingActive && (
-            <div className="rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
-              Tryb incognito · aktywny cennik incognito
-            </div>
-          )}
-        </div>
+        </nav>
 
         {(isOffline || queuedOfferCount > 0) && (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">

@@ -419,9 +419,7 @@ export default function QuickCalculatorWidget({
             <div className="mt-5 grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800/60 dark:bg-emerald-950/30 sm:grid-cols-[1.2fr_1fr_1fr] sm:items-center">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                  {result.pricingMode === "incognito"
-                    ? "Cena incognito brutto"
-                    : "Cena instalacji brutto"}
+                  Cena instalacji brutto
                 </p>
                 <p className="mt-1 text-2xl font-black text-emerald-950 dark:text-emerald-100">
                   {formatMoney(result.finalGross)}
