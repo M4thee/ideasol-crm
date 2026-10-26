@@ -1076,7 +1076,7 @@ export default function OfferForm({
                   >
                     <span
                       aria-hidden="true"
-                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${incognitoModeEnabled ? "translate-x-6" : "translate-x-1"}`}
+                      className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${incognitoModeEnabled ? "translate-x-6" : "translate-x-1"}`}
                     />
                   </button>
                 </div>
