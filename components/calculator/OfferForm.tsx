@@ -1059,13 +1059,10 @@ export default function OfferForm({
 
             {incognitoModeAvailable && (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Rabat specjalny za zgodą Mateusza
-                </p>
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <span className={`text-xs font-semibold ${!incognitoModeEnabled ? "text-slate-950 dark:text-white" : "text-slate-400 dark:text-slate-500"}`}>
-                    Standard
-                  </span>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Rabat specjalny za zgodą Mateusza
+                  </p>
                   <button
                     type="button"
                     role="switch"
@@ -1082,9 +1079,6 @@ export default function OfferForm({
                       className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${incognitoModeEnabled ? "translate-x-6" : "translate-x-1"}`}
                     />
                   </button>
-                  <span className={`text-xs font-semibold ${incognitoModeEnabled ? "text-emerald-700 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}`}>
-                    Incognito
-                  </span>
                 </div>
               </div>
             )}
