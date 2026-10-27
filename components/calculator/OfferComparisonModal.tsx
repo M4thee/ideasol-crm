@@ -48,7 +48,6 @@ export default function OfferComparisonModal({
 }: OfferComparisonModalProps) {
   const [email, setEmail] = useState(clientEmail);
   const [note, setNote] = useState("");
-  const [mode, setMode] = useState<"anonymous" | "public">("public");
 
   useEffect(() => {
     if (!open) return;
@@ -239,14 +238,11 @@ export default function OfferComparisonModal({
                       placeholder="Opcjonalna wiadomość dla klienta"
                     />
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setMode("anonymous")} className={`rounded-xl border px-3 py-2.5 text-xs font-bold ${mode === "anonymous" ? "border-[#0c2349] bg-[#0c2349] text-white" : "border-slate-200 dark:border-slate-700"}`}>Anonimowo</button>
-                    <button type="button" onClick={() => setMode("public")} className={`rounded-xl border px-3 py-2.5 text-xs font-bold ${mode === "public" ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 dark:border-slate-700"}`}>Jawnie</button>
-                  </div>
+                  <p className="rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Wiadomość zostanie wysłana jawnie z danymi handlowca.</p>
                   <button
                     type="button"
                     disabled={!canSend || sending}
-                    onClick={() => void onSend({ email: email.trim(), note: note.trim(), mode })}
+                    onClick={() => void onSend({ email: email.trim(), note: note.trim(), mode: "public" })}
                     className="w-full rounded-2xl bg-blue-600 px-4 py-4 text-sm font-black text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:disabled:bg-slate-800"
                   >
                     {sending ? "Wysyłanie…" : "Wyślij porównanie, PDF i karty"}

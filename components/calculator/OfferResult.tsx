@@ -457,7 +457,6 @@ export default function OfferResult({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
 
-  const [sendMode, setSendMode] = useState<"anonymous" | "public">("anonymous");
   const [sellerNote, setSellerNote] = useState("");
   const [includeOfferPdf, setIncludeOfferPdf] = useState(false);
   const [showSendConfirm, setShowSendConfirm] = useState(false);
@@ -749,18 +748,11 @@ export default function OfferResult({
   }
 
 
-  const confirmationText =
-    sendMode === "anonymous"
-      ? {
-          title: "Uwaga! Wysyłasz mail z ofertą anonimowo.",
-          body: "Klient nie będzie znał Twojego imienia, nazwiska, telefonu i adresu e-mail. Ewentualna odpowiedź na maila będzie kierowana na skrzynkę ogólną. Czy chcesz kontynuować?",
-          confirm: "Tak, wyślij anonimowo",
-        }
-      : {
-          title: "Uwaga! Wysyłasz mail z ofertą w wersji jawnej.",
-          body: "Klient otrzyma wiadomość z Twoim imieniem i nazwiskiem, numerem telefonu i adresem e-mail, a odpowiedź na maila będzie kierowana na Twój służbowy e-mail. Czy chcesz kontynuować?",
-          confirm: "Tak, wyślij jawnie",
-        };
+  const confirmationText = {
+    title: "Potwierdź wysłanie oferty",
+    body: "Klient otrzyma wiadomość z Twoim imieniem i nazwiskiem, numerem telefonu i adresem e-mail, a odpowiedź na maila będzie kierowana na Twój służbowy e-mail. Czy chcesz kontynuować?",
+    confirm: "Tak, wyślij ofertę",
+  };
 
   const compactSubsidyTotal = result.arimr2026?.grantAfterLimit ?? (
     result.subsidyAllocation?.enabled
@@ -950,10 +942,7 @@ export default function OfferResult({
               <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Notatka</span><textarea value={sellerNote} onChange={(event) => setSellerNote(event.target.value)} maxLength={2000} placeholder="Opcjonalna wiadomość" className="mt-1.5 min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500 dark:border-slate-700 dark:bg-slate-950" /></label>
               <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={includeOfferPdf} onChange={(event) => setIncludeOfferPdf(event.target.checked)} className="h-4 w-4 accent-slate-950 dark:accent-white" />Dołącz ofertę PDF</label>
               {hasCatalogCards && <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={includeCatalogCards} onChange={(event) => setIncludeCatalogCards?.(event.target.checked)} className="h-4 w-4 accent-slate-950 dark:accent-white" />Dołącz karty katalogowe</label>}
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setSendMode("anonymous")} className={`rounded-xl border px-3 py-2 text-xs font-bold ${sendMode === "anonymous" ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 dark:border-slate-700"}`}>Anonimowo</button>
-                <button type="button" onClick={() => setSendMode("public")} className={`rounded-xl border px-3 py-2 text-xs font-bold ${sendMode === "public" ? "border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-slate-950" : "border-slate-200 dark:border-slate-700"}`}>Jawnie</button>
-              </div>
+              <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Oferta zostanie wysłana jawnie z danymi handlowca.</p>
               <button type="button" disabled={sendingEmail || !canSendOfferEmail} onClick={() => setShowSendConfirm(true)} className="w-full rounded-xl bg-slate-950 px-3 py-3 text-xs font-black text-white disabled:bg-slate-200 disabled:text-slate-400 dark:bg-white dark:text-slate-950 dark:disabled:bg-slate-800">{sendingEmail ? "Wysyłanie..." : "Wyślij ofertę"}</button>
             </div>
           )}
@@ -1332,31 +1321,9 @@ export default function OfferResult({
             )}
 
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSendMode("anonymous")}
-                  className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
-                    sendMode === "anonymous"
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                  }`}
-                >
-                  Anonimowo
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSendMode("public")}
-                  className={`rounded-2xl px-4 py-3 text-sm font-semibold border transition ${
-                    sendMode === "public"
-                      ? "border-emerald-600 bg-emerald-600 text-white"
-                      : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                  }`}
-                >
-                  Jawnie
-                </button>
-              </div>
+              <p className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                Oferta zostanie wysłana jawnie z danymi handlowca.
+              </p>
 
               <button
                 type="button"
@@ -1519,7 +1486,7 @@ export default function OfferResult({
                   }
 
                   setShowSendConfirm(false);
-                  void sendOfferEmail(sendMode, {
+                  void sendOfferEmail("public", {
                     sellerNote: sellerNote.trim(),
                     includeOfferPdf,
                     offerPdfPayload: getOfferPdfPayload(),

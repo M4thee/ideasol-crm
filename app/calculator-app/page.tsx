@@ -2925,7 +2925,7 @@ IdeaSol`;
 
 
   async function sendOfferEmail(
-    mode: "anonymous" | "public" = "anonymous",
+    mode: "anonymous" | "public" = "public",
     emailOptions?: OfferEmailOptions
   ) {
     if (!result) return;

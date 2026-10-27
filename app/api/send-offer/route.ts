@@ -333,13 +333,12 @@ export async function POST(request: Request) {
     const isCustomOffer = offerType === "custom";
     const isStorageOnly = offerType === "storage";
     const hasEnergyStorage = !isComparisonOffer && String(body.energyStorage || "").toLowerCase() !== "brak";
-    const sendMode = body.sendMode === "public" ? "public" : "anonymous";
+    const sendMode = "public";
     const advisorName = String(body.advisor?.name || body.advisorName || "").trim();
     const advisorPhone = String(body.advisor?.phone || body.advisorPhone || "").trim();
     const advisorEmail = String(body.advisor?.email || body.advisorEmail || "").trim();
-    const isPublicSend = sendMode === "public";
     const generalReplyTo = process.env.OFFER_REPLY_TO || "kontakt@ideasol.pl";
-    const replyTo = isPublicSend && advisorEmail ? advisorEmail : generalReplyTo;
+    const replyTo = advisorEmail || generalReplyTo;
     const vatRate = Number(body.vatRate || 8);
     const finalGross = Number(body.finalGross || body.finalGross8 || 0);
     const sellerNote = normalizeSellerNote(body.sellerNote);
@@ -646,12 +645,7 @@ export async function POST(request: Request) {
       .filter((line) => line !== "")
       .join("\n");
 
-    const anonymousSignatureText = `Pozdrawiamy,
-Dział handlowy IdeaSol
-
-www.ideasol.pl`;
-
-    const emailSignatureText = isPublicSend ? publicSignatureText : anonymousSignatureText;
+    const emailSignatureText = publicSignatureText;
 
     const publicSignatureHtml = `
               <p style="font-size:16px; margin:0 0 8px; line-height:1.6;">
@@ -661,13 +655,7 @@ www.ideasol.pl`;
               ${advisorPhone ? `<p style="font-size:14px; margin:0 0 4px; color:#475569;">tel. ${advisorPhone}</p>` : ""}
               ${advisorEmail ? `<p style="font-size:14px; margin:0 0 24px;"><a href="mailto:${advisorEmail}" style="color:#047857; text-decoration:none; font-weight:700;">${advisorEmail}</a></p>` : ""}`;
 
-    const anonymousSignatureHtml = `
-              <p style="font-size:16px; margin:0 0 24px; line-height:1.6;">
-                Pozdrawiamy,<br />
-                <strong>Dział handlowy IdeaSol</strong>
-              </p>`;
-
-    const emailSignatureHtml = isPublicSend ? publicSignatureHtml : anonymousSignatureHtml;
+    const emailSignatureHtml = publicSignatureHtml;
 
     const text = `Dzień dobry,
 
