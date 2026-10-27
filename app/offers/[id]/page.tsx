@@ -957,7 +957,6 @@ export default function OfferDetailsPage() {
   const [incognitoCalculationStatus, setIncognitoCalculationStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
-  const [incognitoCalculationError, setIncognitoCalculationError] = useState("");
   const [sellerOptions, setSellerOptions] = useState<UserProfile[]>([]);
   const [selectedSaleSellerId, setSelectedSaleSellerId] = useState("");
   const [visibleUserIds, setVisibleUserIds] = useState<string[] | null>(null);
@@ -998,6 +997,8 @@ export default function OfferDetailsPage() {
     clientId: null,
     conflictDetected: false,
   });
+  const saleCreationInFlightRef = useRef(false);
+  const saleCreationRequestIdRef = useRef<string | null>(null);
   const [invalidFields, setInvalidFields] = useState<string[]>([]);
 
   const canSeeFullFinancials = useMemo(
@@ -1075,7 +1076,6 @@ export default function OfferDetailsPage() {
     if (!showSaleForm || !offer || !isIncognitoSale) {
       setIncognitoCalculation(null);
       setIncognitoCalculationStatus("idle");
-      setIncognitoCalculationError("");
 
       if (showSaleForm && offer && !isIncognitoSale && !hasCustomPaymentSchedule) {
         const standardTotalGross =
@@ -1099,7 +1099,6 @@ export default function OfferDetailsPage() {
     if (!sellerId) {
       setIncognitoCalculation(null);
       setIncognitoCalculationStatus("error");
-      setIncognitoCalculationError("Najpierw wybierz sprzedawcę prowadzącego sprzedaż.");
       return () => {
         cancelled = true;
       };
@@ -1108,7 +1107,6 @@ export default function OfferDetailsPage() {
     async function loadIncognitoCalculation() {
       setIncognitoCalculation(null);
       setIncognitoCalculationStatus("loading");
-      setIncognitoCalculationError("");
 
       try {
         const { data: sessionData } = await supabase.auth.getSession();
@@ -1162,11 +1160,7 @@ export default function OfferDetailsPage() {
         if (cancelled) return;
         setIncognitoCalculation(null);
         setIncognitoCalculationStatus("error");
-        setIncognitoCalculationError(
-          error instanceof Error
-            ? error.message
-            : "Nie udało się przeliczyć ceny sprzedaży incognito."
-        );
+        console.error("Nie udało się przeliczyć ceny sprzedaży:", error);
       }
     }
 
@@ -1421,7 +1415,6 @@ export default function OfferDetailsPage() {
     setIsIncognitoSale(canUseIncognitoSales && offerUsesIncognitoPricing);
     setIncognitoCalculation(null);
     setIncognitoCalculationStatus("idle");
-    setIncognitoCalculationError("");
 
     setSaleForm({
       ...emptySaleForm(),
@@ -1931,7 +1924,7 @@ export default function OfferDetailsPage() {
     clientId: string | null;
     conflictDetected: boolean;
   }) {
-    if (!offer) return;
+    if (!offer || saleCreationInFlightRef.current) return;
 
     const effectiveSellerId = canChooseSaleSeller
       ? selectedSaleSellerId
@@ -1946,6 +1939,16 @@ export default function OfferDetailsPage() {
       setCreateSaleStatus(validationError);
       return;
     }
+
+    saleCreationInFlightRef.current = true;
+    setCreatingSale(true);
+    const creationRequestId =
+      saleCreationRequestIdRef.current || crypto.randomUUID();
+    saleCreationRequestIdRef.current = creationRequestId;
+    const releaseSaleCreationLock = () => {
+      saleCreationInFlightRef.current = false;
+      setCreatingSale(false);
+    };
 
     const duplicateWorkflow = workflowOverride || duplicateWorkflowRef.current;
 
@@ -1973,6 +1976,7 @@ export default function OfferDetailsPage() {
       });
 
       setCreateSaleStatus("");
+      releaseSaleCreationLock();
 
       return;
     }
@@ -2022,6 +2026,7 @@ export default function OfferDetailsPage() {
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) {
         setCreateSaleStatus("Sesja wygasła. Zaloguj się ponownie.");
+        releaseSaleCreationLock();
         return;
       }
 
@@ -2049,9 +2054,9 @@ export default function OfferDetailsPage() {
         !incognitoResult ||
         incognitoResult.pricingMode !== "incognito"
       ) {
-        setCreateSaleStatus(
-          incognitoResult?.error || "Nie udało się obliczyć ceny sprzedaży incognito."
-        );
+        console.error("Nie udało się obliczyć ceny sprzedaży:", incognitoResult?.error);
+        setCreateSaleStatus("Nie udało się obliczyć ceny sprzedaży.");
+        releaseSaleCreationLock();
         return;
       }
 
@@ -2105,17 +2110,16 @@ export default function OfferDetailsPage() {
     if (contractDuplicateError) {
       console.error("Błąd sprawdzania duplikatu numeru umowy:", contractDuplicateError);
       setCreateSaleStatus("Nie udało się sprawdzić numeru umowy. Spróbuj ponownie.");
-      setCreatingSale(false);
+      releaseSaleCreationLock();
       return;
     }
 
     if (Array.isArray(existingContracts) && existingContracts.length > 0) {
       setCreateSaleStatus("Umowa o wskazanym numerze istnieje w systemie.");
-      setCreatingSale(false);
+      releaseSaleCreationLock();
       return;
     }
 
-    setCreatingSale(true);
     setCreateSaleStatus("");
 
     let effectiveClientId =
@@ -2151,7 +2155,7 @@ export default function OfferDetailsPage() {
       if (newClientError || !newClient) {
         console.error("Błąd tworzenia nowego klienta mimo dubla:", newClientError);
         setCreateSaleStatus(newClientError?.message || "Nie udało się utworzyć nowego klienta.");
-        setCreatingSale(false);
+        releaseSaleCreationLock();
         return;
       }
 
@@ -2171,6 +2175,7 @@ export default function OfferDetailsPage() {
       status: "Oczekuje na sprawdzenie dokumentów",
       customer_type: saleForm.customerType,
       customer_data: {
+        creation_request_id: creationRequestId,
         calculator_program: calculatorProgram,
         installation_count: installationCount,
         customer_type: saleForm.customerType,
@@ -2269,7 +2274,8 @@ export default function OfferDetailsPage() {
       if (response.ok && responseBody?.id) {
         createdSale = { id: responseBody.id };
       } else {
-        saleError = { message: responseBody?.error || "Nie udało się utworzyć sprzedaży incognito." };
+        console.error("Nie udało się utworzyć sprzedaży:", responseBody?.error);
+        saleError = { message: "Nie udało się utworzyć sprzedaży." };
       }
     } else {
       const insertResult = await supabase
@@ -2279,11 +2285,23 @@ export default function OfferDetailsPage() {
         .single();
       createdSale = insertResult.data;
       saleError = insertResult.error;
+
+      if (insertResult.error?.code === "23505") {
+        const { data: existingSale } = await supabase
+          .from("sales")
+          .select("id")
+          .contains("customer_data", { creation_request_id: creationRequestId })
+          .maybeSingle();
+        if (existingSale?.id) {
+          createdSale = existingSale;
+          saleError = null;
+        }
+      }
     }
     if (saleError || !createdSale) {
       console.error("Błąd tworzenia sprzedaży z oferty:", saleError);
       setCreateSaleStatus(saleError?.message || "Nie udało się utworzyć sprzedaży.");
-      setCreatingSale(false);
+      releaseSaleCreationLock();
       return;
     }
     // Client status is shared outside the sale access policy. Do not change it
@@ -2421,7 +2439,7 @@ export default function OfferDetailsPage() {
       });
       await sendTeamsSaleCreatedNotification(createdSale.id);
     }
-    setCreatingSale(false);
+    releaseSaleCreationLock();
     setAllowDuplicateClientCreation(false);
     setSkipDuplicateCheck(false);
     duplicateWorkflowRef.current = {
@@ -2596,56 +2614,6 @@ export default function OfferDetailsPage() {
                     ))}
                   </select>
                 </label>
-              )}
-
-              {canUseIncognitoSales && (
-                <div className="md:col-span-2 space-y-3">
-                  <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-                    <input
-                      type="checkbox"
-                      checked={isIncognitoSale}
-                      onChange={(event) => {
-                        setIsIncognitoSale(event.target.checked);
-                        setCreateSaleStatus("");
-                      }}
-                      className="mt-1 h-4 w-4 rounded border-violet-300 accent-violet-700"
-                    />
-                    <span>
-                      <span className="block text-sm font-black text-violet-950">Sprzedaż incognito</span>
-                      <span className="mt-1 block text-xs font-medium text-violet-800">
-                        Sprzedaż będzie widoczna tylko dla administratora i osób z tym uprawnieniem. Powiadomienia Teams o podpisaniu i zawarciu umowy nie zostaną wysłane.
-                      </span>
-                    </span>
-                  </label>
-
-                  {isIncognitoSale && (
-                    <div className="rounded-2xl border border-violet-300 bg-white px-4 py-3">
-                      {incognitoCalculationStatus === "loading" && (
-                        <p className="text-sm font-bold text-violet-800">
-                          Przeliczanie ceny incognito…
-                        </p>
-                      )}
-                      {incognitoCalculationStatus === "error" && (
-                        <p className="text-sm font-bold text-red-700">
-                          {incognitoCalculationError}
-                        </p>
-                      )}
-                      {incognitoCalculationStatus === "ready" && (
-                        <div>
-                          <p className="text-xs font-bold uppercase text-violet-600">
-                            Cena incognito brutto
-                          </p>
-                          <p className="mt-1 text-2xl font-black text-violet-950">
-                            {money(salePricingPreview.totalGross)}
-                          </p>
-                          <p className="mt-1 text-xs font-semibold text-slate-600">
-                            Cena standardowa: {money(salePricingPreview.standardTotalGross)} · obniżka: {money(salePricingPreview.savingsGross)}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
               )}
 
               <label className="block">
@@ -3572,13 +3540,7 @@ export default function OfferDetailsPage() {
             <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">
-                  {showSaleForm && isIncognitoSale
-                    ? isMultiInstallation
-                      ? "Cena incognito brutto łącznie"
-                      : "Cena incognito brutto"
-                    : isMultiInstallation
-                      ? "Cena brutto łącznie"
-                      : "Cena brutto"}
+                  {isMultiInstallation ? "Cena brutto łącznie" : "Cena brutto"}
                 </p>
                 <p className="mt-1 text-2xl font-black text-slate-950">
                   {showSaleForm && isIncognitoSale && incognitoCalculationStatus === "error"
@@ -3606,13 +3568,7 @@ export default function OfferDetailsPage() {
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase text-slate-400">
-                  {showSaleForm && isIncognitoSale
-                    ? isMultiInstallation
-                      ? "Cena incognito netto łącznie"
-                      : "Cena incognito netto"
-                    : isMultiInstallation
-                      ? "Cena netto łącznie"
-                      : "Cena netto"}
+                  {isMultiInstallation ? "Cena netto łącznie" : "Cena netto"}
                 </p>
                 <p className="mt-1 text-xl font-black text-slate-950">
                   {showSaleForm && isIncognitoSale && incognitoCalculationStatus === "error"

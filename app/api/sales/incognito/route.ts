@@ -76,6 +76,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Brak uprawnienia do zmiany sprzedawcy." }, { status: 403 });
   }
 
+  const customerData = record(requestedSale.customer_data);
+  const requestedCreationRequestId = String(customerData.creation_request_id || "");
+  const contractNumber = String(requestedSale.contract_number || "");
+  const creationRequestId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      requestedCreationRequestId
+    )
+      ? requestedCreationRequestId
+      : `sale:${sourceOfferId}:${contractNumber}`;
+
+  const { data: existingContractSale } = await supabaseAdmin
+    .from("sales")
+    .select("id")
+    .eq("source_offer_id", sourceOfferId)
+    .eq("contract_number", contractNumber)
+    .eq("is_incognito", true)
+    .limit(1)
+    .maybeSingle();
+  if (existingContractSale?.id) {
+    return NextResponse.json(
+      { id: existingContractSale.id, deduplicated: true },
+      { status: 200 }
+    );
+  }
+
+  const findExistingSale = () =>
+    supabaseAdmin
+      .from("sales")
+      .select("id")
+      .contains("customer_data", { creation_request_id: creationRequestId })
+      .maybeSingle();
+
+  const { data: existingSale } = await findExistingSale();
+  if (existingSale?.id) {
+    return NextResponse.json({ id: existingSale.id, deduplicated: true }, { status: 200 });
+  }
+
   const offerData = record(offer.offer_data);
   const calculationResponse = await fetch(new URL("/api/calculate", request.url), {
     method: "POST",
@@ -117,7 +154,6 @@ export async function POST(request: Request) {
     pricedOffer,
     getOfferInstallationCount(offer)
   );
-  const customerData = record(requestedSale.customer_data);
 
   const safeSale = {
     client_id: requestedSale.client_id,
@@ -132,6 +168,7 @@ export async function POST(request: Request) {
     customer_type: requestedSale.customer_type,
     customer_data: {
       ...customerData,
+      creation_request_id: creationRequestId,
       contract_total_gross: Number(snapshot.sale_price_gross || 0),
       incognito_pricing_applied: true,
     },
@@ -149,6 +186,15 @@ export async function POST(request: Request) {
     .single();
 
   if (insertError || !createdSale) {
+    if (insertError?.code === "23505") {
+      const { data: concurrentSale } = await findExistingSale();
+      if (concurrentSale?.id) {
+        return NextResponse.json(
+          { id: concurrentSale.id, deduplicated: true },
+          { status: 200 }
+        );
+      }
+    }
     console.error("Nie udało się utworzyć sprzedaży incognito", insertError);
     return NextResponse.json({ error: "Nie udało się utworzyć sprzedaży." }, { status: 500 });
   }
