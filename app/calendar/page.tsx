@@ -72,6 +72,7 @@ export default function CalendarPage() {
   const [selectedEventTypes, setSelectedEventTypes] = useState<Array<CalendarItem["type"]>>([
     "meeting",
     "phone_call",
+    "vacation",
   ]);
   const [selectedItem, setSelectedItem] = useState<CalendarItem | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export default function CalendarPage() {
   const [newVacationEndDate, setNewVacationEndDate] = useState("");
   const [newEventDescription, setNewEventDescription] = useState("");
   const [createEventError, setCreateEventError] = useState("");
+  const [calendarNotice, setCalendarNotice] = useState("");
   const [creatingEvent, setCreatingEvent] = useState(false);
 
   useEffect(() => {
@@ -813,6 +815,7 @@ async function findAdvisorVacationConflict(advisorId: string, eventDateTime: str
 
 async function createCalendarEventFromModal() {
   setCreateEventError("");
+  setCalendarNotice("");
 
   if (!currentUserId) {
     setCreateEventError("Brak zalogowanego użytkownika.");
@@ -908,6 +911,39 @@ async function createCalendarEventFromModal() {
       return;
     }
 
+    const { data: existingVacationRows, error: existingVacationError } = await supabase
+      .from("calendar_events")
+      .select("event_at")
+      .eq("event_type", "vacation")
+      .eq("assigned_user_id", newEventAdvisorId)
+      .gte("event_at", `${vacationDates[0]}T00:00:00Z`)
+      .lte("event_at", `${vacationDates[vacationDates.length - 1]}T23:59:59Z`);
+
+    if (existingVacationError) {
+      console.error("Nie udało się sprawdzić istniejących urlopów", existingVacationError);
+      setCreateEventError("Nie udało się sprawdzić, czy urlop już istnieje.");
+      setCreatingEvent(false);
+      return;
+    }
+
+    const duplicateVacationDates = [
+      ...new Set(
+        (existingVacationRows || [])
+          .map((row) => String(row.event_at || "").slice(0, 10))
+          .filter((dateValue) => vacationDates.includes(dateValue))
+      ),
+    ].sort();
+
+    if (duplicateVacationDates.length > 0) {
+      const formattedDates = duplicateVacationDates
+        .map((dateValue) => new Date(`${dateValue}T12:00:00Z`).toLocaleDateString("pl-PL"))
+        .join(", ");
+
+      setCreateEventError(`Urlop dla tej osoby już istnieje w dniach: ${formattedDates}.`);
+      setCreatingEvent(false);
+      return;
+    }
+
     const vacationDescription = [
       `Urlop od ${newVacationStartDate} do ${newVacationEndDate}`,
       newEventDescription || null,
@@ -920,7 +956,7 @@ async function createCalendarEventFromModal() {
       title: eventTitle,
       description: vacationDescription || null,
       event_type: "vacation",
-      event_at: combineDateAndTime(dateValue, "09:00"),
+      event_at: new Date(combineDateAndTime(dateValue, "09:00")).toISOString(),
       status: "planned",
       created_by: currentUserId,
       assigned_user_id: newEventAdvisorId,
@@ -933,7 +969,11 @@ async function createCalendarEventFromModal() {
 
     if (error) {
       console.error("Nie udało się utworzyć urlopu", error);
-      setCreateEventError("Nie udało się utworzyć urlopu.");
+      setCreateEventError(
+        error.code === "23505"
+          ? "Urlop dla tej osoby w wybranym terminie już istnieje."
+          : "Nie udało się utworzyć urlopu."
+      );
       setCreatingEvent(false);
       return;
     }
@@ -951,6 +991,11 @@ async function createCalendarEventFromModal() {
     setNewVacationStartDate("");
     setNewVacationEndDate("");
     setNewEventDescription("");
+    setCalendarNotice(
+      `Dodano urlop dla ${advisorName}: ${newVacationStartDate}–${newVacationEndDate} (${vacationDates.length} ${
+        vacationDates.length === 1 ? "dzień" : "dni"
+      }).`
+    );
 
     await loadCalendarItems();
     return;
@@ -1454,7 +1499,7 @@ async function createCalendarEventFromModal() {
               </div>
             </div>
 
-              <div className="grid w-full grid-cols-2 gap-2 lg:w-auto lg:grid-cols-none lg:flex lg:items-center">
+              <div className="grid w-full grid-cols-3 gap-2 lg:w-auto lg:grid-cols-none lg:flex lg:items-center">
                 <button
                   type="button"
                   onClick={() => toggleEventTypeFilter("meeting")}
@@ -1477,6 +1522,18 @@ async function createCalendarEventFromModal() {
                   }`}
                 >
                   Kontakty tel.
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleEventTypeFilter("vacation")}
+                  className={`flex h-14 w-full items-center justify-center rounded-xl border px-4 text-center text-sm font-semibold leading-tight transition sm:w-36 ${
+                    selectedEventTypes.includes("vacation")
+                      ? "border-orange-300 bg-orange-50 text-orange-800"
+                      : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Urlopy
                 </button>
               </div>
             
@@ -1518,6 +1575,12 @@ async function createCalendarEventFromModal() {
               </button>
             </div>
           </div>
+
+          {calendarNotice && (
+            <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              {calendarNotice}
+            </div>
+          )}
 
           {loading ? (
             <p className="text-sm text-slate-400">Ładowanie kalendarza...</p>
@@ -1663,10 +1726,12 @@ async function createCalendarEventFromModal() {
 
                         <div className="text-right">
                           <p className="font-bold">
-                            {new Date(item.date).toLocaleTimeString("pl-PL", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {item.type === "vacation"
+                              ? "Cały dzień"
+                              : new Date(item.date).toLocaleTimeString("pl-PL", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
                             {getCalendarItemLabel(item)}
@@ -2241,10 +2306,12 @@ function CalendarEventCard({ item, onClick, showOwner = false }: CalendarEventCa
         <p
           className={`font-bold ${itemStyle.time}`}
         >
-          {new Date(item.date).toLocaleTimeString("pl-PL", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {item.type === "vacation"
+            ? "Cały dzień"
+            : new Date(item.date).toLocaleTimeString("pl-PL", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
         </p>
 
         <span
