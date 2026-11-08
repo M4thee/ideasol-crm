@@ -19,6 +19,7 @@ import {
 } from "@/lib/metaLeadNormalization";
 import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { normalizeBusinessArea } from "@/lib/businessAreas";
 
 export const runtime = "nodejs";
 
@@ -158,6 +159,7 @@ async function createClient(
       status: assignedUserId ? "Przypisany" : "Nowy lead",
       assigned_user_id: assignedUserId,
       lead_source: "Meta Ads",
+      business_area: normalizeBusinessArea(integration.business_area),
     })
     .select("id")
     .single();

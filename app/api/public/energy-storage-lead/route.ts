@@ -276,7 +276,8 @@ async function findRecentLeadByPhone(phone: string) {
 
 async function insertLeadIntoCrm(
   payload: LeadPayload,
-  assignedUser: AssignableLeadUser | null
+  assignedUser: AssignableLeadUser | null,
+  businessArea: "ideasol" | "ideatermo"
 ) {
   const contact = payload.contact ?? {};
   const firstName = cleanText(contact.firstName);
@@ -306,6 +307,7 @@ async function insertLeadIntoCrm(
       is_lead: true,
       lead_source: "kalkulatorME",
       assigned_user_id: assignedUser?.id || null,
+      business_area: businessArea,
     })
     .select("id")
     .single();
@@ -881,7 +883,11 @@ export async function POST(request: Request) {
       ? await assignLead(integration, { postalCode })
       : null;
     const assignedUser = assignment?.user || null;
-    const crmResult = await insertLeadIntoCrm(payload, assignedUser);
+    const crmResult = await insertLeadIntoCrm(
+      payload,
+      assignedUser,
+      integration?.business_area || "ideasol"
+    );
 
     after(async () => {
       await createEnergyStorageAiNote(crmResult.clientId, {

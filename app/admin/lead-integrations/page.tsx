@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { getBusinessAreaLabel, type BusinessArea } from "@/lib/businessAreas";
 
 type AssignmentRule = "random" | "postal_code" | "round_robin";
 
@@ -12,6 +13,7 @@ type Integration = {
   name: string;
   source_type: string;
   campaign_name: string;
+  business_area: BusinessArea;
   external_form_id: string | null;
   is_active: boolean;
   assignment_rule: AssignmentRule;
@@ -26,6 +28,8 @@ type User = {
   display_name: string | null;
   email: string | null;
   role: string | null;
+  ideasol: boolean;
+  ideatermo: boolean;
 };
 
 type Tag = { name: string; color: string | null };
@@ -88,6 +92,13 @@ export default function LeadIntegrationsPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const isCreating = draft?.id === "";
+  const eligibleUsers = useMemo(
+    () =>
+      users.filter((user) =>
+        draft?.business_area === "ideatermo" ? user.ideatermo : user.ideasol
+      ),
+    [draft?.business_area, users]
+  );
 
   async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
     const {
@@ -182,6 +193,7 @@ export default function LeadIntegrationsPage() {
       name: "Nowa integracja Meta Ads",
       source_type: "meta",
       campaign_name: "",
+      business_area: "ideasol",
       external_form_id: null,
       is_active: true,
       assignment_rule: "round_robin",
@@ -232,6 +244,7 @@ export default function LeadIntegrationsPage() {
           sourceType: draft.source_type,
           name: draft.name,
           campaignName: draft.campaign_name,
+          businessArea: draft.business_area,
           externalFormId: draft.external_form_id,
           isActive: draft.is_active,
           assignmentRule: draft.assignment_rule,
@@ -392,7 +405,7 @@ export default function LeadIntegrationsPage() {
                   >
                     <span className="block text-sm font-black text-slate-900">{integration.name}</span>
                     <span className="mt-1 block text-xs text-slate-500">
-                      {integration.source_type.toUpperCase()} · {integration.is_active ? "Aktywna" : "Wyłączona"}
+                      {getBusinessAreaLabel(integration.business_area)} · {integration.source_type.toUpperCase()} · {integration.is_active ? "Aktywna" : "Wyłączona"}
                     </span>
                   </button>
                 ))}
@@ -429,6 +442,34 @@ export default function LeadIntegrationsPage() {
                       }
                       className="w-full rounded-xl border border-slate-300 px-4 py-3 font-normal outline-none focus:border-emerald-500"
                     />
+                  </label>
+                  <label className="space-y-2 text-sm font-bold text-slate-700 sm:col-span-2">
+                    Obszar działalności kampanii
+                    <select
+                      value={draft.business_area}
+                      onChange={(event) => {
+                        const businessArea = event.target.value as BusinessArea;
+                        setDraft((current) =>
+                          current && {
+                            ...current,
+                            business_area: businessArea,
+                            participant_user_ids: current.participant_user_ids.filter((userId) => {
+                              const user = users.find((candidate) => candidate.id === userId);
+                              return businessArea === "ideatermo"
+                                ? user?.ideatermo === true
+                                : user?.ideasol === true;
+                            }),
+                          }
+                        );
+                      }}
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 font-normal outline-none focus:border-emerald-500"
+                    >
+                      <option value="ideasol">IdeaSol — PV i magazyny energii</option>
+                      <option value="ideatermo">IdeaTermo — termomodernizacja</option>
+                    </select>
+                    <span className="block text-xs font-normal leading-5 text-slate-500">
+                      Nowy klient i przydział leada zostaną zapisane wyłącznie w tym obszarze.
+                    </span>
                   </label>
                   <label className="space-y-2 text-sm font-bold text-slate-700 sm:col-span-2">
                     ID formularza Meta {isCreating ? "(wymagane)" : "(puste = konfiguracja domyślna)"}
@@ -496,7 +537,7 @@ export default function LeadIntegrationsPage() {
                       type="button"
                       onClick={() =>
                         setDraft((current) =>
-                          current && { ...current, participant_user_ids: users.map((user) => user.id) }
+                          current && { ...current, participant_user_ids: eligibleUsers.map((user) => user.id) }
                         )
                       }
                       className="text-xs font-bold text-emerald-700"
@@ -505,7 +546,7 @@ export default function LeadIntegrationsPage() {
                     </button>
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {users.map((user) => (
+                    {eligibleUsers.map((user) => (
                       <label
                         key={user.id}
                         className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-200 p-3 transition hover:bg-slate-50"
@@ -527,6 +568,12 @@ export default function LeadIntegrationsPage() {
                       </label>
                     ))}
                   </div>
+                  {eligibleUsers.length === 0 && (
+                    <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                      Brak aktywnych użytkowników z uprawnieniem {getBusinessAreaLabel(draft.business_area)}.
+                      Nadaj je najpierw w panelu użytkowników.
+                    </div>
+                  )}
                 </div>
 
                 <div>

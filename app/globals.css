@@ -23,8 +23,35 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-termo-50: #f2f7ff;
+  --color-termo-100: #e5efff;
+  --color-termo-200: #c9defd;
+  --color-termo-300: #9fc5fa;
+  --color-termo-400: #6ea7f5;
+  --color-termo-500: #418cef;
+  --color-termo-600: #327bda;
+  --color-termo-700: #2864b6;
+  --color-termo-800: #254f8d;
+  --color-termo-900: #223f6f;
+  --color-termo-950: #172a49;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+.dark .ideatermo-active-step-index {
+  background-color: #ffffff !important;
+  color: #172a49 !important;
+}
+
+.ideatermo-date-input {
+  line-height: 3rem;
+  padding-block: 0;
+}
+
+.ideatermo-date-input::-webkit-date-and-time-value {
+  align-items: center;
+  display: flex;
+  min-height: 3rem;
 }
 
 html {

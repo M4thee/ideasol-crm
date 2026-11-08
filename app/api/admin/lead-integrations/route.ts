@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { LeadAssignmentRule } from "@/lib/leadIntegrations";
+import type { BusinessArea } from "@/lib/businessAreas";
 
 const VALID_RULES = new Set<LeadAssignmentRule>([
   "random",
@@ -14,6 +15,7 @@ type IntegrationInput = {
   name?: string;
   sourceType?: string;
   campaignName?: string;
+  businessArea?: BusinessArea;
   externalFormId?: string | null;
   isActive?: boolean;
   assignmentRule?: LeadAssignmentRule;
@@ -52,9 +54,12 @@ function validateInput(input: IntegrationInput, creating = false) {
   const errors: string[] = [];
 
   if (creating && !input.slug?.trim()) errors.push("Podaj identyfikator integracji.");
-  if (creating && !input.sourceType?.trim()) errors.push("Podaj źródło integracji.");
+  if (!input.sourceType?.trim()) errors.push("Podaj źródło integracji.");
   if (!input.name?.trim()) errors.push("Podaj nazwę integracji.");
   if (!input.campaignName?.trim()) errors.push("Podaj nazwę kampanii.");
+  if (!input.businessArea || !["ideasol", "ideatermo"].includes(input.businessArea)) {
+    errors.push("Wybierz obszar działalności kampanii.");
+  }
   if (!input.assignmentRule || !VALID_RULES.has(input.assignmentRule)) {
     errors.push("Wybierz prawidłową zasadę przydzielania leadów.");
   }
@@ -68,20 +73,37 @@ function validateInput(input: IntegrationInput, creating = false) {
   return errors;
 }
 
-async function validateParticipants(userIds: string[]) {
+async function validateParticipants(userIds: string[], businessArea: BusinessArea) {
   const uniqueIds = [...new Set(userIds)];
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id,is_active,hidden_from_assignment")
-    .in("id", uniqueIds);
+  const [profilesResult, permissionsResult] = await Promise.all([
+    supabaseAdmin
+      .from("profiles")
+      .select("id,is_active,hidden_from_assignment")
+      .in("id", uniqueIds),
+    supabaseAdmin
+      .from("user_permissions")
+      .select("user_id,ideasol,ideatermo")
+      .in("user_id", uniqueIds),
+  ]);
 
-  if (error) throw error;
+  if (profilesResult.error) throw profilesResult.error;
+  if (permissionsResult.error) throw permissionsResult.error;
+
+  const areaAccess = new Set(
+    (permissionsResult.data ?? [])
+      .filter((permission) =>
+        businessArea === "ideatermo" ? permission.ideatermo : permission.ideasol
+      )
+      .map((permission) => permission.user_id)
+  );
 
   const validIds = new Set(
-    (data ?? [])
+    (profilesResult.data ?? [])
       .filter(
         (profile) =>
-          profile.is_active !== false && profile.hidden_from_assignment !== true
+          profile.is_active !== false &&
+          profile.hidden_from_assignment !== true &&
+          areaAccess.has(profile.id)
       )
       .map((profile) => profile.id)
   );
@@ -100,6 +122,29 @@ async function validateTags(tagNames: string[]) {
   if (error) throw error;
 
   return (data ?? []).map((tag) => tag.name);
+}
+
+async function findConflictingIntegration(
+  sourceType: string,
+  externalFormId: string | null,
+  excludedIntegrationId?: string
+) {
+  let query = supabaseAdmin
+    .from("lead_integrations")
+    .select("id")
+    .eq("source_type", sourceType);
+
+  query = externalFormId
+    ? query.eq("external_form_id", externalFormId)
+    : query.is("external_form_id", null);
+
+  if (excludedIntegrationId) {
+    query = query.neq("id", excludedIntegrationId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 async function replaceParticipants(integrationId: string, userIds: string[]) {
@@ -128,11 +173,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Brak uprawnień." }, { status: 403 });
   }
 
-  const [integrationsResult, linksResult, profilesResult, tagsResult] = await Promise.all([
+  const [integrationsResult, linksResult, profilesResult, permissionsResult, tagsResult] = await Promise.all([
     supabaseAdmin
       .from("lead_integrations")
       .select(
-        "id,slug,name,source_type,campaign_name,external_form_id,is_active,assignment_rule,tag_names,notify_assigned_user,notify_owners,updated_at"
+        "id,slug,name,source_type,campaign_name,business_area,external_form_id,is_active,assignment_rule,tag_names,notify_assigned_user,notify_owners,updated_at"
       )
       .order("created_at", { ascending: true }),
     supabaseAdmin
@@ -145,6 +190,9 @@ export async function GET(request: Request) {
       .in("role", ["seller", "manager", "owner"])
       .order("display_name", { ascending: true }),
     supabaseAdmin
+      .from("user_permissions")
+      .select("user_id,ideasol,ideatermo"),
+    supabaseAdmin
       .from("client_tags")
       .select("name,color")
       .eq("is_active", true)
@@ -152,7 +200,11 @@ export async function GET(request: Request) {
   ]);
 
   const firstError =
-    integrationsResult.error || linksResult.error || profilesResult.error || tagsResult.error;
+    integrationsResult.error ||
+    linksResult.error ||
+    profilesResult.error ||
+    permissionsResult.error ||
+    tagsResult.error;
 
   if (firstError) {
     return NextResponse.json(
@@ -168,15 +220,25 @@ export async function GET(request: Request) {
     participantsByIntegration.set(link.integration_id, current);
   }
 
+  const permissionsByUser = new Map(
+    (permissionsResult.data ?? []).map((permission) => [permission.user_id, permission])
+  );
+
   return NextResponse.json({
     integrations: (integrationsResult.data ?? []).map((integration) => ({
       ...integration,
       participant_user_ids: participantsByIntegration.get(integration.id) ?? [],
     })),
-    users: (profilesResult.data ?? []).filter(
-      (profile) =>
-        profile.is_active !== false && profile.hidden_from_assignment !== true
-    ),
+    users: (profilesResult.data ?? [])
+      .filter(
+        (profile) =>
+          profile.is_active !== false && profile.hidden_from_assignment !== true
+      )
+      .map((profile) => ({
+        ...profile,
+        ideasol: permissionsByUser.get(profile.id)?.ideasol === true,
+        ideatermo: permissionsByUser.get(profile.id)?.ideatermo === true,
+      })),
     tags: tagsResult.data ?? [],
   });
 }
@@ -194,16 +256,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    const participantIds = await validateParticipants(input.participantUserIds ?? []);
+    const participantIds = await validateParticipants(
+      input.participantUserIds ?? [],
+      input.businessArea!
+    );
     const tagNames = await validateTags(input.tagNames ?? []);
 
-    if (input.sourceType === "meta" && !input.externalFormId?.trim()) {
-      const { data: existingDefault } = await supabaseAdmin
-        .from("lead_integrations")
-        .select("id")
-        .eq("source_type", "meta")
-        .is("external_form_id", null)
-        .maybeSingle();
+    const sourceType = input.sourceType!.trim();
+    const externalFormId = input.externalFormId?.trim() || null;
+
+    if (sourceType === "meta" && !externalFormId) {
+      const existingDefault = await findConflictingIntegration(sourceType, null);
 
       if (existingDefault) {
         return NextResponse.json(
@@ -213,13 +276,11 @@ export async function POST(request: Request) {
       }
     }
 
-    if (input.externalFormId?.trim()) {
-      const { data: duplicateForm } = await supabaseAdmin
-        .from("lead_integrations")
-        .select("id")
-        .eq("source_type", input.sourceType!.trim())
-        .eq("external_form_id", input.externalFormId.trim())
-        .maybeSingle();
+    if (externalFormId) {
+      const duplicateForm = await findConflictingIntegration(
+        sourceType,
+        externalFormId
+      );
 
       if (duplicateForm) {
         return NextResponse.json(
@@ -248,9 +309,10 @@ export async function POST(request: Request) {
       .insert({
         slug: input.slug!.trim(),
         name: input.name!.trim(),
-        source_type: input.sourceType!.trim(),
+        source_type: sourceType,
         campaign_name: input.campaignName!.trim(),
-        external_form_id: input.externalFormId?.trim() || null,
+        business_area: input.businessArea,
+        external_form_id: externalFormId,
         is_active: input.isActive !== false,
         assignment_rule: input.assignmentRule,
         tag_names: tagNames,
@@ -288,8 +350,43 @@ export async function PATCH(request: Request) {
 
   try {
     const integrationId = input.id!;
-    const participantIds = await validateParticipants(input.participantUserIds ?? []);
+    const sourceType = input.sourceType!.trim();
+    const externalFormId = input.externalFormId?.trim() || null;
+    const participantIds = await validateParticipants(
+      input.participantUserIds ?? [],
+      input.businessArea!
+    );
     const tagNames = await validateTags(input.tagNames ?? []);
+
+    if (sourceType === "meta" && !externalFormId) {
+      const existingDefault = await findConflictingIntegration(
+        sourceType,
+        null,
+        integrationId
+      );
+
+      if (existingDefault) {
+        return NextResponse.json(
+          { error: "Istnieje już domyślna integracja Meta. Dla kolejnej kampanii podaj ID formularza." },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (externalFormId) {
+      const duplicateForm = await findConflictingIntegration(
+        sourceType,
+        externalFormId,
+        integrationId
+      );
+
+      if (duplicateForm) {
+        return NextResponse.json(
+          { error: "Ten formularz jest już przypisany do innej integracji." },
+          { status: 400 }
+        );
+      }
+    }
 
     if (participantIds.length !== new Set(input.participantUserIds ?? []).size) {
       return NextResponse.json(
@@ -310,7 +407,8 @@ export async function PATCH(request: Request) {
       .update({
         name: input.name!.trim(),
         campaign_name: input.campaignName!.trim(),
-        external_form_id: input.externalFormId?.trim() || null,
+        business_area: input.businessArea,
+        external_form_id: externalFormId,
         is_active: input.isActive !== false,
         assignment_rule: input.assignmentRule,
         tag_names: tagNames,

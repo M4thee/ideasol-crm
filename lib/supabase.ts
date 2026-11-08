@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const storageKey = "ideasol-crm-auth";
+const legacyStorageKey = "ideasol-crm-auth";
 
 function getProjectRefFromSupabaseUrl(url: string) {
   try {
@@ -12,22 +12,74 @@ function getProjectRefFromSupabaseUrl(url: string) {
   }
 }
 
+const projectRef = getProjectRefFromSupabaseUrl(supabaseUrl);
+const storageKey = `ideasol-crm-auth-${projectRef || "default"}`;
+
+function sessionBelongsToCurrentSupabase(rawSession: string) {
+  try {
+    const session = JSON.parse(rawSession) as { access_token?: string };
+    const payloadPart = session.access_token?.split(".")[1];
+
+    if (!payloadPart) return false;
+
+    const normalizedPayload = payloadPart
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(payloadPart.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(normalizedPayload)) as { iss?: string };
+
+    if (!payload.iss) return false;
+
+    return new URL(payload.iss).origin === new URL(supabaseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 function migrateSupabaseSessionStorage() {
   if (typeof window === "undefined") return;
 
-  const projectRef = getProjectRefFromSupabaseUrl(supabaseUrl);
   if (!projectRef) return;
 
   const defaultStorageKey = `sb-${projectRef}-auth-token`;
   const customSession = window.localStorage.getItem(storageKey);
   const defaultSession = window.localStorage.getItem(defaultStorageKey);
+  const legacySession = window.localStorage.getItem(legacyStorageKey);
+  let matchingCustomSession =
+    customSession && sessionBelongsToCurrentSupabase(customSession)
+      ? customSession
+      : null;
+  const matchingDefaultSession =
+    defaultSession && sessionBelongsToCurrentSupabase(defaultSession)
+      ? defaultSession
+      : null;
+  const matchingLegacySession =
+    legacySession && sessionBelongsToCurrentSupabase(legacySession)
+      ? legacySession
+      : null;
 
-  if (!customSession && defaultSession) {
-    window.localStorage.setItem(storageKey, defaultSession);
+  if (customSession && !matchingCustomSession) {
+    window.localStorage.removeItem(storageKey);
   }
 
-  if (!defaultSession && customSession) {
-    window.localStorage.setItem(defaultStorageKey, customSession);
+  if (defaultSession && !matchingDefaultSession) {
+    window.localStorage.removeItem(defaultStorageKey);
+  }
+
+  if (!matchingCustomSession && (matchingDefaultSession || matchingLegacySession)) {
+    matchingCustomSession = matchingDefaultSession || matchingLegacySession;
+    window.localStorage.setItem(
+      storageKey,
+      matchingCustomSession || ""
+    );
+  }
+
+  if (!matchingDefaultSession && matchingCustomSession) {
+    window.localStorage.setItem(defaultStorageKey, matchingCustomSession);
+  }
+
+  if (matchingLegacySession) {
+    window.localStorage.removeItem(legacyStorageKey);
   }
 }
 

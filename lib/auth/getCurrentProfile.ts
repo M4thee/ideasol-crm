@@ -2,6 +2,10 @@
 
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import {
+  DEFAULT_BUSINESS_AREA_PERMISSIONS,
+  type BusinessAreaPermissions,
+} from "@/lib/businessAreas";
 
 export type CurrentProfile = {
   id: string;
@@ -9,6 +13,7 @@ export type CurrentProfile = {
   display_name: string | null;
   role: string | null;
   manager_id: string | null;
+  business_areas: BusinessAreaPermissions;
 };
 
 export async function getCurrentProfile(): Promise<CurrentProfile | null> {
@@ -47,6 +52,26 @@ export async function getCurrentProfile(): Promise<CurrentProfile | null> {
     return null;
   }
 
+  const { data: permissionData, error: permissionError } = await supabase
+    .from("user_permissions")
+    .select("ideasol, ideatermo")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (permissionError) {
+    console.warn(
+      "Nie udało się pobrać uprawnień obszarów działalności; używam bezpiecznej zgodności IdeaSol.",
+      permissionError
+    );
+  }
+
+  const businessAreas: BusinessAreaPermissions = permissionData
+    ? {
+        ideasol: permissionData.ideasol === true,
+        ideatermo: permissionData.ideatermo === true,
+      }
+    : DEFAULT_BUSINESS_AREA_PERMISSIONS;
+
   if (!profileData) {
     return {
       id: user.id,
@@ -54,8 +79,12 @@ export async function getCurrentProfile(): Promise<CurrentProfile | null> {
       display_name: null,
       role: null,
       manager_id: null,
+      business_areas: businessAreas,
     };
   }
 
-  return profileData as CurrentProfile;
+  return {
+    ...(profileData as Omit<CurrentProfile, "business_areas">),
+    business_areas: businessAreas,
+  };
 }

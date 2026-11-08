@@ -16,6 +16,7 @@ import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
   ContactFormPayload,
 } from "../components/ClientContactForm";
+import { getBusinessAreaLabel, type BusinessArea } from "@/lib/businessAreas";
 
 type Client = {
   id: string;
@@ -53,6 +54,7 @@ type Client = {
     display_name: string | null;
     email: string | null;
   } | null;
+  business_area: BusinessArea;
 };
 
 type CalendarEvent = {
@@ -87,6 +89,31 @@ type ClientOffer = {
   energy_storage: string | null;
   created_by: string | null;
   created_at: string;
+};
+
+type IdeaTermoCalculationResult = {
+  indicativeRequiredPowerKw?: number | null;
+  indicativePowerMinKw?: number | null;
+  indicativePowerMaxKw?: number | null;
+  workScope?: {
+    wallAreaM2?: number | null;
+    roofAreaM2?: number | null;
+    floorAreaM2?: number | null;
+    windowCount?: number | null;
+    doorCount?: number | null;
+  } | null;
+};
+
+type IdeaTermoCalculation = {
+  id: string;
+  status: "draft" | "completed";
+  audit_date: string;
+  planned_scope: string[];
+  planned_heat_source: string | null;
+  calculation: IdeaTermoCalculationResult | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type ClientTag = {
@@ -250,6 +277,12 @@ export default function ClientPage() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [offers, setOffers] = useState<ClientOffer[]>([]);
+  const [ideaTermoCalculations, setIdeaTermoCalculations] = useState<
+    IdeaTermoCalculation[]
+  >([]);
+  const [downloadingIdeaTermoPdf, setDownloadingIdeaTermoPdf] = useState<
+    string | null
+  >(null);
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [activities, setActivities] = useState<ClientActivity[]>([]);
   const [tags, setTags] = useState<ClientTag[]>([]);
@@ -305,7 +338,6 @@ export default function ClientPage() {
 
   useEffect(() => {
     loadClientCard();
-    loadClientProfit();
     loadAssignmentData();
     loadMeetingAdvisors();
     loadMentionableUsers();
@@ -413,7 +445,7 @@ export default function ClientPage() {
 
     let clientQuery = supabase
       .from("clients")
-      .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at, created_by")
+      .select("id, public_id, full_name, company_name, phone, email, province, phone_country_code, pesel, regon, city, address, street, building_number, postal_code, nip, contact_person, contact_phone, client_type, lead_source, status, assigned_user_id, assigned_user:profiles!clients_assigned_user_id_fkey(id, display_name, email, role), created_at, created_by, business_area")
       .eq("id", clientId);
 
     if (!canViewAllClients) {
@@ -437,6 +469,7 @@ export default function ClientPage() {
       setEvents([]);
       setSales([]);
       setOffers([]);
+      setIdeaTermoCalculations([]);
       setNotes([]);
       setActivities([]);
       setAccessDenied(true);
@@ -482,6 +515,7 @@ export default function ClientPage() {
       setEvents([]);
       setSales([]);
       setOffers([]);
+      setIdeaTermoCalculations([]);
       setNotes([]);
       setActivities([]);
       setAccessDenied(true);
@@ -506,33 +540,66 @@ export default function ClientPage() {
 
     setEvents((eventsData as CalendarEvent[]) || []);
 
-    const { data: salesData, error: salesError } = await supabase
-      .from("sales")
-      .select("id, public_id, contract_number, sale_date, contract_value, status")
-      .eq("client_id", clientId)
-      .order("created_at", { ascending: false });
+    const isIdeaTermoClient = clientData.business_area === "ideatermo";
+    if (isIdeaTermoClient) {
+      setProfitAccount(null);
+      setProfitError("");
+      setProfitLoading(false);
+    } else {
+      void loadClientProfit();
+    }
+    const salesResponse = isIdeaTermoClient
+      ? { data: [], error: null }
+      : await supabase
+          .from("sales")
+          .select("id, public_id, contract_number, sale_date, contract_value, status")
+          .eq("client_id", clientId)
+          .order("created_at", { ascending: false });
 
-    if (salesError) {
-      console.error("Błąd ładowania sprzedaży klienta:", salesError);
+    if (salesResponse.error) {
+      console.error("Błąd ładowania sprzedaży klienta:", salesResponse.error);
     }
 
-    const loadedSales = (salesData as Sale[]) || [];
+    const loadedSales = (salesResponse.data as Sale[]) || [];
     setSales(loadedSales);
     setSelectedSmsSaleId((current) =>
       loadedSales.some((sale) => sale.id === current) ? current : loadedSales[0]?.id || ""
     );
 
-    const { data: offersData, error: offersError } = await supabase
-      .from("client_offers")
-      .select("id, offer_public_id, offer_type, status, sale_price_gross, seller_margin, company_margin, pv_power_kw, energy_storage, created_by, created_at")
-      .eq("client_id", clientId)
-      .order("created_at", { ascending: false });
+    const offersResponse = isIdeaTermoClient
+      ? { data: [], error: null }
+      : await supabase
+          .from("client_offers")
+          .select("id, offer_public_id, offer_type, status, sale_price_gross, seller_margin, company_margin, pv_power_kw, energy_storage, created_by, created_at")
+          .eq("client_id", clientId)
+          .order("created_at", { ascending: false });
 
-    if (offersError) {
-      console.error("Błąd ładowania ofert klienta:", offersError);
+    if (offersResponse.error) {
+      console.error("Błąd ładowania ofert klienta:", offersResponse.error);
     }
 
-    setOffers((offersData as ClientOffer[]) || []);
+    setOffers((offersResponse.data as ClientOffer[]) || []);
+
+    const ideaTermoCalculationsResponse = isIdeaTermoClient
+      ? await supabase
+          .from("ideatermo_preaudits")
+          .select(
+            "id,status,audit_date,planned_scope,planned_heat_source,calculation,created_by,created_at,updated_at"
+          )
+          .eq("client_id", clientId)
+          .order("updated_at", { ascending: false })
+      : { data: [], error: null };
+
+    if (ideaTermoCalculationsResponse.error) {
+      console.error(
+        "Błąd ładowania kalkulacji IdeaTermo klienta:",
+        ideaTermoCalculationsResponse.error
+      );
+    }
+
+    setIdeaTermoCalculations(
+      (ideaTermoCalculationsResponse.data as IdeaTermoCalculation[]) || []
+    );
 
     const { data: notesData, error: notesError } = await supabase
       .from("client_notes")
@@ -1249,6 +1316,43 @@ export default function ClientPage() {
     return offerType || "Oferta";
   }
 
+  async function downloadIdeaTermoCalculationPdf(calculationId: string) {
+    setDownloadingIdeaTermoPdf(calculationId);
+
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("Sesja CRM wygasła. Zaloguj się ponownie.");
+
+      const response = await fetch(
+        `/api/ideatermo/preaudits/${encodeURIComponent(clientId)}/pdf`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(result?.error || "Nie udało się wygenerować PDF.");
+      }
+
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = `IdeaTermo-zakres-prac-${client?.public_id || clientId.slice(0, 8)}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się pobrać dokumentu IdeaTermo."
+      );
+    } finally {
+      setDownloadingIdeaTermoPdf(null);
+    }
+  }
+
   function openAssignModal() {
     setSelectedUserId(client?.assigned_user_id || "");
     setShowAssignModal(true);
@@ -1722,6 +1826,12 @@ export default function ClientPage() {
 
   const fullAddress = client.address || structuredAddress || "Brak adresu";
   const isB2B = clientType === "B2B";
+  const isIdeaTermoClient = client.business_area === "ideatermo";
+  const visibleTabs = tabs.filter((tab) => {
+    if (tab.id === "sms") return hasSmsAccess;
+    if (!isIdeaTermoClient) return true;
+    return tab.id === "dashboard" || tab.id === "meetings" || tab.id === "offers";
+  });
   const meetings = events.filter((event) => event.event_type === "meeting");
   const reminders = events.filter((event) => event.event_type === "reminder");
   const visibleActivities = activities;
@@ -1799,12 +1909,21 @@ export default function ClientPage() {
               <h1 className="text-3xl font-bold text-slate-900">{clientName}</h1>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href={`/calculator?clientId=${client.id}`}
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-500"
-                >
-                  Przygotuj ofertę
-                </Link>
+                {isIdeaTermoClient ? (
+                  <Link
+                    href={`/ideatermo/preaudyt?clientId=${client.id}`}
+                    className="inline-flex items-center justify-center rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-orange-500"
+                  >
+                    Otwórz preaudyt
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/calculator?clientId=${client.id}`}
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-500"
+                  >
+                    Przygotuj ofertę
+                  </Link>
+                )}
               </div>
 
               <div className="mt-1 space-y-0.5 text-xs font-medium text-slate-400">
@@ -1819,6 +1938,16 @@ export default function ClientPage() {
               <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm font-semibold">
                   {clientType}
+                </span>
+
+                <span
+                  className={`rounded-full px-3 py-1 text-sm font-black ${
+                    isIdeaTermoClient
+                      ? "bg-orange-100 text-orange-900"
+                      : "bg-sky-100 text-sky-900"
+                  }`}
+                >
+                  {getBusinessAreaLabel(client.business_area)}
                 </span>
 
                 <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-900 text-sm font-semibold">
@@ -2023,7 +2152,7 @@ export default function ClientPage() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex items-center gap-3 overflow-x-auto border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-            {tabs.filter((tab) => tab.id !== "sms" || hasSmsAccess).map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -2416,18 +2545,119 @@ export default function ClientPage() {
 
             {activeTab === "offers" && (
               <div className="space-y-3">
-                {offers.length === 0 ? (
-                  <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center">
-                    <p className="font-bold text-slate-900">Brak ofert klienta</p>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Oferty zapisane z kalkulatora pojawią się tutaj automatycznie.
+                {offers.length === 0 && ideaTermoCalculations.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center dark:border-slate-700">
+                    <p className="font-bold text-slate-900 dark:text-slate-100">
+                      Brak zapisanych kalkulacji i ofert
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Zapisane oferty OZE i kalkulacje IdeaTermo pojawią się tutaj automatycznie.
                     </p>
                   </div>
                 ) : (
-                  offers.map((offer) => (
+                  <>
+                    {ideaTermoCalculations.map((calculation) => {
+                      const power = calculation.calculation?.indicativeRequiredPowerKw;
+                      const powerMin = calculation.calculation?.indicativePowerMinKw;
+                      const powerMax = calculation.calculation?.indicativePowerMaxKw;
+
+                      return (
+                        <div
+                          key={calculation.id}
+                          className="overflow-hidden rounded-2xl border border-[#418cef]/45 bg-gradient-to-br from-[#418cef]/10 via-white to-white shadow-sm transition hover:border-[#418cef]/70 hover:shadow-md dark:from-[#418cef]/20 dark:via-slate-900 dark:to-slate-900"
+                        >
+                          <div className="h-1.5 bg-[#418cef]" />
+                          <div className="p-4">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-black text-slate-900 dark:text-white">
+                                    IT-{calculation.id.slice(0, 8).toUpperCase()}
+                                  </p>
+                                  <span className="rounded-full bg-[#418cef] px-3 py-1 text-xs font-black text-white shadow-sm">
+                                    IdeaTermo
+                                  </span>
+                                  <span className="rounded-full bg-[#418cef]/12 px-3 py-1 text-xs font-bold text-[#1f63bd] dark:bg-[#418cef]/25 dark:text-blue-200">
+                                    Preaudyt / zakres prac
+                                  </span>
+                                  <span
+                                    className={`rounded-full px-3 py-1 text-xs font-bold ${
+                                      calculation.status === "completed"
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"
+                                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200"
+                                    }`}
+                                  >
+                                    {calculation.status === "completed"
+                                      ? "Zatwierdzony"
+                                      : "Wersja robocza"}
+                                  </span>
+                                </div>
+
+                                <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                                  Data ankiety: {new Date(`${calculation.audit_date}T12:00:00`).toLocaleDateString("pl-PL")}
+                                  {" · "}Ostatni zapis: {new Date(calculation.updated_at).toLocaleString("pl-PL")}
+                                </p>
+
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {calculation.planned_scope.length > 0 ? (
+                                    calculation.planned_scope.map((scope) => (
+                                      <span
+                                        key={scope}
+                                        className="rounded-lg border border-[#418cef]/20 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-950/40 dark:text-slate-200"
+                                      >
+                                        {scope}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-sm text-slate-500 dark:text-slate-400">
+                                      Nie wskazano zakresu prac.
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="w-full rounded-xl border border-[#418cef]/20 bg-white/80 px-4 py-3 lg:w-[260px] dark:bg-slate-950/45">
+                                <p className="text-xs font-bold uppercase tracking-wide text-[#1f63bd] dark:text-blue-300">
+                                  Szacowana moc źródła
+                                </p>
+                                <p className="mt-1 font-black text-slate-900 dark:text-white">
+                                  {typeof power === "number" ? `${power} kW` : "Brak wyliczenia"}
+                                </p>
+                                {typeof powerMin === "number" && typeof powerMax === "number" ? (
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    Przedział: {powerMin}–{powerMax} kW
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#418cef]/15 pt-3">
+                              <button
+                                type="button"
+                                onClick={() => void downloadIdeaTermoCalculationPdf(calculation.id)}
+                                disabled={downloadingIdeaTermoPdf === calculation.id}
+                                className="rounded-xl border border-[#418cef]/30 bg-white px-4 py-2 text-sm font-bold text-[#1f63bd] transition hover:bg-[#418cef]/10 disabled:cursor-wait disabled:opacity-60 dark:bg-slate-900 dark:text-blue-200"
+                              >
+                                {downloadingIdeaTermoPdf === calculation.id
+                                  ? "Generowanie PDF…"
+                                  : "Pobierz PDF"}
+                              </button>
+                              <Link
+                                href={`/ideatermo/preaudyt?clientId=${clientId}`}
+                                className="rounded-xl bg-[#418cef] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#3279d5]"
+                              >
+                                Otwórz kalkulację
+                              </Link>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {offers.map((offer) => (
                     <div
                       key={offer.id}
-                      className="border border-slate-200 rounded-2xl p-4 hover:bg-slate-50 transition"
+                      className="rounded-2xl border border-slate-200 p-4 transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800/60"
                     >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
@@ -2510,7 +2740,8 @@ export default function ClientPage() {
                         </Link>
                       </div>
                     </div>
-                  ))
+                    ))}
+                  </>
                 )}
               </div>
             )}

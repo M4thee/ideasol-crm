@@ -50,6 +50,13 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, error: "Brak dostępu do klienta." }, { status: 403 });
   }
 
+  if (access.client.business_area !== "ideasol") {
+    return NextResponse.json(
+      { ok: false, error: "IdeaSol Profit nie jest dostępny dla klientów IdeaTermo." },
+      { status: 403 }
+    );
+  }
+
   try {
     const profit = getProfitAdminClient();
     const { data: user, error: userError } = await profit

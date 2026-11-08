@@ -9,6 +9,7 @@ import MeetingConfirmationReminderFields, {
   meetingConfirmationReminderToIso,
   validateMeetingConfirmationReminder,
 } from "@/components/MeetingConfirmationReminderFields";
+import type { BusinessArea, BusinessAreaPermissions } from "@/lib/businessAreas";
 
 type CalendarItem = {
   id: string;
@@ -46,6 +47,8 @@ type AdvisorForCalendarEvent = {
   email: string | null;
   phone: string | null;
   role: string | null;
+  ideasol: boolean;
+  ideatermo: boolean;
 };
 
 type ClientForCalendarEvent = {
@@ -61,6 +64,7 @@ type ClientForCalendarEvent = {
   building_number: string | null;
   postal_code: string | null;
   address: string | null;
+  business_area: BusinessArea;
 };
 
 export default function CalendarPage() {
@@ -98,6 +102,10 @@ export default function CalendarPage() {
   const [createEventError, setCreateEventError] = useState("");
   const [calendarNotice, setCalendarNotice] = useState("");
   const [creatingEvent, setCreatingEvent] = useState(false);
+  const [businessAreaPermissions, setBusinessAreaPermissions] =
+    useState<BusinessAreaPermissions>({ ideasol: true, ideatermo: false });
+  const [newEventBusinessArea, setNewEventBusinessArea] =
+    useState<BusinessArea>("ideasol");
 
   useEffect(() => {
     initializeCalendar();
@@ -183,11 +191,25 @@ export default function CalendarPage() {
 
     setCurrentUserId(user.id);
 
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("role, display_name")
-      .eq("id", user.id)
-      .maybeSingle();
+    const [profileResult, permissionResult] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("role, display_name")
+        .eq("id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("user_permissions")
+        .select("ideasol,ideatermo")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
+    const profileData = profileResult.data;
+    const permissions = {
+      ideasol: permissionResult.data?.ideasol !== false,
+      ideatermo: permissionResult.data?.ideatermo === true,
+    };
+    setBusinessAreaPermissions(permissions);
+    setNewEventBusinessArea(permissions.ideasol ? "ideasol" : "ideatermo");
 
     setCurrentUserRole(
       (profileData?.role || "seller") as "admin" | "owner" | "manager" | "seller" | "cc"
@@ -583,7 +605,7 @@ async function loadClientsForEventModal() {
   const { data, error } = await supabase
     .from("clients")
     .select(
-      "id, full_name, company_name, contact_person, email, phone, contact_phone, city, street, building_number, postal_code, address"
+      "id, full_name, company_name, contact_person, email, phone, contact_phone, city, street, building_number, postal_code, address, business_area"
     )
     .order("created_at", { ascending: false })
     .limit(250);
@@ -601,12 +623,17 @@ async function loadClientsForEventModal() {
 }
 
 async function loadAdvisorsForEventModal() {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, display_name, email, phone, role")
-    .neq("role", "admin")
-    .eq("hidden_from_assignment", false)
-    .order("display_name", { ascending: true });
+  const [profilesResult, permissionsResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, display_name, email, phone, role")
+      .neq("role", "admin")
+      .eq("hidden_from_assignment", false)
+      .order("display_name", { ascending: true }),
+    supabase.from("user_permissions").select("user_id,ideasol,ideatermo"),
+  ]);
+  const data = profilesResult.data;
+  const error = profilesResult.error || permissionsResult.error;
 
   if (error) {
     console.error("Nie udało się pobrać doradców do formularza wydarzenia", error);
@@ -614,7 +641,16 @@ async function loadAdvisorsForEventModal() {
     return;
   }
 
-  setAdvisorsForEvent((data || []) as AdvisorForCalendarEvent[]);
+  const permissionsByUser = new Map(
+    (permissionsResult.data || []).map((permission) => [permission.user_id, permission])
+  );
+  setAdvisorsForEvent(
+    (data || []).map((advisor) => ({
+      ...advisor,
+      ideasol: permissionsByUser.get(advisor.id)?.ideasol === true,
+      ideatermo: permissionsByUser.get(advisor.id)?.ideatermo === true,
+    })) as AdvisorForCalendarEvent[]
+  );
 }
 async function openCreateEventModal() {
   setCreateEventError("");
@@ -624,6 +660,7 @@ async function openCreateEventModal() {
   setNewEventAdvisorId("");
   setNewEventAdvisorSearch("");
   setNewEventType("meeting");
+  setNewEventBusinessArea(businessAreaPermissions.ideasol ? "ideasol" : "ideatermo");
   setNewEventAt("");
   setNewEventConfirmationRequired(false);
   setNewEventConfirmationReminderAt("");
@@ -961,6 +998,7 @@ async function createCalendarEventFromModal() {
       created_by: currentUserId,
       assigned_user_id: newEventAdvisorId,
       microsoft_sync_status: "not_synced",
+      business_area: newEventBusinessArea,
     }));
 
     const { error } = await supabase
@@ -1384,12 +1422,15 @@ async function createCalendarEventFromModal() {
     .slice(0, 20);
 
   const selectedEventClient = clientsForEvent.find((client) => client.id === newEventClientId) || null;
+  const eventBusinessArea = selectedEventClient?.business_area || newEventBusinessArea;
 
   const filteredAdvisorsForEvent = advisorsForEvent
     .filter((advisor) => {
       const searchValue = newEventAdvisorSearch.trim().toLowerCase();
 
       if (searchValue.length < 2) return false;
+      if (eventBusinessArea === "ideatermo" && !advisor.ideatermo) return false;
+      if (eventBusinessArea === "ideasol" && !advisor.ideasol) return false;
 
       return [advisor.display_name, advisor.email, getRoleLabel(advisor.role)]
         .filter(Boolean)
@@ -1838,6 +1879,25 @@ async function createCalendarEventFromModal() {
     </button>
   </div>
 </div>
+                  {newEventType === "vacation" &&
+                    businessAreaPermissions.ideasol &&
+                    businessAreaPermissions.ideatermo && (
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Obszar kalendarza
+                        <select
+                          value={newEventBusinessArea}
+                          onChange={(event) => {
+                            setNewEventBusinessArea(event.target.value as BusinessArea);
+                            setNewEventAdvisorId("");
+                            setNewEventAdvisorSearch("");
+                          }}
+                          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-normal"
+                        >
+                          <option value="ideasol">IdeaSol</option>
+                          <option value="ideatermo">IdeaTermo</option>
+                        </select>
+                      </label>
+                    )}
                   {newEventType !== "vacation" && (
                     <div className="block">
                       <span className="text-sm font-semibold text-slate-700">Klient</span>
@@ -1887,6 +1947,9 @@ async function createCalendarEventFromModal() {
                                   onClick={() => {
                                     setNewEventClientId(client.id);
                                     setNewEventClientSearch(getClientDisplayName(client));
+                                    setNewEventBusinessArea(client.business_area);
+                                    setNewEventAdvisorId("");
+                                    setNewEventAdvisorSearch("");
                                   }}
                                   className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition last:border-b-0 hover:bg-emerald-50"
                                 >

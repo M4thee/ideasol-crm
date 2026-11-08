@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getNearbyLeadCandidates } from "@/lib/leadAssignment";
+import type { BusinessArea } from "@/lib/businessAreas";
 
 export type LeadAssignmentRule = "random" | "postal_code" | "round_robin";
 
@@ -9,6 +10,7 @@ export type LeadIntegration = {
   name: string;
   source_type: string;
   campaign_name: string;
+  business_area: BusinessArea;
   external_form_id: string | null;
   assignment_rule: LeadAssignmentRule;
   tag_names: string[];
@@ -39,7 +41,7 @@ export async function findLeadIntegration(
   let query = supabaseAdmin
     .from("lead_integrations")
     .select(
-      "id,slug,name,source_type,campaign_name,external_form_id,assignment_rule,tag_names,field_mapping,notify_assigned_user,notify_owners"
+      "id,slug,name,source_type,campaign_name,business_area,external_form_id,assignment_rule,tag_names,field_mapping,notify_assigned_user,notify_owners"
     )
     .eq("source_type", sourceType)
     .eq("is_active", true);
@@ -67,11 +69,11 @@ export async function findLeadIntegration(
   return integrations.find((integration) => !integration.external_form_id) ?? null;
 }
 
-async function getEligibleUsers(integrationId: string) {
+async function getEligibleUsers(integration: LeadIntegration) {
   const { data: links, error: linksError } = await supabaseAdmin
     .from("lead_integration_users")
     .select("user_id,position")
-    .eq("integration_id", integrationId)
+    .eq("integration_id", integration.id)
     .order("position", { ascending: true });
 
   if (linksError) {
@@ -82,21 +84,41 @@ async function getEligibleUsers(integrationId: string) {
 
   if (userIds.length === 0) return [];
 
-  const { data: profiles, error: profilesError } = await supabaseAdmin
-    .from("profiles")
-    .select("id,email,display_name,is_active,hidden_from_assignment")
-    .in("id", userIds);
+  const [profilesResult, permissionsResult] = await Promise.all([
+    supabaseAdmin
+      .from("profiles")
+      .select("id,email,display_name,is_active,hidden_from_assignment")
+      .in("id", userIds),
+    supabaseAdmin
+      .from("user_permissions")
+      .select("user_id,ideasol,ideatermo")
+      .in("user_id", userIds),
+  ]);
 
-  if (profilesError) {
-    throw new Error(`Nie udało się pobrać użytkowników integracji: ${profilesError.message}`);
+  if (profilesResult.error) {
+    throw new Error(`Nie udało się pobrać użytkowników integracji: ${profilesResult.error.message}`);
+  }
+  if (permissionsResult.error) {
+    throw new Error(`Nie udało się sprawdzić obszaru uczestników integracji: ${permissionsResult.error.message}`);
   }
 
   const order = new Map(userIds.map((id, index) => [id, index]));
+  const areaUserIds = new Set(
+    (permissionsResult.data ?? [])
+      .filter((permission) =>
+        integration.business_area === "ideatermo"
+          ? permission.ideatermo
+          : permission.ideasol
+      )
+      .map((permission) => permission.user_id)
+  );
 
-  return (profiles ?? [])
+  return (profilesResult.data ?? [])
     .filter(
       (profile) =>
-        profile.is_active !== false && profile.hidden_from_assignment !== true
+        profile.is_active !== false &&
+        profile.hidden_from_assignment !== true &&
+        areaUserIds.has(profile.id)
     )
     .sort((first, second) =>
       (order.get(first.id) ?? Number.MAX_SAFE_INTEGER) -
@@ -118,19 +140,6 @@ async function getProfile(userId: string | null) {
   }
 
   return (data as AssignableLeadUser | null) ?? null;
-}
-
-async function claimRoundRobinUser(integrationId: string) {
-  const { data, error } = await supabaseAdmin.rpc(
-    "claim_next_lead_integration_user",
-    { p_integration_id: integrationId }
-  );
-
-  if (error) {
-    throw new Error(`Nie udało się przydzielić leada na zmianę: ${error.message}`);
-  }
-
-  return getProfile(typeof data === "string" ? data : null);
 }
 
 async function claimRoundRobinCandidate(
@@ -291,7 +300,7 @@ export async function assignLead(
   integration: LeadIntegration,
   input: { postalCode?: string | null }
 ): Promise<LeadAssignmentResult> {
-  const eligibleUsers = await getEligibleUsers(integration.id);
+  const eligibleUsers = await getEligibleUsers(integration);
 
   if (eligibleUsers.length === 0) {
     return {
@@ -331,7 +340,10 @@ export async function assignLead(
     }
 
     return {
-      user: await claimRoundRobinUser(integration.id),
+      user: await claimRoundRobinCandidate(
+        integration.id,
+        eligibleUsers.map((user) => user.id)
+      ),
       requestedRule: "postal_code",
       appliedRule: "round_robin",
       fallbackReason:
@@ -340,7 +352,10 @@ export async function assignLead(
   }
 
   return {
-    user: await claimRoundRobinUser(integration.id),
+    user: await claimRoundRobinCandidate(
+      integration.id,
+      eligibleUsers.map((user) => user.id)
+    ),
     requestedRule: "round_robin",
     appliedRule: "round_robin",
     fallbackReason: null,

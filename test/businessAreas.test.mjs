@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+
+const { normalizeBusinessArea } = await import("../lib/businessAreas.ts");
+
+const source = fs.readFileSync(
+  path.join(process.cwd(), "lib/businessAreas.ts"),
+  "utf8"
+);
+
+test("business areas are explicit and default existing users to IdeaSol", () => {
+  assert.match(source, /BUSINESS_AREAS = \["ideasol", "ideatermo"\]/);
+  assert.match(source, /ideasol: true/);
+  assert.match(source, /ideatermo: false/);
+});
+
+test("PV modules and preaudit are gated independently", () => {
+  assert.match(source, /canUsePvSalesModules[\s\S]*permissions\.ideasol/);
+  assert.match(source, /canUsePreaudit[\s\S]*permissions\.ideatermo/);
+});
+
+test("campaign area is mapped exactly and unknown values stay in IdeaSol", () => {
+  assert.equal(normalizeBusinessArea("ideatermo"), "ideatermo");
+  assert.equal(normalizeBusinessArea("ideasol"), "ideasol");
+  assert.equal(normalizeBusinessArea("unknown"), "ideasol");
+  assert.equal(normalizeBusinessArea(null), "ideasol");
+});
+
+test("migration contains restrictive client and calendar gates", () => {
+  const migrationsDir = path.join(process.cwd(), "supabase/migrations");
+  const migrationName = fs
+    .readdirSync(migrationsDir)
+    .find((name) => name.endsWith("_add_ideatermo_business_area.sql"));
+
+  assert.ok(migrationName);
+  const migration = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
+  assert.match(migration, /clients_business_area_gate/);
+  assert.match(migration, /calendar_events_business_area_gate/);
+  assert.match(migration, /as restrictive/);
+  assert.match(migration, /ideatermo_preaudits/);
+  assert.match(migration, /lead_integrations_business_area_check/);
+  assert.match(migration, /validate_lead_integration_participant_area/);
+  assert.match(
+    migration,
+    /Commercial records belong exclusively to IdeaSol/
+  );
+});
+
+test("lead campaigns persist the selected area and only assign eligible users", () => {
+  const adminRoute = fs.readFileSync(
+    path.join(process.cwd(), "app/api/admin/lead-integrations/route.ts"),
+    "utf8"
+  );
+  const leadService = fs.readFileSync(
+    path.join(process.cwd(), "lib/leadIntegrations.ts"),
+    "utf8"
+  );
+  const metaWebhook = fs.readFileSync(
+    path.join(process.cwd(), "app/api/meta/webhook/route.ts"),
+    "utf8"
+  );
+
+  assert.match(adminRoute, /business_area: input\.businessArea/);
+  assert.match(adminRoute, /findConflictingIntegration/);
+  assert.match(adminRoute, /excludedIntegrationId/);
+  assert.match(leadService, /integration\.business_area === "ideatermo"/);
+  assert.match(
+    metaWebhook,
+    /business_area: normalizeBusinessArea\(integration\.business_area\)/
+  );
+});
+
+test("a source form can belong to only one campaign", () => {
+  const migrationsDir = path.join(process.cwd(), "supabase/migrations");
+  const migrationName = fs
+    .readdirSync(migrationsDir)
+    .find((name) => name.endsWith("_enforce_unique_lead_campaign_form.sql"));
+
+  assert.ok(migrationName);
+  const migration = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
+  assert.match(migration, /create unique index/);
+  assert.match(migration, /source_type, external_form_id/);
+  assert.match(migration, /where external_form_id is not null/);
+});
+
+test("only the IdeaTermo header uses the IdeaTermo logo and Beta badge", () => {
+  const header = fs.readFileSync(
+    path.join(process.cwd(), "app/components/AppHeader.tsx"),
+    "utf8"
+  );
+
+  assert.match(
+    header,
+    /src=\{isIdeaTermoRoute \? "\/brand\/logo_termo\.png" : "\/logo\.png"\}/
+  );
+  assert.match(header, /\{isIdeaTermoRoute \? \([\s\S]*?Beta[\s\S]*?\) : null\}/);
+});

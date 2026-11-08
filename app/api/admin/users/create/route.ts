@@ -29,6 +29,8 @@ export async function POST(request: Request) {
     const role = String(body.role || "seller").trim();
 
     const managerId = body.manager_id || null;
+    const ideaSolAccess = body.ideasol !== false;
+    const ideaTermoAccess = body.ideatermo === true;
 
     if (!email || !password || !displayName) {
       return NextResponse.json(
@@ -79,6 +81,27 @@ export async function POST(request: Request) {
         {
           status: 500,
         }
+      );
+    }
+
+    const { error: permissionsError } = await supabaseAdmin
+      .from("user_permissions")
+      .upsert(
+        {
+          user_id: userId,
+          ideasol: ideaSolAccess,
+          ideatermo: ideaTermoAccess,
+          updated_by: actor.id,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (permissionsError) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      return NextResponse.json(
+        { error: permissionsError.message },
+        { status: 500 }
       );
     }
 

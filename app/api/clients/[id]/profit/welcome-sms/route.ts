@@ -29,13 +29,19 @@ export async function POST(request: Request, context: RouteContext) {
     const { id: clientId } = await context.params;
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
-      .select("id")
+      .select("id,business_area")
       .eq("id", clientId)
       .maybeSingle();
 
     if (clientError) throw clientError;
     if (!client) {
       return NextResponse.json({ ok: false, error: "Nie znaleziono klienta." }, { status: 404 });
+    }
+    if (client.business_area !== "ideasol") {
+      return NextResponse.json(
+        { ok: false, error: "IdeaSol Profit nie jest dostępny dla klientów IdeaTermo." },
+        { status: 403 }
+      );
     }
 
     const profit = getProfitAdminClient();

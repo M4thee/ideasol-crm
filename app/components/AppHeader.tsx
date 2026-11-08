@@ -6,6 +6,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getCrmAuditSessionId, recordCrmAuditEvent } from "@/lib/crmAudit";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  DEFAULT_BUSINESS_AREA_PERMISSIONS,
+  type BusinessAreaPermissions,
+} from "@/lib/businessAreas";
 
 declare global {
   interface Window {
@@ -23,13 +27,14 @@ type AppHeaderProps = {
 };
 
 const navItems = [
-  { href: "/", label: "Pulpit" },
-  { href: "/calendar", label: "Kalendarz" },
-  { href: "/clients", label: "Kontakty" },
-  { href: "/tasks", label: "Zadania" },
-  { href: "/sales", label: "Sprzedaże" },
-  { href: "/reports", label: "Raporty" },
-  { href: "/calculator", label: "Kalkulator" },
+  { href: "/", label: "Pulpit", area: "shared" },
+  { href: "/calendar", label: "Kalendarz", area: "shared" },
+  { href: "/clients", label: "Kontakty", area: "shared" },
+  { href: "/tasks", label: "Zadania", area: "shared" },
+  { href: "/sales", label: "Sprzedaże", area: "ideasol" },
+  { href: "/reports", label: "Raporty", area: "ideasol" },
+  { href: "/calculator", label: "Kalkulator", area: "ideasol" },
+  { href: "/ideatermo/preaudyt", label: "Preaudyt", area: "ideatermo" },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -55,6 +60,7 @@ type HeaderProfile = {
   email: string | null;
   display_name: string | null;
   role: string | null;
+  business_areas: BusinessAreaPermissions;
 };
 
 type SearchResult = {
@@ -206,6 +212,7 @@ function normalizeInfobar(row: InfobarRow): InfobarItem {
 export default function AppHeader({ currentUser }: AppHeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const isIdeaTermoRoute = pathname.startsWith("/ideatermo/preaudyt");
 
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -231,6 +238,15 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
   const lastNotificationSoundRef = useRef<number>(0);
 
   const trimmedSearch = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const visibleNavItems = useMemo(
+    () =>
+      navItems.filter((item) => {
+        if (item.area === "shared") return true;
+        if (item.area === "ideatermo") return profile?.business_areas.ideatermo === true;
+        return profile?.business_areas.ideasol !== false;
+      }),
+    [profile?.business_areas.ideasol, profile?.business_areas.ideatermo]
+  );
 
   const visibleInfobars = infobars.filter(
     (infobar) => !closedInfobarIds.includes(infobar.id)
@@ -959,11 +975,29 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
           console.error("Błąd ładowania profilu w headerze:", profileError);
         }
 
+        const { data: businessAreaData, error: businessAreaError } = await supabase
+          .from("user_permissions")
+          .select("ideasol, ideatermo")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+
+        if (businessAreaError) {
+          console.warn("Migracja IdeaTermo nie jest jeszcze zastosowana", businessAreaError);
+        }
+
+        const businessAreas: BusinessAreaPermissions = businessAreaData
+          ? {
+              ideasol: businessAreaData.ideasol === true,
+              ideatermo: businessAreaData.ideatermo === true,
+            }
+          : DEFAULT_BUSINESS_AREA_PERMISSIONS;
+
         setProfile(
           profileData
             ? {
-                ...(profileData as Omit<HeaderProfile, "email">),
+                ...(profileData as Omit<HeaderProfile, "email" | "business_areas">),
                 email: session.user.email || null,
+                business_areas: businessAreas,
               }
             : {
                 id: session.user.id,
@@ -975,6 +1009,7 @@ export default function AppHeader({ currentUser }: AppHeaderProps) {
                   null,
                 role:
                   session.user.user_metadata?.role || null,
+                business_areas: businessAreas,
               }
         );
       } catch (error) {
@@ -1063,10 +1098,16 @@ const canManageUsers = profile?.role === "admin";
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <img
-              src="/logo.png"
-              alt="IdeaSol CRM"
+              src={isIdeaTermoRoute ? "/brand/logo_termo.png" : "/logo.png"}
+              alt={isIdeaTermoRoute ? "IdeaTermo CRM" : "IdeaSol CRM"}
               className="h-14 w-auto sm:h-[72px]"
             />
+
+            {isIdeaTermoRoute ? (
+              <span className="-ml-1 rounded-full border border-[#418cef]/35 bg-[#418cef]/12 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#1f63bd] dark:border-[#418cef]/60 dark:bg-[#418cef]/25 dark:text-blue-200">
+                Beta
+              </span>
+            ) : null}
 
             <span className="text-base font-bold text-slate-900 sm:text-lg">CRM</span>
           </div>
@@ -1248,8 +1289,9 @@ const canManageUsers = profile?.role === "admin";
 
 
           <nav className="ml-3 hidden h-12 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-sm lg:flex">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isExternal = "external" in item && item.external;
+              const isIdeaTermoItem = item.area === "ideatermo";
 
               const isActive =
                 !isExternal &&
@@ -1271,10 +1313,15 @@ const canManageUsers = profile?.role === "admin";
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={isActive ? "page" : undefined}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    isActive
-                      ? "bg-emerald-500 text-white"
-                      : "text-slate-700 hover:bg-slate-50"
+                    isIdeaTermoItem
+                      ? isActive
+                        ? "bg-termo-500 text-white shadow-sm hover:bg-termo-600"
+                        : "bg-termo-50 text-termo-700 hover:bg-termo-100 hover:text-termo-800"
+                      : isActive
+                        ? "bg-emerald-500 text-white"
+                        : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
                   {item.label}
@@ -1597,7 +1644,8 @@ const canManageUsers = profile?.role === "admin";
           </div>
 
           <nav className="grid gap-2">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
+              const isIdeaTermoItem = item.area === "ideatermo";
               const isActive =
                 item.href === "/"
                   ? pathname === "/"
@@ -1608,10 +1656,15 @@ const canManageUsers = profile?.role === "admin";
                   key={item.href}
                   href={item.href}
                   onClick={() => setMobileMenuOpen(false)}
+                  aria-current={isActive ? "page" : undefined}
                   className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
-                    isActive
-                      ? "bg-emerald-500 text-white"
-                      : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+                    isIdeaTermoItem
+                      ? isActive
+                        ? "bg-termo-500 text-white shadow-sm hover:bg-termo-600"
+                        : "bg-termo-50 text-termo-700 hover:bg-termo-100 hover:text-termo-800"
+                      : isActive
+                        ? "bg-emerald-500 text-white"
+                        : "bg-slate-50 text-slate-700 hover:bg-slate-100"
                   }`}
                 >
                   {item.label}

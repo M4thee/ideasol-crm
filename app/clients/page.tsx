@@ -5,6 +5,13 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
+import {
+  DEFAULT_BUSINESS_AREA_PERMISSIONS,
+  getBusinessAreaLabel,
+  getDefaultBusinessArea,
+  type BusinessArea,
+  type BusinessAreaPermissions,
+} from "@/lib/businessAreas";
 
 const statusStyles: Record<string, string> = {
   "Nowy lead": "bg-blue-100 text-blue-900",
@@ -46,6 +53,7 @@ type Client = {
   tags?: ClientTag[];
   tag_ids?: string[];
   created_at: string;
+  business_area: BusinessArea;
 };
 
 type UserRole =
@@ -295,6 +303,7 @@ function ClientsPageContent() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("Wszystkie");
+  const [businessAreaFilter, setBusinessAreaFilter] = useState<"all" | BusinessArea>("all");
   const [subStatusFilter, setSubStatusFilter] = useState<string>("Wszystkie");
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
@@ -320,6 +329,10 @@ function ClientsPageContent() {
   const [showSelfAssignPrompt, setShowSelfAssignPrompt] = useState(false);
   const [loadingGusData, setLoadingGusData] = useState(false);
   const [clientType, setClientType] = useState<"B2C" | "B2B">("B2C");
+  const [businessAreaPermissions, setBusinessAreaPermissions] =
+    useState<BusinessAreaPermissions>(DEFAULT_BUSINESS_AREA_PERMISSIONS);
+  const [newClientBusinessArea, setNewClientBusinessArea] =
+    useState<BusinessArea>("ideasol");
   const [newClient, setNewClient] = useState({
     full_name: "",
     company_name: "",
@@ -374,6 +387,15 @@ function ClientsPageContent() {
       const parsedFilters = JSON.parse(savedFilters) as Record<string, unknown>;
 
       setStatusFilter(readPersistedString(parsedFilters.statusFilter, "Wszystkie"));
+      const savedBusinessArea = readPersistedString(
+        parsedFilters.businessAreaFilter,
+        "all"
+      );
+      setBusinessAreaFilter(
+        savedBusinessArea === "ideasol" || savedBusinessArea === "ideatermo"
+          ? savedBusinessArea
+          : "all"
+      );
       setSubStatusFilter(readPersistedString(parsedFilters.subStatusFilter, "Wszystkie"));
       setSelectedAdvisorIds(readPersistedStringArray(parsedFilters.selectedAdvisorIds));
       setSelectedClientTypes(readPersistedStringArray(parsedFilters.selectedClientTypes));
@@ -395,6 +417,7 @@ function ClientsPageContent() {
       CLIENTS_FILTERS_STORAGE_KEY,
       JSON.stringify({
         statusFilter,
+        businessAreaFilter,
         subStatusFilter,
         selectedAdvisorIds,
         selectedClientTypes,
@@ -406,6 +429,7 @@ function ClientsPageContent() {
   }, [
     filtersHydrated,
     statusFilter,
+    businessAreaFilter,
     subStatusFilter,
     selectedAdvisorIds,
     selectedClientTypes,
@@ -442,6 +466,7 @@ function ClientsPageContent() {
   }, [
     clients.length,
     statusFilter,
+    businessAreaFilter,
     subStatusFilter,
     selectedAdvisorIds,
     selectedClientTypes,
@@ -474,6 +499,25 @@ function ClientsPageContent() {
 
     const role = (profileData?.role || "seller") as UserRole;
     setCurrentUserRole(role);
+
+    const { data: businessAreaData, error: businessAreaError } = await supabase
+      .from("user_permissions")
+      .select("ideasol, ideatermo")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (businessAreaError) {
+      console.warn("Migracja IdeaTermo nie jest jeszcze zastosowana", businessAreaError);
+    }
+
+    const permissions: BusinessAreaPermissions = businessAreaData
+      ? {
+          ideasol: businessAreaData.ideasol === true,
+          ideatermo: businessAreaData.ideatermo === true,
+        }
+      : DEFAULT_BUSINESS_AREA_PERMISSIONS;
+    setBusinessAreaPermissions(permissions);
+    setNewClientBusinessArea(getDefaultBusinessArea(permissions) || "ideasol");
 
     await Promise.all([loadSellers(), loadAvailableTags()]);
   }
@@ -657,6 +701,7 @@ function ClientsPageContent() {
 
   function clearAllClientFilters() {
     setStatusFilter("Wszystkie");
+    setBusinessAreaFilter("all");
     setSubStatusFilter("Wszystkie");
     setSelectedAdvisorIds([]);
     setSelectedClientTypes([]);
@@ -701,11 +746,13 @@ function ClientsPageContent() {
 
     const CLIENTS_PAGE_SIZE = 500;
 
-    function buildClientsQuery(from: number, to: number) {
+    function buildClientsQuery(from: number, to: number, includeBusinessArea = true) {
       let query = supabase
         .from("clients")
         .select(
-          "id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at"
+          `id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at${
+            includeBusinessArea ? ", business_area" : ""
+          }`
         )
         .order("created_at", { ascending: false })
         .range(from, to);
@@ -747,18 +794,38 @@ function ClientsPageContent() {
 
     const rawClients: ClientRow[] = [];
     let clientsPage = 0;
+    let businessAreaColumnAvailable = true;
 
     while (true) {
       const from = clientsPage * CLIENTS_PAGE_SIZE;
       const to = from + CLIENTS_PAGE_SIZE - 1;
-      const { data: pageData, error: pageError } = await buildClientsQuery(from, to);
+      let { data: pageData, error: pageError } = await buildClientsQuery(
+        from,
+        to,
+        businessAreaColumnAvailable
+      );
+
+      if (pageError?.code === "42703" && businessAreaColumnAvailable) {
+        businessAreaColumnAvailable = false;
+        const legacyPage = await buildClientsQuery(from, to, false);
+        pageData = legacyPage.data;
+        pageError = legacyPage.error;
+      }
 
       if (pageError) {
         console.error("Błąd ładowania klientów:", pageError);
         break;
       }
 
-      const pageClients = (pageData || []) as ClientRow[];
+      const pageClients = (pageData || []).map((client) => {
+        const row = client as unknown as Omit<ClientRow, "business_area"> & {
+          business_area?: BusinessArea;
+        };
+        return {
+          ...row,
+          business_area: row.business_area === "ideatermo" ? "ideatermo" : "ideasol",
+        };
+      }) as ClientRow[];
       rawClients.push(...pageClients);
 
       if (pageClients.length < CLIENTS_PAGE_SIZE) {
@@ -1034,6 +1101,9 @@ function ClientsPageContent() {
   }
 
   function openAddClientModal() {
+    setNewClientBusinessArea(
+      getDefaultBusinessArea(businessAreaPermissions) || "ideasol"
+    );
     setShowAddClientModal(true);
   }
 
@@ -1175,6 +1245,7 @@ function ClientsPageContent() {
           : null,
       status: shouldAssignToCurrentUser ? "Przypisany" : "Nowy lead",
       assigned_user_id: shouldAssignToCurrentUser ? currentUserId : null,
+      business_area: newClientBusinessArea,
     };
 
     const { data: insertedClient, error } = await supabase
@@ -1573,6 +1644,7 @@ function ClientsPageContent() {
 
   const activeClientFiltersCount =
     (statusFilter !== "Wszystkie" ? 1 : 0) +
+    (businessAreaFilter !== "all" ? 1 : 0) +
     (subStatusFilter !== "Wszystkie" ? 1 : 0) +
     activeAdvancedFiltersCount;
 
@@ -1581,6 +1653,8 @@ function ClientsPageContent() {
   const filteredClients = clients.filter((client) => {
     const matchesStatus =
       statusFilter === "Wszystkie" || client.status === statusFilter;
+    const matchesBusinessArea =
+      businessAreaFilter === "all" || client.business_area === businessAreaFilter;
 
     const clientIsNotInterested =
       isNotInterestedStatus(client.status) ||
@@ -1612,6 +1686,7 @@ function ClientsPageContent() {
     const matchesTags = clientMatchesSelectedTags(client);
     return (
       matchesStatus &&
+      matchesBusinessArea &&
       matchesSubStatus &&
       matchesAdvisor &&
       matchesClientType &&
@@ -1727,6 +1802,35 @@ function ClientsPageContent() {
 
         <section className="relative z-40 overflow-visible rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-end gap-4">
+            {businessAreaPermissions.ideasol && businessAreaPermissions.ideatermo && (
+              <div className="w-full">
+                <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
+                  Obszar działalności
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["all", "Wszystkie"],
+                    ["ideasol", "IdeaSol"],
+                    ["ideatermo", "IdeaTermo"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setBusinessAreaFilter(value as "all" | BusinessArea)}
+                      className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                        businessAreaFilter === value
+                          ? value === "ideatermo"
+                            ? "bg-orange-600 text-white"
+                            : "bg-slate-900 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <p className="mb-2 text-xs font-semibold uppercase text-slate-400">
                 Status klienta
@@ -2119,6 +2223,16 @@ function ClientsPageContent() {
                                 {getClientTypeLabel(client)}
                               </span>
 
+                              <span
+                                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${
+                                  client.business_area === "ideatermo"
+                                    ? "border-orange-300 bg-orange-100 text-orange-900"
+                                    : "border-sky-200 bg-sky-50 text-sky-800"
+                                }`}
+                              >
+                                {getBusinessAreaLabel(client.business_area)}
+                              </span>
+
                               <div className="min-w-0">
                                 <div
                                   className={`truncate font-semibold ${isNotInterested ? "text-slate-400" : "text-slate-900"
@@ -2342,6 +2456,40 @@ function ClientsPageContent() {
               >
                 Zamknij
               </button>
+            </div>
+
+            <div className="mb-6 flex flex-wrap gap-3">
+              {businessAreaPermissions.ideasol && (
+                <button
+                  type="button"
+                  onClick={() => setNewClientBusinessArea("ideasol")}
+                  className={`rounded-xl px-5 py-3 text-sm font-bold transition ${
+                    newClientBusinessArea === "ideasol"
+                      ? "bg-sky-700 text-white"
+                      : "bg-sky-50 text-sky-800"
+                  }`}
+                >
+                  IdeaSol
+                </button>
+              )}
+
+              {businessAreaPermissions.ideatermo && (
+                <button
+                  type="button"
+                  onClick={() => setNewClientBusinessArea("ideatermo")}
+                  className={`rounded-xl px-5 py-3 text-sm font-bold transition ${
+                    newClientBusinessArea === "ideatermo"
+                      ? "bg-orange-600 text-white"
+                      : "bg-orange-50 text-orange-900"
+                  }`}
+                >
+                  IdeaTermo
+                </button>
+              )}
+
+              <span className="basis-full text-xs font-semibold text-slate-500">
+                Obszar działalności klienta
+              </span>
             </div>
 
             <div className="mb-6 flex gap-3">

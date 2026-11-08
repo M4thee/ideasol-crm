@@ -44,6 +44,8 @@ type Profile = {
   custom_mode_access: boolean;
   arimr_calculator_access: boolean;
   incognito_sales_access: boolean;
+  ideasol_access: boolean;
+  ideatermo_access: boolean;
   sticky_note_color: StickyNoteColor;
 };
 
@@ -183,6 +185,8 @@ export default function AdminUsersPage() {
     password: "",
     role: "seller" as Role,
     manager_id: "",
+    ideasol_access: true,
+    ideatermo_access: false,
   });
 
   useEffect(() => {
@@ -681,8 +685,15 @@ export default function AdminUsersPage() {
       .from("user_permissions")
       .select("user_id, realization, sms, ideasign_prepare, ideasign_send, custom_mode, arimr_calculator, incognito_sales");
 
+    const { data: businessAreaData, error: businessAreaError } = await supabase
+      .from("user_permissions")
+      .select("user_id, ideasol, ideatermo");
+
     if (permissionsError) {
       console.error("Błąd pobierania uprawnień użytkowników", permissionsError);
+    }
+    if (businessAreaError) {
+      console.warn("Migracja IdeaTermo nie jest jeszcze zastosowana w tej bazie", businessAreaError);
     }
 
     const realizationByUserId = new Map(
@@ -727,6 +738,18 @@ export default function AdminUsersPage() {
         Boolean(permission.incognito_sales),
       ])
     );
+    const ideaSolByUserId = new Map(
+      (businessAreaData || []).map((permission) => [
+        permission.user_id,
+        permission.ideasol !== false,
+      ])
+    );
+    const ideaTermoByUserId = new Map(
+      (businessAreaData || []).map((permission) => [
+        permission.user_id,
+        permission.ideatermo === true,
+      ])
+    );
 
     setProfiles(
       (data ?? []).map((profile) => ({
@@ -738,6 +761,8 @@ export default function AdminUsersPage() {
         custom_mode_access: customModeByUserId.get(profile.id) || false,
         arimr_calculator_access: arimrCalculatorByUserId.get(profile.id) || false,
         incognito_sales_access: incognitoSalesByUserId.get(profile.id) || false,
+        ideasol_access: ideaSolByUserId.get(profile.id) ?? true,
+        ideatermo_access: ideaTermoByUserId.get(profile.id) ?? false,
       })) as Profile[]
     );
     setLoading(false);
@@ -757,6 +782,8 @@ export default function AdminUsersPage() {
       custom_mode_access: customModeAccess,
       arimr_calculator_access: arimrCalculatorAccess,
       incognito_sales_access: incognitoSalesAccess,
+      ideasol_access: ideaSolAccess,
+      ideatermo_access: ideaTermoAccess,
       ...profileValues
     } = values;
     const payload: Partial<Profile> = profileValues;
@@ -799,6 +826,8 @@ export default function AdminUsersPage() {
       customModeAccess !== undefined ||
       arimrCalculatorAccess !== undefined
       || incognitoSalesAccess !== undefined
+      || ideaSolAccess !== undefined
+      || ideaTermoAccess !== undefined
     ) {
       const {
         data: { user },
@@ -831,6 +860,8 @@ export default function AdminUsersPage() {
               false,
             incognito_sales:
               incognitoSalesAccess ?? currentProfile?.incognito_sales_access ?? false,
+            ideasol: ideaSolAccess ?? currentProfile?.ideasol_access ?? true,
+            ideatermo: ideaTermoAccess ?? currentProfile?.ideatermo_access ?? false,
             updated_by: user.id,
             updated_at: new Date().toISOString(),
           },
@@ -1360,6 +1391,26 @@ export default function AdminUsersPage() {
       );
     }
     if (
+      Object.prototype.hasOwnProperty.call(changes, "ideasol_access") &&
+      changes.ideasol_access !== profile.ideasol_access
+    ) {
+      changeLines.push(
+        `Obszar IdeaSol: ${profile.ideasol_access ? "Tak" : "Nie"} → ${
+          changes.ideasol_access ? "Tak" : "Nie"
+        }`
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "ideatermo_access") &&
+      changes.ideatermo_access !== profile.ideatermo_access
+    ) {
+      changeLines.push(
+        `Obszar IdeaTermo: ${profile.ideatermo_access ? "Tak" : "Nie"} → ${
+          changes.ideatermo_access ? "Tak" : "Nie"
+        }`
+      );
+    }
+    if (
       Object.prototype.hasOwnProperty.call(changes, "realization_access") &&
       changes.realization_access !== profile.realization_access
     ) {
@@ -1460,6 +1511,8 @@ export default function AdminUsersPage() {
             newUser.role === "seller"
               ? newUser.manager_id || null
               : null,
+          ideasol: newUser.ideasol_access,
+          ideatermo: newUser.ideatermo_access,
         }),
       });
 
@@ -1477,6 +1530,8 @@ export default function AdminUsersPage() {
         password: "",
         role: "seller",
         manager_id: "",
+        ideasol_access: true,
+        ideatermo_access: false,
       });
 
       await loadProfiles();
@@ -1939,6 +1994,36 @@ export default function AdminUsersPage() {
                   Manager nie dotyczy
                 </div>
               )}
+
+              <label className="flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-bold text-sky-900">
+                <input
+                  type="checkbox"
+                  checked={newUser.ideasol_access}
+                  onChange={(event) =>
+                    setNewUser((current) => ({
+                      ...current,
+                      ideasol_access: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 accent-sky-700"
+                />
+                IdeaSol
+              </label>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-900">
+                <input
+                  type="checkbox"
+                  checked={newUser.ideatermo_access}
+                  onChange={(event) =>
+                    setNewUser((current) => ({
+                      ...current,
+                      ideatermo_access: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 accent-orange-600"
+                />
+                IdeaTermo
+              </label>
             </div>
           </div>
               </>
@@ -2319,6 +2404,8 @@ export default function AdminUsersPage() {
                       </button>
                     </th>
                     <th className="px-4 py-3 text-center">Realizacja</th>
+                    <th className="px-4 py-3 text-center">IdeaSol</th>
+                    <th className="px-4 py-3 text-center">IdeaTermo</th>
                     <th className="px-4 py-3 text-center">Kalkulator ARiMR</th>
                     <th className="px-4 py-3 text-center">Sprzedaż incognito</th>
                     <th className="px-4 py-3">Kolor karteczek</th>
@@ -2443,6 +2530,34 @@ export default function AdminUsersPage() {
                             )
                               ? "Tak"
                               : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-900">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.ideasol_access ?? profile.ideasol_access}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                ideasol_access: event.target.checked,
+                              })}
+                              className="h-4 w-4 rounded border-slate-300 accent-sky-700"
+                            />
+                            {(editedProfile.ideasol_access ?? profile.ideasol_access) ? "Tak" : "Nie"}
+                          </label>
+                        </td>
+
+                        <td className="px-4 py-4 text-center">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-900">
+                            <input
+                              type="checkbox"
+                              checked={editedProfile.ideatermo_access ?? profile.ideatermo_access}
+                              onChange={(event) => updateEditedProfile(profile.id, {
+                                ideatermo_access: event.target.checked,
+                              })}
+                              className="h-4 w-4 rounded border-slate-300 accent-orange-600"
+                            />
+                            {(editedProfile.ideatermo_access ?? profile.ideatermo_access) ? "Tak" : "Nie"}
                           </label>
                         </td>
 
