@@ -21,6 +21,7 @@ import {
   type NormalizedMetaLead,
 } from "@/lib/metaLeadNormalization";
 import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
+import { extractMetaLeadEvents, getMetaLeadPageToken, type MetaLeadEvent } from "@/lib/metaLeadWebhook";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeBusinessArea } from "@/lib/businessAreas";
 
@@ -49,35 +50,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
-type MetaWebhookBody = {
-  entry?: Array<{
-    changes?: Array<{
-      value?: { leadgen_id?: string | number; form_id?: string | number };
-    }>;
-  }>;
-};
-
-function extractLeadEvents(body: unknown) {
-  const events: Array<{ leadgenId: string; formId: string | null }> = [];
-  const webhookBody = body as MetaWebhookBody;
-
-  for (const entry of webhookBody?.entry ?? []) {
-    for (const change of entry?.changes ?? []) {
-      if (change?.value?.leadgen_id) {
-        events.push({
-          leadgenId: String(change.value.leadgen_id),
-          formId: change.value.form_id ? String(change.value.form_id) : null,
-        });
-      }
-    }
-  }
-
-  return events;
-}
-
-async function fetchMetaLead(leadgenId: string) {
-  const accessToken = process.env.META_PAGE_ACCESS_TOKEN;
-  if (!accessToken) throw new Error("Brakuje META_PAGE_ACCESS_TOKEN.");
+async function fetchMetaLead({ leadgenId, pageId }: MetaLeadEvent) {
+  const accessToken = getMetaLeadPageToken(pageId);
 
   const apiVersion = process.env.META_GRAPH_API_VERSION || "v20.0";
   const fields = [
@@ -90,8 +64,8 @@ async function fetchMetaLead(leadgenId: string) {
     "field_data",
   ].join(",");
   const response = await fetch(
-    `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(leadgenId)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(accessToken)}`,
-    { cache: "no-store" }
+    `https://graph.facebook.com/${apiVersion}/${encodeURIComponent(leadgenId)}?fields=${encodeURIComponent(fields)}`,
+    { cache: "no-store", headers: { Authorization: `Bearer ${accessToken}` } }
   );
 
   if (!response.ok) {
@@ -264,7 +238,7 @@ async function sendNotifications(params: {
 }
 
 async function processLeadEvent(
-  event: { leadgenId: string; formId: string | null },
+  event: MetaLeadEvent,
   webhookBody: unknown
 ) {
   const existingClientId = await findExistingClientId(event.leadgenId);
@@ -277,8 +251,8 @@ async function processLeadEvent(
     assignment_status: "received",
   });
 
-  const metaLead = await fetchMetaLead(event.leadgenId);
-  const formId = event.formId || (metaLead?.form_id ? String(metaLead.form_id) : null);
+  const metaLead = await fetchMetaLead(event);
+  const formId = metaLead?.form_id ? String(metaLead.form_id) : event.formId;
   const integration = await findLeadIntegration("meta", { formId });
 
   if (!integration) {
@@ -337,7 +311,7 @@ async function processLeadEvent(
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const leadEvents = extractLeadEvents(body);
+  const leadEvents = extractMetaLeadEvents(body);
   const processedLeads = [];
 
   const { error: logError } = await supabaseAdmin.from("system_logs").insert({
