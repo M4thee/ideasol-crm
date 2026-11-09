@@ -309,12 +309,14 @@ export default function LeadIntegrationsPage() {
                 obsłuży Meta Ads oraz kolejne źródła dodane w przyszłości.
               </p>
             </div>
-            <Link
-              href="/admin/users"
-              className="rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50"
-            >
-              Wróć do panelu
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/admin/postal-codes" className="rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50">
+                Kody pocztowe
+              </Link>
+              <Link href="/admin/users" className="rounded-xl border border-slate-300 px-4 py-2 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50">
+                Wróć do panelu
+              </Link>
+            </div>
           </div>
         </header>
 

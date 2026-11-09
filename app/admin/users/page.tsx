@@ -1869,6 +1869,12 @@ export default function AdminUsersPage() {
                 Integracje leadów
               </Link>
               <Link
+                href="/admin/postal-codes"
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+              >
+                Kody pocztowe
+              </Link>
+              <Link
                 href="/admin/links"
                 className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
               >
