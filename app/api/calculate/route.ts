@@ -414,6 +414,13 @@ export async function POST(request: Request) {
   let authenticatedUserRole: string | null = null;
   let authenticatedUserCanChooseSeller = false;
 
+  if (!accessToken) {
+    return NextResponse.json(
+      { error: "Ten kalkulator wymaga aktywnej sesji użytkownika." },
+      { status: 401 }
+    );
+  }
+
   if (accessToken || customModeRequested || incognitoExplicitlyRequested) {
     if (!supabase) {
       return NextResponse.json(
@@ -443,7 +450,7 @@ export async function POST(request: Request) {
 
     const { data: permission, error: permissionError } = await supabase
       .from("user_permissions")
-      .select("custom_mode, incognito_sales")
+      .select("custom_mode, incognito_sales, ideasol")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -459,6 +466,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Nie udało się sprawdzić uprawnień kalkulatora." },
         { status: 503 }
+      );
+    }
+
+    if (permission?.ideasol !== true) {
+      return NextResponse.json(
+        { error: "Nie masz uprawnień do tej funkcjonalności." },
+        { status: 403 }
       );
     }
 

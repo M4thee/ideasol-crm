@@ -229,6 +229,12 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>("seller");
+  const [ideaSolAccess, setIdeaSolAccess] = useState<{
+    userId: string;
+    allowed: boolean;
+  } | null>(null);
+  const hasIdeaSolAccess =
+    ideaSolAccess?.userId === currentUser?.id && ideaSolAccess?.allowed === true;
   const [managerInfo, setManagerInfo] = useState<{
     display_name: string;
     role: string;
@@ -601,6 +607,40 @@ export default function Home() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const currentUserId = currentUser?.id;
+
+    if (!currentUserId) return;
+
+    async function loadIdeaSolAccess(userId: string) {
+      const { data, error: permissionError } = await supabase
+        .from("user_permissions")
+        .select("ideasol")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (permissionError) {
+        console.error(
+          "Błąd sprawdzania uprawnienia IdeaSol dla szybkiego kalkulatora",
+          permissionError
+        );
+        setIdeaSolAccess({ userId, allowed: false });
+        return;
+      }
+
+      setIdeaSolAccess({ userId, allowed: data?.ideasol === true });
+    }
+
+    void loadIdeaSolAccess(currentUserId);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
 
   useEffect(() => {
@@ -2481,6 +2521,7 @@ export default function Home() {
                 currentUserEmail={currentUser.email}
                 currentUserName={currentUser.user_metadata?.display_name}
                 currentUserRole={currentUserRole}
+                hasIdeaSolAccess={hasIdeaSolAccess}
               />
             )}
             stickyNotesWidget={(

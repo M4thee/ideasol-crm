@@ -255,6 +255,7 @@ type UserProfile = {
   custom_mode_access?: boolean;
   arimr_calculator_access?: boolean;
   incognito_sales_access?: boolean;
+  ideasol_access?: boolean;
 };
 
 type CrmClientOption = {
@@ -596,6 +597,7 @@ export default function Home() {
   const [queuedOfferCount, setQueuedOfferCount] = useState(0);
   const [syncingOfflineOffers, setSyncingOfflineOffers] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [calculatorAccess, setCalculatorAccess] = useState<"checking" | "allowed" | "denied">("checking");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminStatus, setAdminStatus] = useState("");
@@ -989,10 +991,28 @@ export default function Home() {
         setUserProfile(null);
         setCurrentUserEmail("");
         setIncognitoModeEnabled(false);
+        setCalculatorAccess("denied");
         return null;
       }
 
       setCurrentUserEmail(user.email || "");
+
+      const { data: calculatorPermissions, error: calculatorPermissionError } = await supabase
+        .from("user_permissions")
+        .select("custom_mode, arimr_calculator, incognito_sales, ideasol")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (calculatorPermissionError || calculatorPermissions?.ideasol !== true) {
+        if (calculatorPermissionError) {
+          console.warn("Nie udało się sprawdzić uprawnienia IdeaSol", calculatorPermissionError);
+        }
+        setUserProfile(null);
+        setCalculatorAccess("denied");
+        return null;
+      }
+
+      setCalculatorAccess("allowed");
 
       const { data, error } = await supabase
         .from("profiles")
@@ -1006,13 +1026,9 @@ export default function Home() {
       }
 
       if (data) {
-        const { data: calculatorPermissions } = await supabase
-          .from("user_permissions")
-          .select("custom_mode, arimr_calculator, incognito_sales")
-          .eq("user_id", user.id)
-          .maybeSingle();
         const profile = {
           ...data,
+          ideasol_access: true,
           custom_mode_access: calculatorPermissions?.custom_mode === true,
           arimr_calculator_access:
             calculatorPermissions?.arimr_calculator === true,
@@ -1357,6 +1373,8 @@ export default function Home() {
 
     async function loadCalculatorData() {
       const user = await loadCurrentUserProfile();
+
+      if (!user) return;
 
       await Promise.all([
         loadCatalog(),
@@ -3068,6 +3086,28 @@ IdeaSol`;
 
   function markResultForRecalculation() {
     if (result) setResultIsDirty(true);
+  }
+
+  if (calculatorAccess === "checking") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
+        <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Sprawdzanie uprawnień…</p>
+      </main>
+    );
+  }
+
+  if (calculatorAccess === "denied") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
+        <section className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <h1 className="text-2xl font-black text-slate-950 dark:text-white">Brak dostępu</h1>
+          <p className="mt-3 text-slate-600 dark:text-slate-300">Nie masz uprawnień do tej funkcjonalności.</p>
+          <a href="/" className="mt-6 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">
+            Wróć do CRM
+          </a>
+        </section>
+      </main>
+    );
   }
 
 

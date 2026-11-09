@@ -49,6 +49,7 @@ type QuickCalculatorWidgetProps = {
   currentUserEmail?: string;
   currentUserName?: string;
   currentUserRole: string;
+  hasIdeaSolAccess: boolean;
 };
 
 const DEFAULT_POWER_KW = "6";
@@ -76,6 +77,7 @@ export default function QuickCalculatorWidget({
   currentUserEmail,
   currentUserName,
   currentUserRole,
+  hasIdeaSolAccess,
 }: QuickCalculatorWidgetProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -172,6 +174,8 @@ export default function QuickCalculatorWidget({
   }
 
   async function calculatePrice() {
+    if (!hasIdeaSolAccess) return;
+
     if (!catalog || !selectedPanel || panelCount <= 0) {
       setError("Wpisz prawidłową moc instalacji i wybierz panel.");
       return;
@@ -245,9 +249,16 @@ export default function QuickCalculatorWidget({
       >
         <div className="flex min-w-0 items-center gap-3">
           <DashboardWidgetIcon name="calculator" />
-          <h2 className="min-w-0 text-xl font-bold text-slate-900 dark:text-slate-100">
-            Szybki kalkulator
-          </h2>
+          <div className="min-w-0">
+            <h2 className="min-w-0 text-xl font-bold text-slate-900 dark:text-slate-100">
+              Szybki kalkulator
+            </h2>
+            {!hasIdeaSolAccess && (
+              <p className="mt-1 text-sm font-semibold text-slate-600 dark:text-slate-300" role="status">
+                Nie masz uprawnień do tej funkcjonalności.
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -255,7 +266,8 @@ export default function QuickCalculatorWidget({
             <button
               type="button"
               onClick={() => setSettingsOpen((current) => !current)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-300 bg-white text-base text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              disabled={!hasIdeaSolAccess}
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-300 bg-white text-base text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 disabled:opacity-70 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
               aria-label="Ustaw marżę handlowca"
               aria-expanded={settingsOpen}
             >
@@ -276,9 +288,17 @@ export default function QuickCalculatorWidget({
       </div>
 
       {!collapsed && (
-        <div className="border-t border-slate-200 p-5 dark:border-slate-700">
-          {settingsOpen && (
-            <div className="absolute right-5 top-[76px] z-30 w-[calc(100%-2.5rem)] max-w-xs rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-950/15 dark:border-slate-700 dark:bg-slate-900">
+        <div
+          className={`border-t border-slate-200 p-5 dark:border-slate-700 ${
+            hasIdeaSolAccess ? "" : "bg-slate-50/80 dark:bg-slate-950/30"
+          }`}
+          aria-disabled={!hasIdeaSolAccess}
+        >
+          {settingsOpen && hasIdeaSolAccess && (
+            <fieldset
+              disabled={!hasIdeaSolAccess}
+              className="absolute right-5 top-[76px] z-30 w-[calc(100%-2.5rem)] max-w-xs rounded-2xl border border-blue-100 bg-white p-4 shadow-xl shadow-slate-950/15 dark:border-slate-700 dark:bg-slate-900"
+            >
               <label className="dashboard-quick-power block min-w-0">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Marża handlowca netto
@@ -307,13 +327,18 @@ export default function QuickCalculatorWidget({
               >
                 Gotowe
               </button>
-            </div>
+            </fieldset>
           )}
 
           {catalogLoading ? (
             <p className="text-sm text-slate-400">Ładowanie aktualnej bazy sprzętu...</p>
           ) : (
-            <div className="dashboard-quick-controls grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_auto] xl:items-end">
+            <fieldset
+              disabled={!hasIdeaSolAccess}
+              className={`dashboard-quick-controls grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_auto] xl:items-end ${
+                hasIdeaSolAccess ? "" : "cursor-not-allowed opacity-45 grayscale"
+              }`}
+            >
               <label className="block">
                 <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                   Moc instalacji
@@ -395,27 +420,27 @@ export default function QuickCalculatorWidget({
               <button
                 type="button"
                 onClick={calculatePrice}
-                disabled={calculating || catalogLoading || panelCount <= 0}
+                disabled={!hasIdeaSolAccess || calculating || catalogLoading || panelCount <= 0}
                 className="h-[42px] rounded-xl bg-emerald-500 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {calculating ? "Liczenie..." : "Przelicz"}
               </button>
-            </div>
+            </fieldset>
           )}
 
           {selectedPanel && panelCount > 0 && (
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            <p className={`mt-3 text-xs text-slate-500 dark:text-slate-400 ${hasIdeaSolAccess ? "" : "opacity-45 grayscale"}`}>
               Dobór: {panelCount} × {selectedPanel.powerWp} W = {actualPowerKw.toLocaleString("pl-PL")} kWp
             </p>
           )}
 
-          {error && (
+          {hasIdeaSolAccess && error && (
             <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
               {error}
             </p>
           )}
 
-          {result && (
+          {hasIdeaSolAccess && result && (
             <div className="mt-5 grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-800/60 dark:bg-emerald-950/30 sm:grid-cols-[1.2fr_1fr_1fr] sm:items-center">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">

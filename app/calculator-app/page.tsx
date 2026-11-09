@@ -227,6 +227,7 @@ type UserProfile = {
   role: "admin" | "owner" | "seller" | "cc" | null;
   is_active?: boolean | null;
   custom_mode_access?: boolean;
+  ideasol_access?: boolean;
 };
 
 type CrmClientOption = {
@@ -681,6 +682,7 @@ export default function Home() {
   const [isInstalledPwa, setIsInstalledPwa] = useState(false);
   const installRequestedFromUrlRef = useRef(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [calculatorAccess, setCalculatorAccess] = useState<"checking" | "allowed" | "denied">("checking");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminStatus, setAdminStatus] = useState("");
@@ -1350,11 +1352,11 @@ export default function Home() {
     async function loadCurrentUserProfile() {
       const cachedProfile = readCachedCalculatorProfile();
 
-      if (cachedProfile?.profile) {
-        setUserProfile(cachedProfile.profile);
-        setCurrentUserEmail(cachedProfile.email || "");
+      function applyProfile(profile: UserProfile, email: string) {
+        setUserProfile(profile);
+        setCurrentUserEmail(email);
 
-        const defaultMargin = cachedProfile.profile.default_seller_markup;
+        const defaultMargin = profile.default_seller_markup;
 
         if (defaultMargin !== null && defaultMargin !== undefined) {
           const parsedDefaultMargin = Number(defaultMargin);
@@ -1366,7 +1368,12 @@ export default function Home() {
       }
 
       if (!isCalculatorOnline()) {
-        return cachedProfile?.profile
+        const cachedIdeaSolAccess = cachedProfile?.profile?.ideasol_access === true;
+        setCalculatorAccess(cachedIdeaSolAccess ? "allowed" : "denied");
+        if (cachedIdeaSolAccess && cachedProfile?.profile) {
+          applyProfile(cachedProfile.profile, cachedProfile.email || "");
+        }
+        return cachedIdeaSolAccess && cachedProfile?.profile
           ? { id: cachedProfile.profile.id, email: cachedProfile.email }
           : null;
       }
@@ -1379,12 +1386,28 @@ export default function Home() {
         const user = session?.user;
 
         if (!user) {
-          return cachedProfile?.profile
-            ? { id: cachedProfile.profile.id, email: cachedProfile.email }
-            : null;
+          setCalculatorAccess("denied");
+          return null;
         }
 
         setCurrentUserEmail(user.email || "");
+
+        const { data: calculatorPermission, error: calculatorPermissionError } = await supabase
+          .from("user_permissions")
+          .select("custom_mode, ideasol")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (calculatorPermissionError || calculatorPermission?.ideasol !== true) {
+          if (calculatorPermissionError) {
+            console.warn("Nie udało się sprawdzić uprawnienia IdeaSol", calculatorPermissionError);
+          }
+          setUserProfile(null);
+          setCalculatorAccess("denied");
+          return null;
+        }
+
+        setCalculatorAccess("allowed");
 
         const { data, error } = await supabase
           .from("profiles")
@@ -1393,38 +1416,29 @@ export default function Home() {
           .maybeSingle();
 
         if (error) {
+          if (
+            cachedProfile?.profile?.id === user.id &&
+            cachedProfile.profile.ideasol_access === true
+          ) {
+            applyProfile(cachedProfile.profile, user.email || cachedProfile.email || "");
+          }
           return user;
         }
 
         if (data) {
-          const { data: customModePermission } = await supabase
-            .from("user_permissions")
-            .select("custom_mode")
-            .eq("user_id", user.id)
-            .maybeSingle();
           const profile = {
             ...data,
-            custom_mode_access: customModePermission?.custom_mode === true,
+            custom_mode_access: calculatorPermission?.custom_mode === true,
+            ideasol_access: true,
           } as UserProfile;
-          setUserProfile(profile);
+          applyProfile(profile, user.email || "");
           writeCachedCalculatorProfile(profile, user.email || "");
-
-          const defaultMargin = profile.default_seller_markup;
-
-          if (defaultMargin !== null && defaultMargin !== undefined) {
-            const parsedDefaultMargin = Number(defaultMargin);
-
-            if (Number.isFinite(parsedDefaultMargin)) {
-              setSellerMarkup(parsedDefaultMargin);
-            }
-          }
         }
 
         return user;
       } catch {
-        return cachedProfile?.profile
-          ? { id: cachedProfile.profile.id, email: cachedProfile.email }
-          : null;
+        setCalculatorAccess("denied");
+        return null;
       }
     }
 
@@ -1737,6 +1751,8 @@ export default function Home() {
 
     async function loadCalculatorData() {
       const user = await loadCurrentUserProfile();
+
+      if (!user) return;
 
       await Promise.all([
         loadCatalog(),
@@ -2198,17 +2214,15 @@ export default function Home() {
           "Content-Type": "application/json",
         };
 
-        if (calculationPayload.customMode) {
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-          if (!session?.access_token) {
-            throw new Error("Tryb niestandardowy wymaga aktywnej sesji użytkownika.");
-          }
-
-          headers.Authorization = `Bearer ${session.access_token}`;
+        if (!session?.access_token) {
+          throw new Error("Kalkulator wymaga aktywnej sesji użytkownika.");
         }
+
+        headers.Authorization = `Bearer ${session.access_token}`;
 
         const res = await fetch("/api/calculate", {
           method: "POST",
@@ -3482,6 +3496,28 @@ IdeaSol`;
 
   function markResultForRecalculation() {
     if (result) setResultIsDirty(true);
+  }
+
+  if (calculatorAccess === "checking") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
+        <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Sprawdzanie uprawnień…</p>
+      </main>
+    );
+  }
+
+  if (calculatorAccess === "denied") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
+        <section className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <h1 className="text-2xl font-black text-slate-950 dark:text-white">Brak dostępu</h1>
+          <p className="mt-3 text-slate-600 dark:text-slate-300">Nie masz uprawnień do tej funkcjonalności.</p>
+          <a href="/" className="mt-6 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200">
+            Wróć do CRM
+          </a>
+        </section>
+      </main>
+    );
   }
 
   return (

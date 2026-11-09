@@ -23,6 +23,51 @@ test("PV modules and preaudit are gated independently", () => {
   assert.match(source, /canUsePreaudit[\s\S]*permissions\.ideatermo/);
 });
 
+test("quick calculator stays visible but is fully disabled without IdeaSol access", () => {
+  const dashboard = fs.readFileSync(
+    path.join(process.cwd(), "app/page.tsx"),
+    "utf8"
+  );
+  const quickCalculator = fs.readFileSync(
+    path.join(process.cwd(), "app/components/QuickCalculatorWidget.tsx"),
+    "utf8"
+  );
+  const calculateRoute = fs.readFileSync(
+    path.join(process.cwd(), "app/api/calculate/route.ts"),
+    "utf8"
+  );
+
+  assert.match(dashboard, /select\("ideasol"\)/);
+  assert.match(dashboard, /hasIdeaSolAccess=\{hasIdeaSolAccess\}/);
+  assert.match(quickCalculator, /Nie masz uprawnień do tej funkcjonalności\./);
+  assert.match(quickCalculator, /<fieldset[\s\S]*?disabled=\{!hasIdeaSolAccess\}/);
+  assert.match(quickCalculator, /async function calculatePrice\(\) \{\s*if \(!hasIdeaSolAccess\) return;/);
+  assert.match(calculateRoute, /select\("custom_mode, incognito_sales, ideasol"\)/);
+  assert.match(calculateRoute, /if \(!accessToken\)[\s\S]*?status: 401/);
+  assert.match(calculateRoute, /if \(permission\?\.ideasol !== true\)[\s\S]*?status: 403/);
+});
+
+test("direct calculator URLs are denied without IdeaSol access", () => {
+  const calculator = fs.readFileSync(
+    path.join(process.cwd(), "app/calculator/page.tsx"),
+    "utf8"
+  );
+  const calculatorApp = fs.readFileSync(
+    path.join(process.cwd(), "app/calculator-app/page.tsx"),
+    "utf8"
+  );
+
+  for (const page of [calculator, calculatorApp]) {
+    assert.match(page, /calculatorAccess === "denied"/);
+    assert.match(page, /Nie masz uprawnień do tej funkcjonalności\./);
+    assert.match(page, /calculatorPermission[^\n]*\?\.ideasol !== true/);
+  }
+
+  assert.match(calculator, /select\("custom_mode, arimr_calculator, incognito_sales, ideasol"\)/);
+  assert.match(calculatorApp, /select\("custom_mode, ideasol"\)/);
+  assert.match(calculatorApp, /cachedProfile\?\.profile\?\.ideasol_access === true/);
+});
+
 test("campaign area is mapped exactly and unknown values stay in IdeaSol", () => {
   assert.equal(normalizeBusinessArea("ideatermo"), "ideatermo");
   assert.equal(normalizeBusinessArea("ideasol"), "ideasol");
