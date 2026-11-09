@@ -4,6 +4,8 @@ import {
   refreshMicrosoftDelegatedAccessToken,
 } from "@/lib/microsoftGraph";
 import { buildMeetingConfirmationReminderMessage } from "@/lib/meetingConfirmation";
+import type { BusinessArea } from "@/lib/businessAreas";
+import { getMetaLeadBoardChatId } from "@/lib/metaLeadBoardNotification";
 
 export type TeamsCalendarNotificationPayload = {
   userEmail: string;
@@ -562,9 +564,9 @@ export async function sendTeamsDirectMetaLeadNotification(payload: TeamsCalendar
 }
 
 export async function sendTeamsBoardMetaLeadNotification(
-  payload: TeamsChannelNotificationPayload
+  payload: TeamsChannelNotificationPayload & { businessArea: BusinessArea }
 ) {
-  const boardChatId = requireEnv("MICROSOFT_TEAMS_BOARD_CHAT_ID");
+  const boardChatId = getMetaLeadBoardChatId(payload.businessArea);
   const delegatedRefreshToken = process.env.MICROSOFT_DELEGATED_REFRESH_TOKEN;
 
   if (!delegatedRefreshToken) {

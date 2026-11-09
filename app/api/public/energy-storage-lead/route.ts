@@ -701,6 +701,7 @@ async function sendTeamsBoardNotification(
   assignedUser: AssignableLeadUser | null
 ) {
   return sendTeamsBoardMetaLeadNotification({
+    businessArea: "ideasol",
     message: buildTeamsEnergyStorageLeadChannelMessage(
       getTeamsLeadPayload(payload, clientId, assignedUser)
     ),

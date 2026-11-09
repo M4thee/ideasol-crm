@@ -239,6 +239,7 @@ async function sendNotifications(params: {
       {
         target: "board-chat",
         promise: sendTeamsBoardMetaLeadNotification({
+          businessArea: normalizeBusinessArea(integration.business_area),
           message: buildTeamsLeadAssignmentMessage({
             campaignName: integration.campaign_name,
             clientName,
