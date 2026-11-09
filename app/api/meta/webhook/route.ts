@@ -11,7 +11,10 @@ import {
   sendTeamsDirectMetaLeadNotification,
   sendTeamsGeneralMetaLeadNotification,
 } from "@/lib/microsoftTeams";
-import { buildTeamsGeneralMetaLeadMessage } from "@/lib/metaLeadGeneralNotification";
+import {
+  buildTeamsGeneralMetaLeadMessage,
+  shouldSendTeamsGeneralMetaLeadNotification,
+} from "@/lib/metaLeadGeneralNotification";
 import {
   normalizeMetaLead,
   type MetaLeadField,
@@ -200,8 +203,10 @@ async function sendNotifications(params: {
   } = params;
 
   const crmUrl = `${process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl"}/clients/${encodeURIComponent(clientId)}`;
-  const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [
-    {
+  const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [];
+
+  if (shouldSendTeamsGeneralMetaLeadNotification(normalizeBusinessArea(integration.business_area))) {
+    deliveries.push({
       target: "general-chat",
       promise: sendTeamsGeneralMetaLeadNotification({
         message: buildTeamsGeneralMetaLeadMessage({
@@ -210,8 +215,8 @@ async function sendNotifications(params: {
           campaignLeadCount,
         }),
       }),
-    },
-  ];
+    });
+  }
 
   if (integration.notify_assigned_user && assignedUser?.email) {
     deliveries.push(
@@ -303,7 +308,11 @@ async function processLeadEvent(
       : "unassigned_no_participants",
   });
 
-  const campaignLeadCount = await countIntegrationLeads(integration.id);
+  const campaignLeadCount = shouldSendTeamsGeneralMetaLeadNotification(
+    normalizeBusinessArea(integration.business_area)
+  )
+    ? await countIntegrationLeads(integration.id)
+    : null;
 
   await sendNotifications({
     integration,

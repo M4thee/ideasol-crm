@@ -7,6 +7,36 @@ import {
   formatMetaAnswerValue,
 } from "../lib/metaLeadNotes.ts";
 
+test("IdeaTermo zapisuje polskie pytania i wszystkie wybrane prace bez kluczy Meta", () => {
+  const note = buildMetaLeadNote({
+    campaignName: "IdeaTermo | 01 Lokalny wykonawca | 11.2026",
+    answers: [
+      {
+        label: "czy_chcesz_skorzystac_z_termomodernizacji_w_ramach_programu_czyste_powietrze?",
+        value: "yes",
+      },
+      {
+        label: "jaki_zakres_prac_cie_interesuje?",
+        value: "docieplenie, wymiana_stolarki_okiennej, wymiana_drzwi_zewnetrznych, wymiana_nieekologicznego_zrodla_ciepla",
+      },
+      {
+        label: "czy_posiadasz_juz_zaswiadczenie_o_wysokosci_dochodu_wymagane_do_programu?",
+        value: "jestem_w_trakcie_pozyskiwania",
+      },
+    ],
+  });
+  assert.equal(note, [
+    "Nowy lead z Meta Ads",
+    "Kampania: IdeaTermo | 01 Lokalny wykonawca | 11.2026",
+    "",
+    "Odpowiedzi z formularza:",
+    "• Czy chcesz skorzystać z termomodernizacji w ramach programu Czyste Powietrze: Tak",
+    "• Jaki zakres prac Cię interesuje: Docieplenie, Wymiana stolarki okiennej, Wymiana drzwi zewnętrznych, Wymiana nieekologicznego źródła ciepła",
+    "• Czy posiadasz już zaświadczenie o wysokości dochodu wymagane do programu: Jestem w trakcie pozyskiwania",
+  ].join("\n"));
+  assert.doesNotMatch(note, /_/);
+});
+
 test("buduje czytelną notatkę dla formularza ARiMR", () => {
   const note = buildMetaLeadNote({
     campaignName: "ARiMR 2026 | Sadownicy | 65% wsparcia",

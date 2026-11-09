@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildTeamsGeneralMetaLeadMessage } from "../lib/metaLeadGeneralNotification.ts";
+import {
+  buildTeamsGeneralMetaLeadMessage,
+  shouldSendTeamsGeneralMetaLeadNotification,
+} from "../lib/metaLeadGeneralNotification.ts";
+
+test("IdeaTermo nie wysyła licznika na czat ogólny, a IdeaSol zachowuje powiadomienia", () => {
+  assert.equal(shouldSendTeamsGeneralMetaLeadNotification("ideatermo"), false);
+  assert.equal(shouldSendTeamsGeneralMetaLeadNotification("ideasol"), true);
+});
 
 test("buduje anonimowe podsumowanie nowego leada na czat ogólny", () => {
   const message = buildTeamsGeneralMetaLeadMessage({

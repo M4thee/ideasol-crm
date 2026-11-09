@@ -4,6 +4,10 @@ export type TeamsGeneralMetaLeadNotificationPayload = {
   campaignLeadCount: number | null;
 };
 
+export function shouldSendTeamsGeneralMetaLeadNotification(businessArea: string) {
+  return businessArea !== "ideatermo";
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

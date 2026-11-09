@@ -16,6 +16,7 @@ function normalizeLookupValue(value: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
@@ -50,6 +51,16 @@ function humanizeMetaText(value: string, fallback: string) {
 
 export function formatMetaAnswerLabel(label: string) {
   const normalized = normalizeLookupValue(label);
+
+  const termomodernizationQuestions = [
+    "Czy chcesz skorzystać z termomodernizacji w ramach programu Czyste Powietrze",
+    "Jaki zakres prac Cię interesuje",
+    "Czy posiadasz już zaświadczenie o wysokości dochodu wymagane do programu",
+  ];
+  const question = termomodernizationQuestions.find(
+    (candidate) => normalizeLookupValue(candidate) === normalized
+  );
+  if (question) return question;
 
   if (
     normalized.includes("czy_prowadzisz_gospodarstwo") &&
@@ -94,6 +105,22 @@ export function formatMetaAnswerValue(value: string) {
 
   if (normalized === "yes" || normalized === "true") return "Tak";
   if (normalized === "no" || normalized === "false") return "Nie";
+
+  const termomodernizationAnswers = [
+    "Tak",
+    "Nie",
+    "Docieplenie",
+    "Wymiana stolarki okiennej",
+    "Wymiana drzwi zewnętrznych",
+    "Wymiana nieekologicznego źródła ciepła",
+    "Jestem w trakcie pozyskiwania",
+  ];
+  const answers = value.split(/,\s*/).map((part) =>
+    termomodernizationAnswers.find(
+      (candidate) => normalizeLookupValue(candidate) === normalizeLookupValue(part)
+    )
+  );
+  if (answers.every(Boolean)) return answers.join(", ");
 
   return humanizeMetaText(value, "Brak danych");
 }
