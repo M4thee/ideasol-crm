@@ -30,6 +30,10 @@ type AdvisorProfile = {
   email: string | null;
 };
 
+type IdeaSolPermission = {
+  user_id: string;
+};
+
 type PostalCodeLocation = {
   postal_code: string;
   latitude: number;
@@ -344,25 +348,43 @@ async function findAdvisorProfileIdByName(
   supabase: any,
   advisorName: string
 ): Promise<string | null> {
-  const { data: profiles, error } = await supabase
-    .from("profiles")
-    .select("id, display_name, email")
-    .eq("is_active", true);
+  const [profilesResult, permissionsResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, display_name, email")
+      .eq("is_active", true),
+    supabase
+      .from("user_permissions")
+      .select("user_id")
+      .eq("ideasol", true),
+  ]);
 
-  if (error) {
-    console.error("Nie udało się pobrać profili doradców dla OCR:", error);
+  if (profilesResult.error || permissionsResult.error) {
+    console.error(
+      "Nie udało się pobrać doradców IdeaSol dla OCR:",
+      profilesResult.error || permissionsResult.error
+    );
     return null;
   }
 
+  const ideaSolUserIds = new Set(
+    ((permissionsResult.data || []) as IdeaSolPermission[]).map(
+      (permission) => permission.user_id
+    )
+  );
+  const profiles = ((profilesResult.data || []) as AdvisorProfile[]).filter(
+    (profile) => ideaSolUserIds.has(profile.id)
+  );
+
   const normalizedAdvisorName = normalizeNameForMatch(advisorName);
 
-  const exactMatch = (profiles as AdvisorProfile[] | null)?.find(
+  const exactMatch = profiles.find(
     (profile) => normalizeNameForMatch(profile.display_name) === normalizedAdvisorName
   );
 
   if (exactMatch) return exactMatch.id;
 
-  const partialMatch = (profiles as AdvisorProfile[] | null)?.find((profile) => {
+  const partialMatch = profiles.find((profile) => {
     const normalizedDisplayName = normalizeNameForMatch(profile.display_name);
     return (
       normalizedDisplayName.includes(normalizedAdvisorName) ||

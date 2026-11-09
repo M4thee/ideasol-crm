@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
+import { canAssignUserToBusinessArea } from "@/lib/businessAreas";
 
 type ExcelClientRow = {
   Typ?: string;
@@ -45,6 +46,8 @@ type AdvisorOption = {
   display_name: string | null;
   email: string | null;
   role: string | null;
+  ideasol_access?: boolean;
+  ideatermo_access?: boolean;
 };
 
 type ImageImportDraftRow = {
@@ -246,20 +249,23 @@ export default function ImportClientsPage() {
 
   useEffect(() => {
     async function loadAdvisors() {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, display_name, email, role")
-        .eq("is_active", true)
-        .eq("hidden_from_assignment", false)
-        .in("role", ["seller", "manager", "owner"])
-        .order("display_name", { ascending: true });
+      const { data, error } = await supabase.rpc("list_assignable_crm_users");
 
       if (error) {
         console.error("Błąd pobierania doradców:", error);
+        setAdvisors([]);
         return;
       }
 
-      setAdvisors(data || []);
+      setAdvisors(
+        ((data || []) as Omit<AdvisorOption, "email">[])
+          .filter(
+            (advisor) =>
+              ["seller", "manager", "owner"].includes(advisor.role || "") &&
+              canAssignUserToBusinessArea(advisor, "ideasol")
+          )
+          .map((advisor) => ({ ...advisor, email: null }))
+      );
     }
 
     loadAdvisors();

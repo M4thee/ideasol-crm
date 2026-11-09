@@ -16,7 +16,11 @@ import { trackMetaCrmEvent } from "@/lib/metaConversionsClient";
 import ClientContactForm, {
   ContactFormPayload,
 } from "../components/ClientContactForm";
-import { getBusinessAreaLabel, type BusinessArea } from "@/lib/businessAreas";
+import {
+  canAssignUserToBusinessArea,
+  getBusinessAreaLabel,
+  type BusinessArea,
+} from "@/lib/businessAreas";
 
 type Client = {
   id: string;
@@ -163,6 +167,8 @@ type Profile = {
   display_name: string | null;
   email: string | null;
   role: UserRole | null;
+  ideasol_access?: boolean;
+  ideatermo_access?: boolean;
 };
 
 type MentionableUser = {
@@ -835,12 +841,9 @@ export default function ClientPage() {
 
     if (!["owner", "admin"].includes(role || "")) return;
 
-    const { data: usersData, error: usersError } = await supabase
-      .from("profiles")
-      .select("id, display_name, role")
-      .in("role", ["seller", "manager", "owner", "admin", "cc"])
-      .eq("hidden_from_assignment", false)
-      .order("display_name", { ascending: true });
+    const { data: usersData, error: usersError } = await supabase.rpc(
+      "list_assignable_crm_users"
+    );
 
     if (usersError) {
       console.error("Błąd ładowania użytkowników do przypisania:", usersError);
@@ -1354,7 +1357,12 @@ export default function ClientPage() {
   }
 
   function openAssignModal() {
-    setSelectedUserId(client?.assigned_user_id || "");
+    const currentAssigneeIsEligible = assignableUsers.some(
+      (user) =>
+        user.id === client?.assigned_user_id &&
+        Boolean(client && canAssignUserToBusinessArea(user, client.business_area))
+    );
+    setSelectedUserId(currentAssigneeIsEligible ? client?.assigned_user_id || "" : "");
     setShowAssignModal(true);
   }
 
@@ -1448,6 +1456,22 @@ export default function ClientPage() {
   async function assignClientToUser() {
     if (!client || !selectedUserId) {
       alert("Wybierz użytkownika.");
+      return;
+    }
+
+    const selectedUserIsEligible = assignableUsers.some(
+      (user) =>
+        user.id === selectedUserId &&
+        canAssignUserToBusinessArea(user, client.business_area)
+    );
+
+    if (!selectedUserIsEligible) {
+      alert(
+        `Wybrany użytkownik nie ma uprawnień do obszaru ${getBusinessAreaLabel(
+          client.business_area
+        )}.`
+      );
+      setSelectedUserId("");
       return;
     }
 
@@ -1836,6 +1860,9 @@ export default function ClientPage() {
   const reminders = events.filter((event) => event.event_type === "reminder");
   const visibleActivities = activities;
   const lastContactAt = activities.length > 0 ? activities[0].created_at : null;
+  const eligibleAssignableUsers = assignableUsers.filter((user) =>
+    canAssignUserToBusinessArea(user, client.business_area)
+  );
 
   function isReminderDone(status: string | null) {
     return status === "done" || status?.startsWith("Zakończone");
@@ -3029,7 +3056,7 @@ export default function ClientPage() {
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500"
             >
               <option value="">Wybierz użytkownika</option>
-              {assignableUsers.map((user) => {
+              {eligibleAssignableUsers.map((user) => {
                 const roleLabel = getRoleLabel(user.role);
 
                 return (

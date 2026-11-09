@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useCrmResumeRefresh } from "@/lib/useCrmResumeRefresh";
 import {
+  canAssignUserToBusinessArea,
   DEFAULT_BUSINESS_AREA_PERMISSIONS,
   getBusinessAreaLabel,
   getDefaultBusinessArea,
@@ -70,6 +71,8 @@ type Profile = {
   email: string | null;
   role: UserRole | null;
   hidden_from_assignment?: boolean | null;
+  ideasol_access?: boolean;
+  ideatermo_access?: boolean;
 };
 
 type ClientTag = {
@@ -125,13 +128,6 @@ type CalendarEventSummary = {
 type ClientRow = Omit<Client, "assigned_user"> & {
   assigned_user?: Client["assigned_user"] | Client["assigned_user"][] | null;
 };
-
-function isHiddenAssignmentUser(profile: {
-  display_name?: string | null;
-  hidden_from_assignment?: boolean | null;
-}) {
-  return profile.hidden_from_assignment === true;
-}
 
 function isNotInterestedStatus(status?: string | null) {
   return String(status || "")
@@ -538,25 +534,22 @@ function ClientsPageContent() {
     setAvailableTags((data || []) as ClientTag[]);
   }
   async function loadSellers() {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, display_name, role, hidden_from_assignment")
-      .in("role", ["seller", "manager", "owner", "admin", "cc"])
-      .or("hidden_from_assignment.is.null,hidden_from_assignment.eq.false")
-      .order("display_name", { ascending: true });
+    const { data, error } = await supabase.rpc("list_assignable_crm_users");
 
     if (error) {
       console.error("Błąd ładowania użytkowników:", error);
+      setSellers([]);
       return;
     }
 
     setSellers(
-      ((data || []) as Omit<Profile, "email">[])
-        .filter((profile) => !isHiddenAssignmentUser(profile))
-        .map((profile) => ({
+      ((data || []) as Omit<Profile, "email" | "hidden_from_assignment">[]).map(
+        (profile) => ({
           ...profile,
           email: null,
-        }))
+          hidden_from_assignment: false,
+        })
+      )
     );
   }
 
@@ -1092,7 +1085,12 @@ function ClientsPageContent() {
 
   function openAssignModal(client: Client) {
     setAssigningClient(client);
-    setSelectedSellerId(client.assigned_user_id || "");
+    const currentAssigneeIsEligible = sellers.some(
+      (seller) =>
+        seller.id === client.assigned_user_id &&
+        canAssignUserToBusinessArea(seller, client.business_area)
+    );
+    setSelectedSellerId(currentAssigneeIsEligible ? client.assigned_user_id || "" : "");
   }
 
   function closeAssignModal() {
@@ -1301,6 +1299,22 @@ function ClientsPageContent() {
       return;
     }
 
+    const selectedSellerIsEligible = sellers.some(
+      (seller) =>
+        seller.id === selectedSellerId &&
+        canAssignUserToBusinessArea(seller, assigningClient.business_area)
+    );
+
+    if (!selectedSellerIsEligible) {
+      alert(
+        `Wybrany użytkownik nie ma uprawnień do obszaru ${getBusinessAreaLabel(
+          assigningClient.business_area
+        )}.`
+      );
+      setSelectedSellerId("");
+      return;
+    }
+
     setSavingAssignment(true);
 
     const { error } = await supabase
@@ -1371,7 +1385,22 @@ function ClientsPageContent() {
       return;
     }
 
+    const selectedClients = clients.filter((client) =>
+      selectedClientIds.includes(client.id)
+    );
     const selectedSeller = sellers.find((seller) => seller.id === bulkAssignSellerId);
+    const selectedSellerIsEligible =
+      selectedSeller &&
+      selectedClients.every((client) =>
+        canAssignUserToBusinessArea(selectedSeller, client.business_area)
+      );
+
+    if (!selectedSellerIsEligible) {
+      alert("Wybrany użytkownik nie ma uprawnień do wszystkich zaznaczonych obszarów.");
+      setBulkAssignSellerId("");
+      return;
+    }
+
     const selectedSellerName =
       selectedSeller?.display_name || selectedSeller?.email || "wybranego użytkownika";
 
@@ -1747,6 +1776,20 @@ function ClientsPageContent() {
     lost: clients.filter((client) => client.status === "Utracony").length,
   };
 
+  const assignableSellersForCurrentClient = assigningClient
+    ? sellers.filter((seller) =>
+        canAssignUserToBusinessArea(seller, assigningClient.business_area)
+      )
+    : [];
+  const selectedClients = clients.filter((client) =>
+    selectedClientIds.includes(client.id)
+  );
+  const bulkAssignableSellers = sellers.filter((seller) =>
+    selectedClients.every((client) =>
+      canAssignUserToBusinessArea(seller, client.business_area)
+    )
+  );
+
   return (
     <main className="text-slate-900">
       <div className="space-y-6">
@@ -2121,7 +2164,7 @@ function ClientsPageContent() {
                       className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm outline-none focus:border-emerald-500"
                     >
                       <option value="">Wybierz użytkownika</option>
-                      {sellers.map((seller) => (
+                      {bulkAssignableSellers.map((seller) => (
                         <option key={seller.id} value={seller.id}>
                           {seller.display_name || seller.email || seller.id} — {getRoleLabel(seller.role)}
                         </option>
@@ -2360,7 +2403,7 @@ function ClientsPageContent() {
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500"
             >
               <option value="">Wybierz użytkownika</option>
-              {sellers.map((seller) => {
+              {assignableSellersForCurrentClient.map((seller) => {
                 const roleLabel = getRoleLabel(seller.role);
                 const isMe = seller.id === currentUserId;
 

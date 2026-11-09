@@ -7,6 +7,11 @@ export type BusinessAreaPermissions = {
   ideatermo: boolean;
 };
 
+export type BusinessAreaAssignmentAccess = {
+  ideasol_access?: boolean | null;
+  ideatermo_access?: boolean | null;
+};
+
 export const DEFAULT_BUSINESS_AREA_PERMISSIONS: BusinessAreaPermissions = {
   ideasol: true,
   ideatermo: false,
@@ -21,6 +26,15 @@ export function hasBusinessAreaAccess(
   area: BusinessArea
 ) {
   return area === "ideatermo" ? permissions.ideatermo : permissions.ideasol;
+}
+
+export function canAssignUserToBusinessArea(
+  user: BusinessAreaAssignmentAccess,
+  area: BusinessArea
+) {
+  return area === "ideatermo"
+    ? user.ideatermo_access === true
+    : user.ideasol_access === true;
 }
 
 export function getDefaultBusinessArea(

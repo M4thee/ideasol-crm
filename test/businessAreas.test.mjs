@@ -3,7 +3,9 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 
-const { normalizeBusinessArea } = await import("../lib/businessAreas.ts");
+const { canAssignUserToBusinessArea, normalizeBusinessArea } = await import(
+  "../lib/businessAreas.ts"
+);
 
 const source = fs.readFileSync(
   path.join(process.cwd(), "lib/businessAreas.ts"),
@@ -26,6 +28,65 @@ test("campaign area is mapped exactly and unknown values stay in IdeaSol", () =>
   assert.equal(normalizeBusinessArea("ideasol"), "ideasol");
   assert.equal(normalizeBusinessArea("unknown"), "ideasol");
   assert.equal(normalizeBusinessArea(null), "ideasol");
+});
+
+test("assignment targets must have access to the client's business area", () => {
+  const ideaTermoOnlyUser = {
+    ideasol_access: false,
+    ideatermo_access: true,
+  };
+  const bothAreasUser = {
+    ideasol_access: true,
+    ideatermo_access: true,
+  };
+
+  assert.equal(canAssignUserToBusinessArea(ideaTermoOnlyUser, "ideasol"), false);
+  assert.equal(canAssignUserToBusinessArea(ideaTermoOnlyUser, "ideatermo"), true);
+  assert.equal(canAssignUserToBusinessArea(bothAreasUser, "ideasol"), true);
+  assert.equal(canAssignUserToBusinessArea(bothAreasUser, "ideatermo"), true);
+});
+
+test("database prevents cross-area client assignment", () => {
+  const migrationsDir = path.join(process.cwd(), "supabase/migrations");
+  const migrationName = fs
+    .readdirSync(migrationsDir)
+    .find((name) => name.endsWith("_restrict_client_assignment_by_business_area.sql"));
+
+  assert.ok(migrationName);
+  const migration = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
+  assert.match(migration, /list_assignable_crm_users/);
+  assert.match(migration, /enforce_client_assignee_business_area/);
+  assert.match(migration, /clients_enforce_assignee_business_area/);
+  assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/);
+});
+
+test("client assignment lists are filtered by IdeaSol and IdeaTermo access", () => {
+  const clientsPage = fs.readFileSync(
+    path.join(process.cwd(), "app/clients/page.tsx"),
+    "utf8"
+  );
+  const clientCard = fs.readFileSync(
+    path.join(process.cwd(), "app/clients/[id]/page.tsx"),
+    "utf8"
+  );
+  const importPage = fs.readFileSync(
+    path.join(process.cwd(), "app/clients/import/page.tsx"),
+    "utf8"
+  );
+  const imageImportRoute = fs.readFileSync(
+    path.join(process.cwd(), "app/api/clients/import-images/route.ts"),
+    "utf8"
+  );
+
+  for (const page of [clientsPage, clientCard, importPage]) {
+    assert.match(page, /rpc\(\s*"list_assignable_crm_users"\s*\)/);
+    assert.match(page, /canAssignUserToBusinessArea/);
+  }
+
+  assert.match(clientsPage, /bulkAssignableSellers/);
+  assert.match(clientCard, /eligibleAssignableUsers/);
+  assert.match(importPage, /canAssignUserToBusinessArea\(advisor, "ideasol"\)/);
+  assert.match(imageImportRoute, /from\("user_permissions"\)[\s\S]*?eq\("ideasol", true\)/);
 });
 
 test("migration contains restrictive client and calendar gates", () => {
