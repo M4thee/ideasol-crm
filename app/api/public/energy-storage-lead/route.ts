@@ -19,6 +19,10 @@ import {
   sendTeamsBoardMetaLeadNotification,
   sendTeamsDirectEnergyStorageLeadNotification,
 } from "@/lib/microsoftTeams";
+import {
+  findExistingExternalLead,
+  ingestExternalLead,
+} from "@/lib/externalLeadDedup";
 
 export const maxDuration = 120;
 
@@ -254,26 +258,6 @@ function buildCustomerEmailText(payload: LeadPayload) {
   ].join("\n");
 }
 
-async function findRecentLeadByPhone(phone: string) {
-  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  const { data, error } = await supabaseAdmin
-    .from("clients")
-    .select("id")
-    .eq("phone", phone)
-    .eq("lead_source", "kalkulatorME")
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("energy-storage-lead duplicate check failed", error);
-    throw error;
-  }
-
-  return data?.id as string | undefined;
-}
-
 async function insertLeadIntoCrm(
   payload: LeadPayload,
   assignedUser: AssignableLeadUser | null,
@@ -287,46 +271,40 @@ async function insertLeadIntoCrm(
   const email = cleanText(contact.email).toLowerCase() || null;
   const postalCode = cleanText(contact.postalCode);
 
-  const duplicateClientId = await findRecentLeadByPhone(phone);
-
-  if (duplicateClientId) {
-    return { clientId: duplicateClientId, duplicate: true };
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from("clients")
-    .insert({
-      client_type: "B2C",
-      full_name: fullName,
-      contact_person: fullName,
-      phone,
-      contact_phone: phone,
-      email,
-      postal_code: postalCode,
-      status: assignedUser ? "Przypisany" : "Nowy lead",
-      is_lead: true,
-      lead_source: "kalkulatorME",
-      assigned_user_id: assignedUser?.id || null,
-      business_area: businessArea,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data?.id) {
-    console.error("energy-storage-lead CRM insert failed", error);
-    throw error || new Error("CRM insert did not return a client id.");
-  }
-
-  const { error: noteError } = await supabaseAdmin.from("client_notes").insert({
-    client_id: data.id,
-    content: buildAnalysisNote(payload),
+  const ingestedLead = await ingestExternalLead(supabaseAdmin, {
+    source: "www",
+    externalUid: payload.meta?.eventId || null,
+    businessArea,
+    fullName,
+    email,
+    phone,
+    postalCode,
+    clientType: "B2C",
+    assignedUserId: assignedUser?.id || null,
+    note: buildAnalysisNote(payload),
   });
 
-  if (noteError) {
-    console.error("energy-storage-lead note insert failed", noteError);
+  if (!ingestedLead.duplicate) {
+    const { error } = await supabaseAdmin
+      .from("clients")
+      .update({
+        contact_person: fullName,
+        contact_phone: phone,
+        is_lead: true,
+        lead_source: "kalkulatorME",
+      })
+      .eq("id", ingestedLead.clientId);
+
+    if (error) {
+      console.error("energy-storage-lead CRM metadata update failed", error);
+      throw error;
+    }
   }
 
-  return { clientId: data.id as string, duplicate: false };
+  return {
+    clientId: ingestedLead.clientId,
+    duplicate: ingestedLead.duplicate,
+  };
 }
 
 function buildHtmlEmail(payload: LeadPayload) {
@@ -880,14 +858,20 @@ export async function POST(request: Request) {
     const integration = await findLeadIntegration("calculator", {
       slug: "calculator-energy-storage",
     });
-    const assignment = integration
+    const businessArea = integration?.business_area || "ideasol";
+    const existingClient = await findExistingExternalLead(supabaseAdmin, {
+      businessArea,
+      phone,
+      email: cleanText(contact.email),
+    });
+    const assignment = integration && !existingClient
       ? await assignLead(integration, { postalCode })
       : null;
     const assignedUser = assignment?.user || null;
     const crmResult = await insertLeadIntoCrm(
       payload,
       assignedUser,
-      integration?.business_area || "ideasol"
+      businessArea
     );
 
     after(async () => {
