@@ -363,8 +363,21 @@ export default function AdminUsersPage() {
       installation: {
         ...current.installation,
         pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+        pvRates: {
+          upTo10: Number(data.pv_installation_rate_1_10 ?? current.installation.pvRates.upTo10),
+          upTo20: Number(data.pv_installation_rate_10_20 ?? current.installation.pvRates.upTo20),
+          upTo40: Number(data.pv_installation_rate_20_40 ?? current.installation.pvRates.upTo40),
+          upTo100: Number(data.pv_installation_rate_40_100 ?? current.installation.pvRates.upTo100),
+          above100: Number(data.pv_installation_rate_above_100 ?? current.installation.pvRates.above100),
+        },
         storageWithPvNet: Number(data.storage_installation_with_pv_net ?? current.installation.storageWithPvNet),
         storageWithoutPvNet: Number(data.storage_installation_without_pv_net ?? current.installation.storageWithoutPvNet),
+      },
+      roof: {
+        blacha: data.pv_structure_sheet_rate_per_kwp === null ? null : Number(data.pv_structure_sheet_rate_per_kwp),
+        dachowka: data.pv_structure_tile_rate_per_kwp === null ? null : Number(data.pv_structure_tile_rate_per_kwp),
+        papa: data.pv_structure_felt_rate_per_kwp === null ? null : Number(data.pv_structure_felt_rate_per_kwp),
+        grunt: data.pv_structure_ground_rate_per_kwp === null ? null : Number(data.pv_structure_ground_rate_per_kwp),
       },
       placeholders: {
         ...current.placeholders,
@@ -398,7 +411,7 @@ export default function AdminUsersPage() {
     const numberValue = typeof value === "string" ? Number(value.replace(",", ".")) : 0;
     const safeValue = typeof value === "boolean"
       ? value
-      : value.trim() === ""
+      : typeof value === "string" && value.trim() === ""
         ? null
         : Number.isFinite(numberValue) ? numberValue : null;
 
@@ -421,7 +434,11 @@ export default function AdminUsersPage() {
 
   function updateIncognitoPricingValue(path: string[], value: string | boolean) {
     const parsed = typeof value === "string" ? Number(value.replace(",", ".")) : value;
-    const safeValue = typeof parsed === "boolean" ? parsed : Number.isFinite(parsed) ? parsed : 0;
+    const safeValue = typeof parsed === "boolean"
+      ? parsed
+      : typeof value === "string" && value.trim() === ""
+        ? null
+        : Number.isFinite(parsed) ? parsed : null;
     setIncognitoPricingOverrides((current) => {
       const next = structuredClone(current);
       let target = next as unknown as Record<string, unknown>;
@@ -442,6 +459,15 @@ export default function AdminUsersPage() {
       .from("incognito_pricing_settings")
       .update({
         installation_pv_per_kw: pricing.installation.pvPerKwNet,
+        pv_installation_rate_1_10: pricing.installation.pvRates.upTo10,
+        pv_installation_rate_10_20: pricing.installation.pvRates.upTo20,
+        pv_installation_rate_20_40: pricing.installation.pvRates.upTo40,
+        pv_installation_rate_40_100: pricing.installation.pvRates.upTo100,
+        pv_installation_rate_above_100: pricing.installation.pvRates.above100,
+        pv_structure_sheet_rate_per_kwp: pricing.roof.blacha,
+        pv_structure_tile_rate_per_kwp: pricing.roof.dachowka,
+        pv_structure_felt_rate_per_kwp: pricing.roof.papa,
+        pv_structure_ground_rate_per_kwp: pricing.roof.grunt,
         storage_installation_with_pv_net: pricing.installation.storageWithPvNet,
         storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
         protections_cost: pricing.placeholders.protections,
@@ -2287,7 +2313,6 @@ export default function AdminUsersPage() {
                       pricingOverrides={incognitoPricingOverrides}
                       updatePricingValue={updateIncognitoPricingValue}
                       savePricingSettings={saveIncognitoPricingSettings}
-                      pricingMode="incognito"
                       resetPricingOverrides={() => {
                         setIncognitoPricingOverrides(DEFAULT_INCOGNITO_PRICING_OVERRIDES);
                         setAdminStatus("Przywrócono wartości domyślne incognito — zapisz, aby je utrwalić");

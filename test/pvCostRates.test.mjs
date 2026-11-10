@@ -48,24 +48,18 @@ test("brak stawki konstrukcji nie jest zastępowany zgadywaną ceną", () => {
   );
 });
 
-test("kalkulator Incognito zachowuje odrębną historyczną ścieżkę kosztów", () => {
+test("kalkulator Incognito używa tych samych reguł progów i konstrukcji co standardowy", () => {
   const source = fs.readFileSync(
     path.join(process.cwd(), "lib/calculator/calculateOffer.ts"),
     "utf8"
   );
 
-  assert.match(source, /const LEGACY_INCOGNITO_ROOF_COSTS = \{[\s\S]*?grunt: 4500/);
-  assert.match(
-    source,
-    /pricingMode === "incognito"[\s\S]*?pvPowerKw \* pricing\.pvInstallationPerKwNet/
-  );
-  assert.match(
-    source,
-    /pricingMode === "incognito"[\s\S]*?pricing\.roofRates\[roofType\][\s\S]*?: calculatePvStructureCost/
-  );
+  assert.doesNotMatch(source, /LEGACY_INCOGNITO_ROOF_COSTS/);
+  assert.match(source, /pvInstallationNet[\s\S]*?calculatePvInstallationCost\(pvPowerKw, pricing\.pvInstallationRates\)/);
+  assert.match(source, /roofExtraNet[\s\S]*?calculatePvStructureCost\(pvPowerKw, roofType, pricing\.roofRates\)/);
 });
 
-test("migracja zapisuje uzgodnione stawki konstrukcji tylko w cenniku standardowym", () => {
+test("migracje utrzymują niezależne stawki w cenniku standardowym i Incognito", () => {
   const migration = fs.readFileSync(
     path.join(
       process.cwd(),
@@ -79,6 +73,17 @@ test("migracja zapisuje uzgodnione stawki konstrukcji tylko w cenniku standardow
   assert.match(migration, /pv_structure_felt_rate_per_kwp[^\n]*default 325/);
   assert.match(migration, /pv_structure_ground_rate_per_kwp[^\n]*default 325/);
   assert.doesNotMatch(migration, /alter table public\.incognito_pricing_settings/);
+
+  const incognitoMigration = fs.readFileSync(
+    path.join(
+      process.cwd(),
+      "supabase/migrations/20261110103256_incognito_pv_rates.sql"
+    ),
+    "utf8"
+  );
+  assert.match(incognitoMigration, /alter table public\.incognito_pricing_settings/);
+  assert.match(incognitoMigration, /pv_installation_rate_1_10[^\n]*default 600/);
+  assert.match(incognitoMigration, /pv_structure_ground_rate_per_kwp[^\n]*default 325/);
 });
 
 test("panel administratora ładuje i zapisuje nowy format cennika standardowego", () => {
@@ -93,7 +98,7 @@ test("panel administratora ładuje i zapisuje nowy format cennika standardowego"
   assert.match(adminPage, /pv_structure_ground_rate_per_kwp:\s*pricing\.roof\.grunt/);
 });
 
-test("panel Incognito zachowuje historyczne pojedyncze pole montażu PV", () => {
+test("panel Incognito edytuje własne progi montażu i stawki konstrukcji", () => {
   const adminPage = fs.readFileSync(
     path.join(process.cwd(), "app/admin/users/page.tsx"),
     "utf8"
@@ -103,10 +108,9 @@ test("panel Incognito zachowuje historyczne pojedyncze pole montażu PV", () => 
     "utf8"
   );
 
-  assert.match(adminPage, /pricingMode="incognito"/);
-  assert.match(adminPanel, /pricingMode === "standard"/);
-  assert.match(
-    adminPanel,
-    /Montaż PV netto \/ kWp[\s\S]*?\["installation", "pvPerKwNet"\]/
-  );
+  assert.doesNotMatch(adminPage, /pricingMode="incognito"/);
+  assert.match(adminPage, /pv_installation_rate_1_10:\s*pricing\.installation\.pvRates\.upTo10/);
+  assert.match(adminPage, /pv_structure_ground_rate_per_kwp:\s*pricing\.roof\.grunt/);
+  assert.match(adminPanel, /Progi montażu PV — stawka dla całej mocy/);
+  assert.match(adminPanel, /Konstrukcja PV — stawki za kWp/);
 });

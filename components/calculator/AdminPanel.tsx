@@ -71,7 +71,6 @@ type AdminPanelProps = {
   updatePricingValue: (path: string[], value: string | boolean) => void;
   savePricingSettings: (pricing: any) => void;
   resetPricingOverrides: () => void;
-  pricingMode?: "standard" | "incognito";
 };
 
 const EMPTY_PANEL_FORM = {
@@ -154,7 +153,6 @@ export default function AdminPanel({
   updatePricingValue,
   savePricingSettings,
   resetPricingOverrides,
-  pricingMode = "standard",
 }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState("global");
   const [panels, setPanels] = useState<PanelItem[]>([]);
@@ -812,9 +810,7 @@ export default function AdminPanel({
             />
           </label>
 
-          {pricingMode === "standard" ? (
-            <>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-3">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-3">
                 <h3 className="text-sm font-bold text-slate-900">Progi montażu PV — stawka dla całej mocy</h3>
                 <p className="mt-1 text-xs text-slate-600">Po przekroczeniu progu nowa stawka obejmuje wszystkie kWp instalacji, nie tylko nadwyżkę.</p>
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -833,9 +829,9 @@ export default function AdminPanel({
                     </label>
                   ))}
                 </div>
-              </div>
+          </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-3">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-3">
                 <h3 className="text-sm font-bold text-slate-900">Konstrukcja PV — stawki za kWp</h3>
                 <p className="mt-1 text-xs text-slate-600">Koszt konstrukcji = całkowita moc PV × stawka wybranego rodzaju. Puste pole blokuje kalkulację zamiast podstawiać cenę.</p>
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -855,21 +851,7 @@ export default function AdminPanel({
                     </label>
                   ))}
                 </div>
-              </div>
-            </>
-          ) : (
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700">Montaż PV netto / kWp</span>
-              <input
-                type="number"
-                value={pricingOverrides.installation.pvPerKwNet}
-                onChange={(event) =>
-                  updatePricingValue(["installation", "pvPerKwNet"], event.target.value)
-                }
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100 dark:shadow-none"
-              />
-            </label>
-          )}
+          </div>
 
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Montaż ME z PV netto</span>

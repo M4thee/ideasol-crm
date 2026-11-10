@@ -75,10 +75,10 @@ const EMPTY_STORAGE_CATALOG: Record<string, StorageItem> = {
 const LEGACY_PRICING_COLUMNS =
   "installation_pv_per_kw, storage_installation_with_pv_net, storage_installation_without_pv_net, transport_electronics_net, transport_panels_net, protections_cost, wiring_cost, documentation_cost, ems_cost, warranty_percent, marketing_cost, owners_count, pv_small_per_kw, pv_small_fixed, pv_large_per_kw, pv_large_fixed, storage_per_owner, manager_fee_percent, pme_qualify_vat";
 
-const STANDARD_PV_RATE_COLUMNS =
+const PV_RATE_COLUMNS =
   "pv_installation_rate_1_10, pv_installation_rate_10_20, pv_installation_rate_20_40, pv_installation_rate_40_100, pv_installation_rate_above_100, pv_structure_sheet_rate_per_kwp, pv_structure_tile_rate_per_kwp, pv_structure_felt_rate_per_kwp, pv_structure_ground_rate_per_kwp";
 
-const STANDARD_PRICING_COLUMNS = `${LEGACY_PRICING_COLUMNS}, ${STANDARD_PV_RATE_COLUMNS}`;
+const PRICING_COLUMNS = `${LEGACY_PRICING_COLUMNS}, ${PV_RATE_COLUMNS}`;
 
 const ROOF_PLACEHOLDERS = {
   blacha: 1500,
@@ -371,7 +371,7 @@ export async function GET() {
       supabase
         ? supabase
             .from("pricing_settings")
-            .select(STANDARD_PRICING_COLUMNS)
+            .select(PRICING_COLUMNS)
             .eq("id", 1)
             .single()
         : Promise.resolve({ data: null, error: null }),
@@ -556,7 +556,7 @@ export async function POST(request: Request) {
     supabase
       ? supabase
           .from(incognitoPricingActive ? "incognito_pricing_settings" : "pricing_settings")
-          .select(incognitoPricingActive ? LEGACY_PRICING_COLUMNS : STANDARD_PRICING_COLUMNS)
+          .select(PRICING_COLUMNS)
           .eq("id", 1)
           .single()
       : Promise.resolve({ data: null, error: null }),
