@@ -61,6 +61,10 @@ create table if not exists public.client_merge_audit (
   source_client_snapshot jsonb not null,
   relation_counts_before jsonb not null,
   moved_relations jsonb not null default '{}'::jsonb,
+  source_assigned_user_id uuid references public.profiles(id) on delete set null,
+  target_assigned_user_id_before uuid references public.profiles(id) on delete set null,
+  resolved_assigned_user_id uuid references public.profiles(id) on delete set null,
+  advisor_resolution_rule text not null default 'earliest_duplicate_card_with_assigned_advisor',
   decided_by uuid references public.profiles(id) on delete set null,
   decision_note text,
   merged_at timestamptz not null default now()
@@ -273,6 +277,9 @@ declare
   v_counts jsonb := '{}'::jsonb;
   v_moved jsonb := '{}'::jsonb;
   v_audit_id uuid;
+  v_shared_phone_key text;
+  v_shared_email_key text;
+  v_resolved_advisor_id uuid;
 begin
   if p_source_client_id = p_target_client_id then
     raise exception 'Source and target client must differ';
@@ -290,9 +297,50 @@ begin
   select * into v_target from public.clients where id = p_target_client_id for update;
   if not found then raise exception 'Target client % not found', p_target_client_id; end if;
 
-  if v_source.assigned_user_id is distinct from v_target.assigned_user_id then
-    raise exception 'Client advisors differ; explicit reassignment decision is required';
+  if v_source.business_area is distinct from v_target.business_area then
+    raise exception 'Clients belong to different business areas';
   end if;
+
+  v_shared_phone_key := case
+    when v_source.phone_dedup_key is not null
+     and v_source.phone_dedup_key = v_target.phone_dedup_key
+      then v_source.phone_dedup_key
+    else null
+  end;
+  v_shared_email_key := case
+    when v_source.email_dedup_key is not null
+     and v_source.email_dedup_key = v_target.email_dedup_key
+      then v_source.email_dedup_key
+    else null
+  end;
+
+  if v_shared_phone_key is null and v_shared_email_key is null then
+    raise exception 'Clients do not share a normalized phone or email';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'client-merge-identity:' || v_target.business_area || ':' ||
+      coalesce('phone:' || v_shared_phone_key, 'email:' || v_shared_email_key),
+      0
+    )
+  );
+
+  select c.assigned_user_id
+  into v_resolved_advisor_id
+  from public.clients c
+  where c.business_area = v_target.business_area
+    and c.assigned_user_id is not null
+    and (
+      (v_shared_phone_key is not null and c.phone_dedup_key = v_shared_phone_key)
+      or (
+        v_shared_phone_key is null
+        and v_shared_email_key is not null
+        and c.email_dedup_key = v_shared_email_key
+      )
+    )
+  order by c.created_at asc nulls last, c.id
+  limit 1;
 
   if exists (select 1 from public.ideatermo_preaudits where client_id = p_source_client_id)
      and exists (select 1 from public.ideatermo_preaudits where client_id = p_target_client_id) then
@@ -372,16 +420,25 @@ begin
 
   update public.clients
   set updated_at = now(),
-      last_lead_activity_at = greatest(last_lead_activity_at, v_source.last_lead_activity_at)
+      last_lead_activity_at = greatest(last_lead_activity_at, v_source.last_lead_activity_at),
+      assigned_user_id = v_resolved_advisor_id,
+      status = case
+        when v_resolved_advisor_id is not null and status = 'Nowy lead' then 'Przypisany'
+        else status
+      end
   where id = p_target_client_id;
 
   insert into public.client_merge_audit (
     source_client_uid, target_client_uid, target_client_id,
     source_client_snapshot, relation_counts_before, moved_relations,
+    source_assigned_user_id, target_assigned_user_id_before,
+    resolved_assigned_user_id, advisor_resolution_rule,
     decided_by, decision_note
   ) values (
     p_source_client_id::text, p_target_client_id::text, p_target_client_id,
     to_jsonb(v_source), v_counts, v_moved,
+    v_source.assigned_user_id, v_target.assigned_user_id,
+    v_resolved_advisor_id, 'earliest_duplicate_card_with_assigned_advisor',
     p_decided_by, p_decision_note
   ) returning id into v_audit_id;
 
@@ -391,6 +448,7 @@ begin
     'audit_id', v_audit_id,
     'source_client_id', p_source_client_id,
     'target_client_id', p_target_client_id,
+    'resolved_assigned_user_id', v_resolved_advisor_id,
     'moved_relations', v_moved
   );
 end;
