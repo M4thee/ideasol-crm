@@ -80,3 +80,33 @@ test("migracja zapisuje uzgodnione stawki konstrukcji tylko w cenniku standardow
   assert.match(migration, /pv_structure_ground_rate_per_kwp[^\n]*default 325/);
   assert.doesNotMatch(migration, /alter table public\.incognito_pricing_settings/);
 });
+
+test("panel administratora ładuje i zapisuje nowy format cennika standardowego", () => {
+  const adminPage = fs.readFileSync(
+    path.join(process.cwd(), "app/admin/users/page.tsx"),
+    "utf8"
+  );
+
+  assert.match(adminPage, /pvRates:\s*\{[\s\S]*?upTo10:\s*600[\s\S]*?above100:\s*320/);
+  assert.match(adminPage, /roof:\s*\{[\s\S]*?blacha:\s*175[\s\S]*?grunt:\s*325/);
+  assert.match(adminPage, /pv_installation_rate_1_10:\s*pricing\.installation\.pvRates\.upTo10/);
+  assert.match(adminPage, /pv_structure_ground_rate_per_kwp:\s*pricing\.roof\.grunt/);
+});
+
+test("panel Incognito zachowuje historyczne pojedyncze pole montażu PV", () => {
+  const adminPage = fs.readFileSync(
+    path.join(process.cwd(), "app/admin/users/page.tsx"),
+    "utf8"
+  );
+  const adminPanel = fs.readFileSync(
+    path.join(process.cwd(), "components/calculator/AdminPanel.tsx"),
+    "utf8"
+  );
+
+  assert.match(adminPage, /pricingMode="incognito"/);
+  assert.match(adminPanel, /pricingMode === "standard"/);
+  assert.match(
+    adminPanel,
+    /Montaż PV netto \/ kWp[\s\S]*?\["installation", "pvPerKwNet"\]/
+  );
+});
