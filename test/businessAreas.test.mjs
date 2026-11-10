@@ -174,8 +174,10 @@ test("lead campaigns persist the selected area and only assign eligible users", 
   assert.match(leadService, /integration\.business_area === "ideatermo"/);
   assert.match(
     metaWebhook,
-    /business_area: normalizeBusinessArea\(integration\.business_area\)/
+    /const businessArea = normalizeBusinessArea\(integration\.business_area\)/
   );
+  assert.match(metaWebhook, /ingestExternalLead\(supabaseAdmin, \{/);
+  assert.match(metaWebhook, /businessArea,/);
 });
 
 test("a source form can belong to only one campaign", () => {

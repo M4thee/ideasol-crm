@@ -54,6 +54,7 @@ type Client = {
   tags?: ClientTag[];
   tag_ids?: string[];
   created_at: string;
+  last_lead_activity_at?: string | null;
   business_area: BusinessArea;
 };
 
@@ -743,10 +744,11 @@ function ClientsPageContent() {
       let query = supabase
         .from("clients")
         .select(
-          `id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at${
+          `id, public_id, full_name, company_name, client_type, phone, email, city, province, status, lead_source, assigned_user_id, created_at, last_lead_activity_at${
             includeBusinessArea ? ", business_area" : ""
           }`
         )
+        .order("last_lead_activity_at", { ascending: false })
         .order("created_at", { ascending: false })
         .range(from, to);
 
@@ -1074,8 +1076,8 @@ function ClientsPageContent() {
       }
 
       return (
-        new Date(secondClient.created_at).getTime() -
-        new Date(firstClient.created_at).getTime()
+        new Date(secondClient.last_lead_activity_at || secondClient.created_at).getTime() -
+        new Date(firstClient.last_lead_activity_at || firstClient.created_at).getTime()
       );
     });
 

@@ -256,7 +256,7 @@ const OFFLINE_OFFER_QUEUE_KEY = "ideasol:calculator:offlineOfferQueue:v1";
 const OFFLINE_CRM_OFFER_QUEUE_KEY = "ideasol:calculator:offlineCrmOfferQueue:v1";
 const OFFLINE_SYNC_STATUS_KEY = "ideasol:offlineSyncStatus:v1";
 const CALCULATOR_CATALOG_CACHE_KEY = "ideasol:calculator:catalog:v4";
-const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v1";
+const CALCULATOR_PRICING_CACHE_KEY = "ideasol:calculator:pricing:v2";
 const CALCULATOR_PROFILE_CACHE_KEY = "ideasol:calculator:profile:v1";
 
 
@@ -557,14 +557,21 @@ const DEFAULT_PRICING_OVERRIDES = {
   storages: {},
   installation: {
     pvPerKwNet: 500,
+    pvRates: {
+      upTo10: 600,
+      upTo20: 570,
+      upTo40: 480,
+      upTo100: 360,
+      above100: 320,
+    },
     storageWithPvNet: 1500,
     storageWithoutPvNet: 2500,
   },
   roof: {
-    blacha: 1500,
-    dachowka: 2000,
-    papa: 2200,
-    grunt: 4500,
+    blacha: 175 as number | null,
+    dachowka: 260 as number | null,
+    papa: 325 as number | null,
+    grunt: 325 as number | null,
   },
   placeholders: {
     protections: 1500,
@@ -1452,6 +1459,14 @@ export default function Home() {
           installation: {
             ...DEFAULT_PRICING_OVERRIDES.installation,
             ...cachedPricing.installation,
+            pvRates: {
+              ...DEFAULT_PRICING_OVERRIDES.installation.pvRates,
+              ...cachedPricing.installation?.pvRates,
+            },
+          },
+          roof: {
+            ...DEFAULT_PRICING_OVERRIDES.roof,
+            ...cachedPricing.roof,
           },
           placeholders: {
             ...DEFAULT_PRICING_OVERRIDES.placeholders,
@@ -1485,8 +1500,21 @@ export default function Home() {
           installation: {
             ...current.installation,
             pvPerKwNet: Number(data.installation_pv_per_kw ?? current.installation.pvPerKwNet),
+            pvRates: {
+              upTo10: Number(data.pv_installation_rate_1_10 ?? current.installation.pvRates.upTo10),
+              upTo20: Number(data.pv_installation_rate_10_20 ?? current.installation.pvRates.upTo20),
+              upTo40: Number(data.pv_installation_rate_20_40 ?? current.installation.pvRates.upTo40),
+              upTo100: Number(data.pv_installation_rate_40_100 ?? current.installation.pvRates.upTo100),
+              above100: Number(data.pv_installation_rate_above_100 ?? current.installation.pvRates.above100),
+            },
             storageWithPvNet: Number(data.storage_installation_with_pv_net ?? current.installation.storageWithPvNet),
             storageWithoutPvNet: Number(data.storage_installation_without_pv_net ?? current.installation.storageWithoutPvNet),
+          },
+          roof: {
+            blacha: data.pv_structure_sheet_rate_per_kwp === null ? null : Number(data.pv_structure_sheet_rate_per_kwp),
+            dachowka: data.pv_structure_tile_rate_per_kwp === null ? null : Number(data.pv_structure_tile_rate_per_kwp),
+            papa: data.pv_structure_felt_rate_per_kwp === null ? null : Number(data.pv_structure_felt_rate_per_kwp),
+            grunt: data.pv_structure_ground_rate_per_kwp === null ? null : Number(data.pv_structure_ground_rate_per_kwp),
           },
           placeholders: {
             ...current.placeholders,
@@ -1906,7 +1934,9 @@ export default function Home() {
     const numberValue = typeof value === "string" ? Number(value.replace(",", ".")) : 0;
     const safeValue = typeof value === "boolean"
       ? value
-      : Number.isFinite(numberValue) ? numberValue : 0;
+      : value.trim() === ""
+        ? null
+        : Number.isFinite(numberValue) ? numberValue : null;
 
     setPricingOverrides((current) => {
       const next = structuredClone(current);
@@ -1931,6 +1961,15 @@ export default function Home() {
       .from("pricing_settings")
       .update({
         installation_pv_per_kw: pricing.installation.pvPerKwNet,
+        pv_installation_rate_1_10: pricing.installation.pvRates.upTo10,
+        pv_installation_rate_10_20: pricing.installation.pvRates.upTo20,
+        pv_installation_rate_20_40: pricing.installation.pvRates.upTo40,
+        pv_installation_rate_40_100: pricing.installation.pvRates.upTo100,
+        pv_installation_rate_above_100: pricing.installation.pvRates.above100,
+        pv_structure_sheet_rate_per_kwp: pricing.roof.blacha,
+        pv_structure_tile_rate_per_kwp: pricing.roof.dachowka,
+        pv_structure_felt_rate_per_kwp: pricing.roof.papa,
+        pv_structure_ground_rate_per_kwp: pricing.roof.grunt,
         storage_installation_with_pv_net: pricing.installation.storageWithPvNet,
         storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
         protections_cost: pricing.placeholders.protections,

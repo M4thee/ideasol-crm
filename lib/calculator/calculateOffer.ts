@@ -10,6 +10,11 @@ import {
   getExplicitStorageVoltageType,
   rankInvertersForStorage,
 } from "@/lib/calculator/equipmentCompatibility";
+import {
+  calculatePvInstallationCost,
+  calculatePvStructureCost,
+  DEFAULT_PV_INSTALLATION_RATES,
+} from "@/lib/calculator/pvCostRates";
 
 export type CalculatorCatalog = {
   panels: Record<string, PanelItem>;
@@ -27,6 +32,15 @@ export type CalculatorCurrentUser = {
 
 export type CalculatorSettingsRow = {
   installation_pv_per_kw?: number | null;
+  pv_installation_rate_1_10?: number | null;
+  pv_installation_rate_10_20?: number | null;
+  pv_installation_rate_20_40?: number | null;
+  pv_installation_rate_40_100?: number | null;
+  pv_installation_rate_above_100?: number | null;
+  pv_structure_sheet_rate_per_kwp?: number | null;
+  pv_structure_tile_rate_per_kwp?: number | null;
+  pv_structure_felt_rate_per_kwp?: number | null;
+  pv_structure_ground_rate_per_kwp?: number | null;
   storage_installation_with_pv_net?: number | null;
   storage_installation_without_pv_net?: number | null;
   transport_electronics_net?: number | null;
@@ -53,6 +67,7 @@ export type CalculateOfferInput = {
   currentUser?: CalculatorCurrentUser;
   settingsRow?: CalculatorSettingsRow;
   nodeEnv?: string;
+  pricingMode?: "standard" | "incognito";
 };
 export type PanelItem = {
   name: string;
@@ -99,7 +114,7 @@ type AdditionalServiceInput = {
   quantity?: number;
 };
 
-const ROOF_PLACEHOLDERS = {
+const LEGACY_INCOGNITO_ROOF_COSTS = {
   blacha: 1500,
   dachowka: 2000,
   papa: 2200,
@@ -281,7 +296,8 @@ function buildPricing(
     panels: Record<string, PanelItem>;
     inverters: InverterItem[];
     storages: Record<string, StorageItem>;
-  }
+  },
+  pricingMode: "standard" | "incognito"
 ) {
   const overrides = body.pricingOverrides || {};
 
@@ -334,12 +350,14 @@ function buildPricing(
     ])
   ) as Record<string, StorageItem>;
 
-  const roofPlaceholders = {
-    blacha: getNumberOverride(overrides?.roof?.blacha, ROOF_PLACEHOLDERS.blacha),
-    dachowka: getNumberOverride(overrides?.roof?.dachowka, ROOF_PLACEHOLDERS.dachowka),
-    papa: getNumberOverride(overrides?.roof?.papa, ROOF_PLACEHOLDERS.papa),
-    grunt: getNumberOverride(overrides?.roof?.grunt, ROOF_PLACEHOLDERS.grunt),
-  };
+  const roofRates = pricingMode === "incognito"
+    ? LEGACY_INCOGNITO_ROOF_COSTS
+    : {
+        blacha: overrides?.roof?.blacha,
+        dachowka: overrides?.roof?.dachowka,
+        papa: overrides?.roof?.papa,
+        grunt: overrides?.roof?.grunt,
+      };
 
   const placeholders = {
     protections: getNumberOverride(
@@ -410,7 +428,7 @@ function buildPricing(
     panels,
     inverters,
     storages,
-    roofPlaceholders,
+    roofRates,
     placeholders,
     operatorPercent,
     margins,
@@ -418,6 +436,13 @@ function buildPricing(
       overrides?.installation?.pvPerKwNet,
       500
     ),
+    pvInstallationRates: {
+      upTo10: overrides?.installation?.pvRates?.upTo10,
+      upTo20: overrides?.installation?.pvRates?.upTo20,
+      upTo40: overrides?.installation?.pvRates?.upTo40,
+      upTo100: overrides?.installation?.pvRates?.upTo100,
+      above100: overrides?.installation?.pvRates?.above100,
+    },
     storageInstallationWithPvNet: getNumberOverride(
       overrides?.installation?.storageWithPvNet,
       1500
@@ -477,6 +502,7 @@ export function calculateOffer(input: CalculateOfferInput) {
   const currentUser = input.currentUser || null;
   const settingsRow = input.settingsRow || null;
   const nodeEnv = input.nodeEnv || "production";
+  const pricingMode = input.pricingMode || "standard";
 
   let normalizedCustomEquipment = null;
 
@@ -576,7 +602,24 @@ export function calculateOffer(input: CalculateOfferInput) {
           currentOverrides?.installation?.storageWithoutPvNet ??
           2500
         ),
+        pvRates: pricingMode === "standard"
+          ? {
+              upTo10: settingsRow?.pv_installation_rate_1_10 ?? currentOverrides?.installation?.pvRates?.upTo10 ?? DEFAULT_PV_INSTALLATION_RATES.upTo10,
+              upTo20: settingsRow?.pv_installation_rate_10_20 ?? currentOverrides?.installation?.pvRates?.upTo20 ?? DEFAULT_PV_INSTALLATION_RATES.upTo20,
+              upTo40: settingsRow?.pv_installation_rate_20_40 ?? currentOverrides?.installation?.pvRates?.upTo40 ?? DEFAULT_PV_INSTALLATION_RATES.upTo40,
+              upTo100: settingsRow?.pv_installation_rate_40_100 ?? currentOverrides?.installation?.pvRates?.upTo100 ?? DEFAULT_PV_INSTALLATION_RATES.upTo100,
+              above100: settingsRow?.pv_installation_rate_above_100 ?? currentOverrides?.installation?.pvRates?.above100 ?? DEFAULT_PV_INSTALLATION_RATES.above100,
+            }
+          : undefined,
       },
+      roof: pricingMode === "standard"
+        ? {
+            blacha: settingsRow?.pv_structure_sheet_rate_per_kwp ?? currentOverrides?.roof?.blacha ?? null,
+            dachowka: settingsRow?.pv_structure_tile_rate_per_kwp ?? currentOverrides?.roof?.dachowka ?? null,
+            papa: settingsRow?.pv_structure_felt_rate_per_kwp ?? currentOverrides?.roof?.papa ?? null,
+            grunt: settingsRow?.pv_structure_ground_rate_per_kwp ?? currentOverrides?.roof?.grunt ?? null,
+          }
+        : LEGACY_INCOGNITO_ROOF_COSTS,
       placeholders: {
         ...(currentOverrides.placeholders || {}),
         protections: Number(
@@ -665,7 +708,7 @@ export function calculateOffer(input: CalculateOfferInput) {
     },
   };
 
-  const pricing = buildPricing(body, catalog);
+  const pricing = buildPricing(body, catalog, pricingMode);
 
   const offerType = String(body.offerType || "pv_storage");
   const isStorageOnly = offerType === "storage";
@@ -737,7 +780,7 @@ export function calculateOffer(input: CalculateOfferInput) {
   const panelCount = Number(body.panelCount || 0);
   const sellerMarkupNet = Number(body.sellerMarkup || 0);
   const vatRate = Number(body.vatRate || 8);
-  const roofType = body.roofType as keyof typeof pricing.roofPlaceholders;
+  const roofType = body.roofType as keyof typeof pricing.roofRates;
 
   const pvPowerKw = isStorageOnly
     ? 0
@@ -832,11 +875,15 @@ export function calculateOffer(input: CalculateOfferInput) {
   const inverterCostNet = inverter.priceNet;
   const pvInstallationNet = isStorageOnly
     ? 0
-    : pvPowerKw * pricing.pvInstallationPerKwNet;
+    : pricingMode === "incognito"
+      ? pvPowerKw * pricing.pvInstallationPerKwNet
+      : calculatePvInstallationCost(pvPowerKw, pricing.pvInstallationRates);
 
   const roofExtraNet = isStorageOnly
     ? 0
-    : pricing.roofPlaceholders[roofType] ?? 2000;
+    : pricingMode === "incognito"
+      ? pricing.roofRates[roofType]
+      : calculatePvStructureCost(pvPowerKw, roofType, pricing.roofRates);
 
   const storageInstallationNet = hasStorageSelected
     ? isStorageOnly

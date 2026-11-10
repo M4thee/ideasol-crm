@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  findExistingExternalLead,
+  ingestExternalLead,
+} from "@/lib/externalLeadDedup";
 
 export const runtime = "nodejs";
 
@@ -495,79 +499,50 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const assignedAdvisor = postalCode
-      ? await assignAdvisorByPostalCode(supabase, postalCode)
+    const existingClient = await findExistingExternalLead(supabase, {
+      businessArea: "ideasol",
+      phone,
+      email,
+    });
+    const proposedAdvisor = existingClient
+      ? null
+      : postalCode
+        ? await assignAdvisorByPostalCode(supabase, postalCode)
+        : null;
+    const ingestedLead = await ingestExternalLead(supabase, {
+      source: "www",
+      businessArea: "ideasol",
+      fullName,
+      email,
+      phone,
+      postalCode,
+      province,
+      clientType,
+      assignedUserId: proposedAdvisor?.id || null,
+      note,
+    });
+    const clientId = ingestedLead.clientId;
+
+    const { data: actualAdvisorProfile } = ingestedLead.assignedUserId
+      ? await supabase
+          .from("profiles")
+          .select("id,email,display_name,username")
+          .eq("id", ingestedLead.assignedUserId)
+          .maybeSingle()
+      : { data: null };
+    const assignedAdvisor: AssignedAdvisor | null = actualAdvisorProfile
+      ? {
+          id: actualAdvisorProfile.id,
+          email: actualAdvisorProfile.email || null,
+          displayName:
+            actualAdvisorProfile.display_name ||
+            actualAdvisorProfile.username ||
+            "Przypisany doradca",
+          distanceKm: proposedAdvisor?.id === actualAdvisorProfile.id
+            ? proposedAdvisor?.distanceKm
+            : undefined,
+        }
       : null;
-
-    const duplicateFilters = [
-      phone ? `phone.eq.${phone}` : "",
-      email ? `email.eq.${email}` : "",
-    ].filter(Boolean);
-
-    let existingClientId: string | null = null;
-    let duplicateClient: { id?: string; assigned_user_id?: string; status?: string } | null = null;
-
-    if (duplicateFilters.length > 0) {
-      const { data, error: duplicateError } = await supabase
-        .from("clients")
-        .select("id, assigned_user_id, status")
-        .or(duplicateFilters.join(","))
-        .maybeSingle();
-
-      if (duplicateError) {
-        console.error("WWW lead duplicate check failed", duplicateError);
-      }
-
-      duplicateClient = data || null;
-      existingClientId = duplicateClient?.id || null;
-    }
-
-    let clientId = existingClientId;
-
-    const existingClientNeedsAssignment =
-      Boolean(existingClientId) && assignedAdvisor && !duplicateClient?.assigned_user_id;
-
-    if (existingClientNeedsAssignment) {
-      const { error: assignmentError } = await supabase
-        .from("clients")
-        .update({
-          assigned_user_id: assignedAdvisor.id,
-          status: "Przypisany",
-        })
-        .eq("id", existingClientId);
-
-      if (assignmentError) {
-        console.error("WWW lead existing client assignment failed", assignmentError);
-      }
-    }
-
-    if (!clientId) {
-      const { data: createdClient, error: clientError } = await supabase
-        .from("clients")
-        .insert({
-          full_name: fullName || "Lead WWW",
-          email: email || null,
-          phone: phone || null,
-          postal_code: postalCode || null,
-          province: province || null,
-          client_type: clientType,
-          status: assignedAdvisor ? "Przypisany" : "Nowy lead",
-          lead_source: "WWW",
-          assigned_user_id: assignedAdvisor?.id || null,
-        })
-        .select("id")
-        .single();
-
-      if (clientError) {
-        console.error("WWW lead client insert failed", clientError);
-        return NextResponse.json(
-          { error: "Client insert failed", details: clientError.message },
-          { status: 500 }
-        );
-      }
-
-      clientId = createdClient.id;
-    }
 
     const { data: tagData, error: tagError } = await supabase
       .from("client_tags")
@@ -604,30 +579,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (clientId && !existingClientId && note) {
-      const { error: noteError } = await supabase
-        .from("client_notes")
-        .insert({
-          client_id: clientId,
-          content: note,
-          created_by: null,
-        });
-
-      if (noteError) {
-        console.error("WWW lead note insert failed", noteError);
-      }
-    }
-
     // Teams notification temporarily disabled for stabilization.
 
     return NextResponse.json(
       {
         ok: true,
         client_id: clientId,
-        duplicate: Boolean(existingClientId),
+        duplicate: ingestedLead.duplicate,
+        duplicate_matched_by: ingestedLead.matchedBy,
         postal_code_received: postalCode || null,
         client_type: clientType,
-        assigned_user_id: assignedAdvisor?.id || null,
+        assigned_user_id: ingestedLead.assignedUserId,
         assigned_advisor: assignedAdvisor?.displayName || null,
         assigned_distance_km:
           typeof assignedAdvisor?.distanceKm === "number"
@@ -635,7 +597,7 @@ export async function POST(request: NextRequest) {
             : null,
         teams_disabled_temporarily: true,
       },
-      { status: existingClientId ? 200 : 201 }
+      { status: ingestedLead.duplicate ? 200 : 201 }
     );
   } catch (error) {
     console.error("WWW lead endpoint error", error);

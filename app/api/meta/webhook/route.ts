@@ -6,6 +6,7 @@ import {
   type LeadIntegration,
 } from "@/lib/leadIntegrations";
 import {
+  buildTeamsDuplicateLeadMessage,
   buildTeamsLeadAssignmentMessage,
   sendTeamsBoardMetaLeadNotification,
   sendTeamsDirectMetaLeadNotification,
@@ -18,12 +19,15 @@ import {
 import {
   normalizeMetaLead,
   type MetaLeadField,
-  type NormalizedMetaLead,
 } from "@/lib/metaLeadNormalization";
 import { buildMetaLeadNote } from "@/lib/metaLeadNotes";
 import { extractMetaLeadEvents, getMetaLeadPageToken, type MetaLeadEvent } from "@/lib/metaLeadWebhook";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeBusinessArea } from "@/lib/businessAreas";
+import {
+  findExistingExternalLead,
+  ingestExternalLead,
+} from "@/lib/externalLeadDedup";
 
 export const runtime = "nodejs";
 
@@ -116,47 +120,6 @@ async function countIntegrationLeads(integrationId: string) {
   return count ?? 0;
 }
 
-async function createClient(
-  lead: NormalizedMetaLead,
-  integration: LeadIntegration,
-  assignedUserId: string | null
-) {
-  const notes = buildMetaLeadNote({
-    campaignName: integration.campaign_name,
-    answers: lead.extraAnswers,
-  });
-
-  const { data, error } = await supabaseAdmin
-    .from("clients")
-    .insert({
-      full_name: lead.fullName || "Lead Meta Ads",
-      email: lead.email,
-      phone: lead.phone,
-      postal_code: lead.postalCode,
-      status: assignedUserId ? "Przypisany" : "Nowy lead",
-      assigned_user_id: assignedUserId,
-      lead_source: "Meta Ads",
-      business_area: normalizeBusinessArea(integration.business_area),
-    })
-    .select("id")
-    .single();
-
-  if (error) throw error;
-
-  if (notes) {
-    const { error: noteError } = await supabaseAdmin.from("client_notes").insert({
-      client_id: data.id,
-      content: notes,
-      created_by: null,
-    });
-
-    if (noteError) throw noteError;
-  }
-
-  await attachIntegrationTags(data.id, integration.tag_names);
-  return String(data.id);
-}
-
 async function sendNotifications(params: {
   integration: LeadIntegration;
   clientId: string;
@@ -165,6 +128,7 @@ async function sendNotifications(params: {
   metaCampaignName: string;
   metaAdName: string;
   campaignLeadCount: number | null;
+  duplicate: boolean;
 }) {
   const {
     integration,
@@ -174,12 +138,13 @@ async function sendNotifications(params: {
     metaCampaignName,
     metaAdName,
     campaignLeadCount,
+    duplicate,
   } = params;
 
   const crmUrl = `${process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl"}/clients/${encodeURIComponent(clientId)}`;
   const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [];
 
-  if (shouldSendTeamsGeneralMetaLeadNotification(normalizeBusinessArea(integration.business_area))) {
+  if (!duplicate && shouldSendTeamsGeneralMetaLeadNotification(normalizeBusinessArea(integration.business_area))) {
     deliveries.push({
       target: "general-chat",
       promise: sendTeamsGeneralMetaLeadNotification({
@@ -198,11 +163,17 @@ async function sendNotifications(params: {
         target: "assigned-user",
         promise: sendTeamsDirectMetaLeadNotification({
           userEmail: assignedUser.email,
-          message: buildTeamsLeadAssignmentMessage({
-            campaignName: integration.campaign_name,
-            clientName,
-            crmUrl,
-          }),
+          message: duplicate
+            ? buildTeamsDuplicateLeadMessage({
+                campaignName: integration.campaign_name,
+                clientName,
+                crmUrl,
+              })
+            : buildTeamsLeadAssignmentMessage({
+                campaignName: integration.campaign_name,
+                clientName,
+                crmUrl,
+              }),
         }),
       }
     );
@@ -214,13 +185,21 @@ async function sendNotifications(params: {
         target: "board-chat",
         promise: sendTeamsBoardMetaLeadNotification({
           businessArea: normalizeBusinessArea(integration.business_area),
-          message: buildTeamsLeadAssignmentMessage({
-            campaignName: integration.campaign_name,
-            clientName,
-            crmUrl,
-            assignedUserName: assignedUser.display_name || assignedUser.email,
-            recipientIsOwner: true,
-          }),
+          message: duplicate
+            ? buildTeamsDuplicateLeadMessage({
+                campaignName: integration.campaign_name,
+                clientName,
+                crmUrl,
+                assignedUserName: assignedUser.display_name || assignedUser.email,
+                recipientIsOwner: true,
+              })
+            : buildTeamsLeadAssignmentMessage({
+                campaignName: integration.campaign_name,
+                clientName,
+                crmUrl,
+                assignedUserName: assignedUser.display_name || assignedUser.email,
+                recipientIsOwner: true,
+              }),
         }),
       }
     );
@@ -269,18 +248,57 @@ async function processLeadEvent(
   );
   if (!lead.phone) throw new Error("Lead Meta nie zawiera numeru telefonu.");
 
-  const assignment = await assignLead(integration, { postalCode: lead.postalCode });
-  const clientId = await createClient(lead, integration, assignment.user?.id ?? null);
+  const businessArea = normalizeBusinessArea(integration.business_area);
+  const existingClient = await findExistingExternalLead(supabaseAdmin, {
+    businessArea,
+    phone: lead.phone,
+    email: lead.email,
+  });
+  const assignment = existingClient
+    ? {
+        user: null,
+        requestedRule: integration.assignment_rule,
+        appliedRule: "none" as const,
+        fallbackReason: null,
+      }
+    : await assignLead(integration, { postalCode: lead.postalCode });
+  const note = buildMetaLeadNote({
+    campaignName: integration.campaign_name,
+    answers: lead.extraAnswers,
+  });
+  const ingestedLead = await ingestExternalLead(supabaseAdmin, {
+    source: "meta",
+    externalUid: event.leadgenId,
+    businessArea,
+    fullName: lead.fullName,
+    email: lead.email,
+    phone: lead.phone,
+    postalCode: lead.postalCode,
+    assignedUserId: assignment.user?.id ?? null,
+    note,
+  });
+  const clientId = ingestedLead.clientId;
+  await attachIntegrationTags(clientId, integration.tag_names);
+
+  const { data: assignedProfile } = ingestedLead.assignedUserId
+    ? await supabaseAdmin
+        .from("profiles")
+        .select("id,email,display_name")
+        .eq("id", ingestedLead.assignedUserId)
+        .maybeSingle()
+    : { data: null };
 
   await saveMetaLead(event.leadgenId, {
     integration_id: integration.id,
     client_id: clientId,
-    assigned_user_id: assignment.user?.id ?? null,
+    assigned_user_id: ingestedLead.assignedUserId,
     raw_payload: metaLead,
     form_answers: lead,
-    assignment_status: assignment.user
-      ? `assigned_${assignment.appliedRule}`
-      : "unassigned_no_participants",
+    assignment_status: ingestedLead.duplicate
+      ? `duplicate_${ingestedLead.matchedBy}`
+      : assignment.user
+        ? `assigned_${assignment.appliedRule}`
+        : "unassigned_no_participants",
   });
 
   const campaignLeadCount = shouldSendTeamsGeneralMetaLeadNotification(
@@ -293,19 +311,22 @@ async function processLeadEvent(
     integration,
     clientId,
     clientName: lead.fullName || "Lead Meta Ads",
-    assignedUser: assignment.user,
+    assignedUser: assignedProfile,
     metaCampaignName: metaLead.campaign_name?.trim() || integration.campaign_name,
     metaAdName: metaLead.ad_name?.trim() || "brak danych",
     campaignLeadCount,
+    duplicate: ingestedLead.duplicate,
   });
 
   return {
     leadgenId: event.leadgenId,
     clientId,
     integration: integration.slug,
-    assignedUserId: assignment.user?.id ?? null,
+    assignedUserId: ingestedLead.assignedUserId,
     assignmentRule: assignment.appliedRule,
     assignmentFallback: assignment.fallbackReason,
+    duplicate: ingestedLead.duplicate,
+    duplicateMatchedBy: ingestedLead.matchedBy,
   };
 }
 

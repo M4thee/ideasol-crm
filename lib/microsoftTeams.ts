@@ -88,6 +88,14 @@ export type TeamsLeadAssignmentNotificationPayload = {
   recipientIsOwner?: boolean;
 };
 
+export type TeamsDuplicateLeadNotificationPayload = {
+  campaignName: string;
+  clientName: string;
+  crmUrl: string;
+  assignedUserName?: string | null;
+  recipientIsOwner?: boolean;
+};
+
 export type TeamsEnergyStorageLeadNotificationPayload = {
   advisorName?: string | null;
   clientName: string;
@@ -187,6 +195,32 @@ export function buildTeamsLeadAssignmentMessage(
     "",
     `Do obsługi został Ci przypisany nowy lead z kampanii <strong>${displayValue(payload.campaignName)}</strong>.`,
     "Niezwłocznie skontaktuj się z klientem.",
+    "",
+    `Klient: ${clientLink}`,
+  ].join("\n");
+}
+
+export function buildTeamsDuplicateLeadMessage(
+  payload: TeamsDuplicateLeadNotificationPayload
+) {
+  const clientLink = `<a href="${escapeHtml(payload.crmUrl)}">${displayValue(payload.clientName)}</a>`;
+
+  if (payload.recipientIsOwner) {
+    return [
+      "<strong>♻️ Ponowne zgłoszenie — wykryto duplikat</strong>",
+      "",
+      `Klient z kampanii <strong>${displayValue(payload.campaignName)}</strong> już istnieje w CRM u użytkownika <strong>${displayValue(payload.assignedUserName)}</strong>.`,
+      "Nie utworzono nowej karty; ankietę dopisano do istniejącej historii.",
+      "",
+      clientLink,
+    ].join("\n");
+  }
+
+  return [
+    "<strong>♻️ Ponowne zgłoszenie — wykryto duplikat</strong>",
+    "",
+    `Istniejący klient ponownie przesłał formularz kampanii <strong>${displayValue(payload.campaignName)}</strong>.`,
+    "Nie utworzono nowej karty; ankietę dopisano do historii, a klient wrócił na górę listy.",
     "",
     `Klient: ${clientLink}`,
   ].join("\n");

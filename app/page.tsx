@@ -684,9 +684,9 @@ export default function Home() {
     let query = supabase
       .from("clients")
       .select(
-        "id, full_name, company_name, contact_person, nip, phone, email, street, building_number, postal_code, city, client_type, status, assigned_user_id"
+        "id, full_name, company_name, contact_person, nip, phone, email, street, building_number, postal_code, city, client_type, status, assigned_user_id, last_lead_activity_at"
       )
-      .order("created_at", { ascending: false })
+      .order("last_lead_activity_at", { ascending: false })
       .limit(100);
 
     if (visibleUserIds && visibleUserIds.length > 0) {
