@@ -10,12 +10,7 @@ import {
   buildTeamsLeadAssignmentMessage,
   sendTeamsBoardMetaLeadNotification,
   sendTeamsDirectMetaLeadNotification,
-  sendTeamsGeneralMetaLeadNotification,
 } from "@/lib/microsoftTeams";
-import {
-  buildTeamsGeneralMetaLeadMessage,
-  shouldSendTeamsGeneralMetaLeadNotification,
-} from "@/lib/metaLeadGeneralNotification";
 import {
   normalizeMetaLead,
   type MetaLeadField,
@@ -105,29 +100,11 @@ async function findExistingClientId(leadgenId: string) {
   return data?.client_id ? String(data.client_id) : null;
 }
 
-async function countIntegrationLeads(integrationId: string) {
-  const { count, error } = await supabaseAdmin
-    .from("meta_leads")
-    .select("meta_lead_id", { count: "exact", head: true })
-    .eq("integration_id", integrationId)
-    .not("client_id", "is", null);
-
-  if (error) {
-    console.error("[META WEBHOOK] campaign lead count", error);
-    return null;
-  }
-
-  return count ?? 0;
-}
-
 async function sendNotifications(params: {
   integration: LeadIntegration;
   clientId: string;
   clientName: string;
   assignedUser: { id: string; email: string | null; display_name: string | null } | null;
-  metaCampaignName: string;
-  metaAdName: string;
-  campaignLeadCount: number | null;
   duplicate: boolean;
 }) {
   const {
@@ -135,27 +112,11 @@ async function sendNotifications(params: {
     clientId,
     clientName,
     assignedUser,
-    metaCampaignName,
-    metaAdName,
-    campaignLeadCount,
     duplicate,
   } = params;
 
   const crmUrl = `${process.env.NEXT_PUBLIC_CRM_URL || "https://crm.ideasol.pl"}/clients/${encodeURIComponent(clientId)}`;
   const deliveries: Array<{ target: string; promise: Promise<unknown> }> = [];
-
-  if (!duplicate && shouldSendTeamsGeneralMetaLeadNotification(normalizeBusinessArea(integration.business_area))) {
-    deliveries.push({
-      target: "general-chat",
-      promise: sendTeamsGeneralMetaLeadNotification({
-        message: buildTeamsGeneralMetaLeadMessage({
-          campaignName: metaCampaignName,
-          adName: metaAdName,
-          campaignLeadCount,
-        }),
-      }),
-    });
-  }
 
   if (integration.notify_assigned_user && assignedUser?.email) {
     deliveries.push(
@@ -301,20 +262,11 @@ async function processLeadEvent(
         : "unassigned_no_participants",
   });
 
-  const campaignLeadCount = shouldSendTeamsGeneralMetaLeadNotification(
-    normalizeBusinessArea(integration.business_area)
-  )
-    ? await countIntegrationLeads(integration.id)
-    : null;
-
   await sendNotifications({
     integration,
     clientId,
     clientName: lead.fullName || "Lead Meta Ads",
     assignedUser: assignedProfile,
-    metaCampaignName: metaLead.campaign_name?.trim() || integration.campaign_name,
-    metaAdName: metaLead.ad_name?.trim() || "brak danych",
-    campaignLeadCount,
     duplicate: ingestedLead.duplicate,
   });
 

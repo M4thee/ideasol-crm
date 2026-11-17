@@ -1,37 +1,25 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
-import {
-  buildTeamsGeneralMetaLeadMessage,
-  shouldSendTeamsGeneralMetaLeadNotification,
-} from "../lib/metaLeadGeneralNotification.ts";
+const webhook = fs.readFileSync(
+  path.join(process.cwd(), "app/api/meta/webhook/route.ts"),
+  "utf8"
+);
+const teams = fs.readFileSync(
+  path.join(process.cwd(), "lib/microsoftTeams.ts"),
+  "utf8"
+);
 
-test("IdeaTermo nie wysyła licznika na czat ogólny, a IdeaSol zachowuje powiadomienia", () => {
-  assert.equal(shouldSendTeamsGeneralMetaLeadNotification("ideatermo"), false);
-  assert.equal(shouldSendTeamsGeneralMetaLeadNotification("ideasol"), true);
+test("webhook Meta nie wysyła licznika leadów na czat Ogólny", () => {
+  assert.doesNotMatch(webhook, /countIntegrationLeads/);
+  assert.doesNotMatch(webhook, /campaignLeadCount/);
+  assert.doesNotMatch(webhook, /general-chat/);
+  assert.doesNotMatch(teams, /sendTeamsGeneralMetaLeadNotification/);
 });
 
-test("buduje anonimowe podsumowanie nowego leada na czat ogólny", () => {
-  const message = buildTeamsGeneralMetaLeadMessage({
-    campaignName: "ARiMR 2026 | PV + magazyn | Rolnicy",
-    adName: "ARiMR 2026 | Małopolska – Podhale/Orawa | Hodowcy",
-    campaignLeadCount: 17,
-  });
-
-  assert.match(message, /ARiMR 2026 \| PV \+ magazyn \| Rolnicy/);
-  assert.match(message, /Małopolska – Podhale\/Orawa \| Hodowcy/);
-  assert.match(message, /Suma leadów z tej kampanii <strong>17<\/strong>/);
-  assert.doesNotMatch(message, /Przypisano|Użytkownikowi|Klient:|crm\.ideasol\.pl/);
-});
-
-test("escapuje nazwy pochodzące z Meta", () => {
-  const message = buildTeamsGeneralMetaLeadMessage({
-    campaignName: "Kampania <test>",
-    adName: "A & B",
-    campaignLeadCount: null,
-  });
-
-  assert.match(message, /Kampania &lt;test&gt;/);
-  assert.match(message, /A &amp; B/);
-  assert.match(message, /Suma leadów z tej kampanii <strong>brak danych<\/strong>/);
+test("pozostawia powiadomienia do doradcy i na czat operacyjny", () => {
+  assert.match(webhook, /sendTeamsDirectMetaLeadNotification/);
+  assert.match(webhook, /sendTeamsBoardMetaLeadNotification/);
 });
