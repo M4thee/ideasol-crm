@@ -1,3 +1,4 @@
+import { resolveElectricalCosts } from "@/lib/calculator/electricalCosts";
 import { calculatePmeSubsidy } from "@/lib/calculator/pmeSubsidy";
 import {
   CUSTOM_INVERTER_CODE,
@@ -47,6 +48,8 @@ export type CalculatorSettingsRow = {
   transport_panels_net?: number | null;
   protections_cost?: number | null;
   wiring_cost?: number | null;
+  storage_only_protections_cost?: number | null;
+  storage_only_wiring_cost?: number | null;
   documentation_cost?: number | null;
   ems_cost?: number | null;
   warranty_percent?: number | null;
@@ -565,6 +568,13 @@ export function calculateOffer(input: CalculateOfferInput) {
   }
 
   const currentOverrides = body.pricingOverrides || {};
+  const electricalCosts = resolveElectricalCosts({
+    storageOnly: body.offerType === "storage",
+    protections: settingsRow?.protections_cost ?? currentOverrides?.placeholders?.protections ?? 1500,
+    wiring: settingsRow?.wiring_cost ?? currentOverrides?.placeholders?.wiring ?? 800,
+    storageOnlyProtections: settingsRow?.storage_only_protections_cost,
+    storageOnlyWiring: settingsRow?.storage_only_wiring_cost,
+  });
   body = {
     ...body,
     pricingOverrides: {
@@ -602,14 +612,8 @@ export function calculateOffer(input: CalculateOfferInput) {
       },
       placeholders: {
         ...(currentOverrides.placeholders || {}),
-        protections: Number(
-          settingsRow?.protections_cost ??
-          currentOverrides?.placeholders?.protections ??
-          1500
-        ),
-        wiring: Number(
-          settingsRow?.wiring_cost ?? currentOverrides?.placeholders?.wiring ?? 800
-        ),
+        protections: electricalCosts.protections,
+        wiring: electricalCosts.wiring,
         transportElectronics: Number(
           settingsRow?.transport_electronics_net ??
           currentOverrides?.placeholders?.transportElectronics ??

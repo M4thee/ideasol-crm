@@ -78,7 +78,7 @@ const LEGACY_PRICING_COLUMNS =
 const PV_RATE_COLUMNS =
   "pv_installation_rate_1_10, pv_installation_rate_10_20, pv_installation_rate_20_40, pv_installation_rate_40_100, pv_installation_rate_above_100, pv_structure_sheet_rate_per_kwp, pv_structure_tile_rate_per_kwp, pv_structure_felt_rate_per_kwp, pv_structure_ground_rate_per_kwp";
 
-const PRICING_COLUMNS = `${LEGACY_PRICING_COLUMNS}, ${PV_RATE_COLUMNS}`;
+const PRICING_COLUMNS = `${LEGACY_PRICING_COLUMNS}, ${PV_RATE_COLUMNS}, storage_only_protections_cost, storage_only_wiring_cost`;
 
 const ROOF_PLACEHOLDERS = {
   blacha: 1500,

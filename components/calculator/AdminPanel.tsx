@@ -879,29 +879,51 @@ export default function AdminPanel({
             />
           </label>
 
-          <label className="block">
-            <span className="text-sm font-medium text-slate-700">Zabezpieczenia</span>
-            <input
-              type="number"
-              value={pricingOverrides.placeholders.protections}
-              onChange={(e) =>
-                updatePricingValue(["placeholders", "protections"], e.target.value)
-              }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-slate-700">Okablowanie</span>
-            <input
-              type="number"
-              value={pricingOverrides.placeholders.wiring}
-              onChange={(e) =>
-                updatePricingValue(["placeholders", "wiring"], e.target.value)
-              }
-              className="w-full mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none dark:shadow-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            />
-          </label>
+          {[
+            {
+              title: "PV oraz PV + ME",
+              description: "Dotychczasowe stawki dla fotowoltaiki — z magazynem energii lub bez niego.",
+              fields: [
+                { key: "protections", label: "Zabezpieczenia — PV / PV + ME" },
+                { key: "wiring", label: "Okablowanie — PV / PV + ME" },
+              ],
+            },
+            {
+              title: "Sam magazyn energii (ME)",
+              description: "Osobne stałe kwoty dla ofert obejmujących sam magazyn, także dodawany do istniejącej instalacji PV.",
+              fields: [
+                { key: "storageOnlyProtections", label: "Zabezpieczenia — sam ME" },
+                { key: "storageOnlyWiring", label: "Okablowanie — sam ME" },
+              ],
+            },
+          ].map((group) => (
+            <fieldset key={group.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:col-span-2 xl:col-span-3">
+              <legend className="px-1 text-sm font-bold text-slate-900">{group.title}</legend>
+              <p className="text-xs text-slate-600">{group.description}</p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                {group.fields.map((field) => {
+                  const value = pricingOverrides.placeholders[field.key];
+                  const invalid = value === null || value === undefined || !Number.isFinite(value) || value < 0;
+                  return (
+                    <label className="block" key={field.key}>
+                      <span className="text-sm font-medium text-slate-700">{field.label} (zł netto)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        required
+                        aria-invalid={invalid}
+                        value={value ?? ""}
+                        onChange={(event) => updatePricingValue(["placeholders", field.key], event.target.value)}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-inner shadow-slate-200/40 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 aria-invalid:border-red-400 dark:shadow-none"
+                      />
+                      {invalid && <span className="mt-1 block text-xs text-red-600">Podaj kwotę netto nie mniejszą niż 0.</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          ))}
 
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Transport falownika / magazynu</span>

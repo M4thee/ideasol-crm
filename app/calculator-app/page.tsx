@@ -1,5 +1,7 @@
 "use client";
 
+import { isValidStorageOnlyElectricalCosts } from "@/lib/calculator/electricalCosts";
+
 import { supabase } from "@/lib/supabase";
 import { useEffect, useRef, useState } from "react";
 import OfferResult, { type OfferEmailOptions } from "@/components/calculator/OfferResult";
@@ -576,6 +578,8 @@ const DEFAULT_PRICING_OVERRIDES = {
   placeholders: {
     protections: 1500,
     wiring: 800,
+    storageOnlyProtections: 1500,
+    storageOnlyWiring: 800,
     transportElectronics: 250,
     transportPanels: 350,
     documentation: 700,
@@ -1520,6 +1524,8 @@ export default function Home() {
             ...current.placeholders,
             protections: Number(data.protections_cost ?? current.placeholders.protections),
             wiring: Number(data.wiring_cost ?? current.placeholders.wiring),
+            storageOnlyProtections: Number(data.storage_only_protections_cost ?? data.protections_cost ?? current.placeholders.protections),
+            storageOnlyWiring: Number(data.storage_only_wiring_cost ?? data.wiring_cost ?? current.placeholders.wiring),
             transportElectronics: Number(data.transport_electronics_net ?? current.placeholders.transportElectronics),
             transportPanels: Number(data.transport_panels_net ?? current.placeholders.transportPanels),
             documentation: Number(data.documentation_cost ?? current.placeholders.documentation),
@@ -1955,6 +1961,10 @@ export default function Home() {
   }
 
   async function savePricingSettings(pricing: typeof DEFAULT_PRICING_OVERRIDES) {
+    if (!isValidStorageOnlyElectricalCosts(pricing.placeholders)) {
+      setAdminStatus("Uzupełnij okablowanie i zabezpieczenia dla samego ME: podaj kwoty netto nie mniejsze niż 0.");
+      return;
+    }
     setAdminStatus("Zapisywanie ustawień...");
 
     const { error } = await supabase
@@ -1974,6 +1984,8 @@ export default function Home() {
         storage_installation_without_pv_net: pricing.installation.storageWithoutPvNet,
         protections_cost: pricing.placeholders.protections,
         wiring_cost: pricing.placeholders.wiring,
+        storage_only_protections_cost: pricing.placeholders.storageOnlyProtections,
+        storage_only_wiring_cost: pricing.placeholders.storageOnlyWiring,
         transport_electronics_net: pricing.placeholders.transportElectronics,
         transport_panels_net: pricing.placeholders.transportPanels,
         documentation_cost: pricing.placeholders.documentation,
